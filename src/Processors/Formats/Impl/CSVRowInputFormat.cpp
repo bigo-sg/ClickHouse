@@ -91,6 +91,7 @@ void CSVRowInputFormat::skipRowEndDelimiter()
 {
     skipWhitespacesAndTabs(*in);
 
+<<<<<<< HEAD
     if (in->eof())
         return;
 
@@ -101,16 +102,100 @@ void CSVRowInputFormat::skipRowEndDelimiter()
     skipWhitespacesAndTabs(*in);
     if (in->eof())
         return;
+=======
+    /// This is a bit of abstraction leakage, but we have almost the same code in other places.
+    /// Thus, we check if this InputFormat is working with the "real" beginning of the data in case of parallel parsing.
+    if (with_names && getCurrentUnitNumber() == 0)
+    {
+        /// This CSV file has a header row with column names. Depending on the
+        /// settings, use it or skip it.
+        if (format_settings.with_names_use_header)
+        {
+            /// Look at the file header to see which columns we have there.
+            /// The missing columns are filled with defaults.
+            column_mapping->read_columns.assign(header.columns(), false);
+            if (format_settings.csv.input_field_names.empty())
+            {
+                do
+                {
+                    String column_name;
+                    skipWhitespacesAndTabs(in);
+                    readCSVString(column_name, in, format_settings.csv);
+                    skipWhitespacesAndTabs(in);
+
+                    addInputColumn(column_name);
+                } while (checkChar(format_settings.csv.delimiter, in));
+
+                skipDelimiter(in, format_settings.csv.delimiter, true);
+            }
+            else
+            {
+                for (const auto & column_name : format_settings.csv.input_field_names)
+                {
+                    addInputColumn(column_name);
+                }
+            }
+>>>>>>> Implement Table Engine Hive
 
     skipEndOfLine(*in);
 }
 
 void CSVRowInputFormat::skipHeaderRow()
 {
+<<<<<<< HEAD
     do
     {
         skipField();
         skipWhitespacesAndTabs(*in);
+=======
+    if (in.eof())
+        return false;
+
+    updateDiagnosticInfo();
+
+    /// Track whether we have to fill any columns in this row with default
+    /// values. If not, we return an empty column mask to the caller, so that
+    /// it doesn't have to check it.
+    bool have_default_columns = column_mapping->have_always_default_columns;
+
+    ext.read_columns.assign(column_mapping->read_columns.size(), true);
+    const auto delimiter = format_settings.csv.delimiter;
+    bool met_end_of_line = false;
+    auto local_read_columns = column_mapping->read_columns;
+    for (size_t file_column = 0; file_column < column_mapping->column_indexes_for_input_fields.size(); ++file_column)
+    {
+        const auto & table_column = column_mapping->column_indexes_for_input_fields[file_column];
+        const bool is_last_file_column = file_column + 1 == column_mapping->column_indexes_for_input_fields.size();
+
+        // After encountering a newline, mark the remaining unread columns as false, so that they can be filled with default values
+        if (met_end_of_line)
+        {
+            have_default_columns = true;
+            if (table_column)
+            {
+                local_read_columns[*table_column] = false;
+            }
+            continue;
+        }
+        if (table_column)
+        {
+            skipWhitespacesAndTabs(in);
+            ext.read_columns[*table_column] = readField(*columns[*table_column], data_types[*table_column],
+                serializations[*table_column], is_last_file_column);
+
+            if (!ext.read_columns[*table_column])
+                have_default_columns = true;
+            skipWhitespacesAndTabs(in);
+        }
+        else
+        {
+            /// We never read this column from the file, just skip it.
+            String tmp;
+            readCSVString(tmp, in, format_settings.csv);
+        }
+
+        met_end_of_line = trySkipDelimiter(in, delimiter);
+>>>>>>> Implement Table Engine Hive
     }
     while (checkChar(format_settings.csv.delimiter, *in));
 
@@ -122,8 +207,25 @@ std::vector<String> CSVRowInputFormat::readHeaderRow()
     std::vector<String> fields;
     do
     {
+<<<<<<< HEAD
         fields.push_back(readFieldIntoString());
         skipWhitespacesAndTabs(*in);
+=======
+        for (size_t i = 0; i < local_read_columns.size(); i++)
+        {
+            if (!local_read_columns[i])
+            {
+                /// The column value for this row is going to be overwritten
+                /// with default by the caller, but the general assumption is
+                /// that the column size increases for each row, so we have
+                /// to insert something. Since we do not care about the exact
+                /// value, we do not have to use the default value specified by
+                /// the data type, and can just use IColumn::insertDefault().
+                columns[i]->insertDefault();
+                ext.read_columns[i] = false;
+            }
+        }
+>>>>>>> Implement Table Engine Hive
     }
     while (checkChar(format_settings.csv.delimiter, *in));
 
