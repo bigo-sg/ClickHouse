@@ -1821,76 +1821,6 @@ zkutil::ZooKeeperPtr Context::getZooKeeper() const
     return shared->zookeeper;
 }
 
-namespace
-{
-
-bool checkZooKeeperConfigIsLocal(const Poco::Util::AbstractConfiguration & config, const std::string & config_name)
-{
-    Poco::Util::AbstractConfiguration::Keys keys;
-    config.keys(config_name, keys);
-
-    for (const auto & key : keys)
-    {
-        if (startsWith(key, "node"))
-        {
-            String host = config.getString(config_name + "." + key + ".host");
-            if (isLocalAddress(DNSResolver::instance().resolveHost(host)))
-                return true;
-        }
-    }
-    return false;
-}
-
-}
-
-
-bool Context::tryCheckClientConnectionToMyKeeperCluster() const
-{
-    try
-    {
-        /// If our server is part of main Keeper cluster
-        if (checkZooKeeperConfigIsLocal(getConfigRef(), "zookeeper"))
-        {
-            LOG_DEBUG(shared->log, "Keeper server is participant of the main zookeeper cluster, will try to connect to it");
-            getZooKeeper();
-            /// Connected, return true
-            return true;
-        }
-        else
-        {
-            Poco::Util::AbstractConfiguration::Keys keys;
-            getConfigRef().keys("auxiliary_zookeepers", keys);
-
-            /// If our server is part of some auxiliary_zookeeper
-            for (const auto & aux_zk_name : keys)
-            {
-                if (checkZooKeeperConfigIsLocal(getConfigRef(), "auxiliary_zookeepers." + aux_zk_name))
-                {
-                    LOG_DEBUG(shared->log, "Our Keeper server is participant of the auxiliary zookeeper cluster ({}), will try to connect to it", aux_zk_name);
-                    getAuxiliaryZooKeeper(aux_zk_name);
-                    /// Connected, return true
-                    return true;
-                }
-            }
-        }
-
-        /// Our server doesn't depend on our Keeper cluster
-        return true;
-    }
-    catch (...)
-    {
-        return false;
-    }
-}
-
-UInt32 Context::getZooKeeperSessionUptime() const
-{
-    std::lock_guard lock(shared->zookeeper_mutex);
-    if (!shared->zookeeper || shared->zookeeper->expired())
-        return 0;
-    return shared->zookeeper->getSessionUptime();
-}
-
 HMSClientPtr Context::getHMSClient(const String & name) const
 {
     using namespace apache::thrift;
@@ -1937,6 +1867,74 @@ HMSClientPtr Context::getHMSClient(const String & name) const
         }
     }
     return it->second;
+}
+
+namespace
+{
+
+bool checkZooKeeperConfigIsLocal(const Poco::Util::AbstractConfiguration & config, const std::string & config_name)
+{
+    Poco::Util::AbstractConfiguration::Keys keys;
+    config.keys(config_name, keys);
+
+    for (const auto & key : keys)
+    {
+        if (startsWith(key, "node"))
+        {
+            String host = config.getString(config_name + "." + key + ".host");
+            if (isLocalAddress(DNSResolver::instance().resolveHost(host)))
+                return true;
+        }
+    }
+    return false;
+}
+}
+
+bool Context::tryCheckClientConnectionToMyKeeperCluster() const
+{
+    try
+    {
+        /// If our server is part of main Keeper cluster
+        if (checkZooKeeperConfigIsLocal(getConfigRef(), "zookeeper"))
+        {
+            LOG_DEBUG(shared->log, "Keeper server is participant of the main zookeeper cluster, will try to connect to it");
+            getZooKeeper();
+            /// Connected, return true
+            return true;
+        }
+        else
+        {
+            Poco::Util::AbstractConfiguration::Keys keys;
+            getConfigRef().keys("auxiliary_zookeepers", keys);
+
+            /// If our server is part of some auxiliary_zookeeper
+            for (const auto & aux_zk_name : keys)
+            {
+                if (checkZooKeeperConfigIsLocal(getConfigRef(), "auxiliary_zookeepers." + aux_zk_name))
+                {
+                    LOG_DEBUG(shared->log, "Our Keeper server is participant of the auxiliary zookeeper cluster ({}), will try to connect to it", aux_zk_name);
+                    getAuxiliaryZooKeeper(aux_zk_name);
+                    /// Connected, return true
+                    return true;
+                }
+            }
+        }
+
+        /// Our server doesn't depend on our Keeper cluster
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+UInt32 Context::getZooKeeperSessionUptime() const
+{
+    std::lock_guard lock(shared->zookeeper_mutex);
+    if (!shared->zookeeper || shared->zookeeper->expired())
+        return 0;
+    return shared->zookeeper->getSessionUptime();
 }
 
 void Context::setSystemZooKeeperLogAfterInitializationIfNeeded()

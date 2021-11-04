@@ -13,7 +13,7 @@
 #include <arrow/buffer.h>
 #include <arrow/io/memory.h>
 #include <arrow/result.h>
-#include <common/logger_useful.h>
+#include <base/logger_useful.h>
 #include <Common/Stopwatch.h>
 #include <Poco/Logger.h>
 

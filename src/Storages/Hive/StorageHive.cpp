@@ -5,13 +5,12 @@
 
 #include <boost/algorithm/string/join.hpp>
 #include <Columns/IColumn.h>
-#include <common/logger_useful.h>
+#include <base/logger_useful.h>
 #include <Common/parseAddress.h>
 #include <Common/parseGlobs.h>
 #include <Core/Block.h>
 #include <Core/Field.h>
 #include <Core/NamesAndTypes.h>
-#include <DataStreams/OwningBlockInputStream.h>
 #include <DataTypes/DataTypeString.h>
 #include <fmt/core.h>
 #include <Formats/FormatFactory.h>
@@ -27,11 +26,11 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Poco/URI.h>
-#include <Processors/Pipe.h>
+#include <QueryPipeline/Pipe.h>
 #include <Processors/Sources/SourceWithProgress.h>
 #include <Processors/Formats/IInputFormat.h>
-#include <Processors/Formats/InputStreamFromInputFormat.h>
 #include <Processors/Formats/Impl/ArrowBlockInputFormat.h>
+#include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Storages/HDFS/HDFSCommon.h>
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
 #include <Storages/Hive/HiveFile.h>
@@ -117,6 +116,7 @@ public:
         {
             to_read_block.erase(name_type.name);
         }
+        format_settings.csv.delimiter = '\x01';
         format_settings.csv.input_field_names = text_input_field_names;
     }
 
@@ -124,7 +124,6 @@ public:
 
     Chunk generate() override
     {
-        Stopwatch sw;
         while (true)
         {
             if (!reader)
@@ -138,7 +137,6 @@ public:
 
                 String uri_with_path = hdfs_namenode_url + current_path;
                 auto compression = chooseCompressionMethod(current_path, compression_method);
-                sw.start();
                 std::unique_ptr<ReadBuffer> raw_read_buf;
                 try
                 {
@@ -162,22 +160,20 @@ public:
                     curr_file->getSize(),
                     std::move(raw_read_buf));
                 // std::unique_ptr<ReadBuffer> remote_read_buf = std::move(raw_read_buf);
-                std::unique_ptr<ReadBuffer> read_buf;
                 if (curr_file->getFormat() == StorageHive::FileFormat::TEXT)
                     read_buf = wrapReadBufferWithCompressionMethod(std::move(remote_read_buf), compression);
                 else
                     read_buf = std::move(remote_read_buf);
 
-                auto input_format = FormatFactory::instance().getInput(
+                auto input_format = FormatFactory::instance().getInputFormat(
                     format, *read_buf, to_read_block, getContext(), max_block_size, format_settings);
-                auto input_stream = std::make_shared<InputStreamFromInputFormat>(input_format);
-                reader = std::make_shared<OwningBlockInputStream<ReadBuffer>>(input_stream, std::move(read_buf));
-                reader->readPrefix();
+                pipeline = QueryPipeline(std::move(input_format));
+                reader = std::make_unique<PullingPipelineExecutor>(pipeline);
             }
 
-            if (auto res = reader->read())
+            Block res;
+            if (reader->pull(res))
             {
-                sw.start();
                 Columns columns = res.getColumns();
                 UInt64 num_rows = res.rows();
                 auto types = source_info->partition_name_types.getTypes();
@@ -203,16 +199,18 @@ public:
                     auto column = DataTypeString().createColumnConst(num_rows, std::move(file_name));
                     columns.push_back(column->convertToFullColumnIfConst());
                 }
-                LOG_TRACE(log, "read from reader timespam:{}", sw.elapsedMilliseconds());
                 return Chunk(std::move(columns), num_rows);
             }
-            reader->readSuffix();
             reader.reset();
+            pipeline.reset();
+            read_buf.reset();
         }
     }
 
 private:
-    BlockInputStreamPtr reader;
+    std::unique_ptr<ReadBuffer> read_buf;
+    QueryPipeline pipeline;
+    std::unique_ptr<PullingPipelineExecutor> reader;
     SourcesInfoPtr source_info;
     String hdfs_namenode_url;
     String format;
@@ -500,11 +498,12 @@ Pipe StorageHive::read(
                 writeString("\n", wb);
 
                 ReadBufferFromString buffer(wb.str());
-                auto format = FormatFactory::instance().getInput(
+                auto format = FormatFactory::instance().getInputFormat(
                     "CSV", buffer, partition_key_expr->getSampleBlock(), getContext(), getContext()->getSettingsRef().max_block_size);
-                auto reader = std::make_shared<InputStreamFromInputFormat>(format);
-                auto block = reader->read();
-                if (!block || !block.rows())
+                auto pipeline = QueryPipeline(std::move(format));
+                auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
+                Block block;
+                if (!reader->pull(block) || !block.rows())
                     throw Exception("Could not parse partition value: " + wb.str(), ErrorCodes::INVALID_PARTITION_VALUE);
 
                 FieldVector fields(partition_names.size());
@@ -550,10 +549,6 @@ Pipe StorageHive::read(
     sources_info->database = hive_database;
     sources_info->table_name = hive_table;
     sources_info->hms_client = hms_client;
-    for (const auto & hive_file : sources_info->hive_files)
-    {
-        std::cout << "hive file:" << hive_file->getPath() << std::endl;
-    }
     sources_info->partition_name_types = partition_name_types;
     for (const auto & column : column_names)
     {

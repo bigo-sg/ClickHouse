@@ -29,11 +29,7 @@ populate_table_bg () {
         $CLICKHOUSE_CLIENT --query "
             INSERT INTO join_block_test
             SELECT toString(number) as id, number * number as num
-<<<<<<< HEAD
             FROM system.numbers LIMIT 500000
-=======
-            FROM system.numbers LIMIT 3000000
->>>>>>> Merge pull request #29544 from Algunenano/join_deadlock
         " >/dev/null
     ) &
 }
