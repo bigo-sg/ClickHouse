@@ -909,7 +909,7 @@ TEST_P(CoordinationTest, SnapshotableHashMapTrySnapshot)
         EXPECT_EQ(itr->active_in_map, i != 3 && i != 2);
         itr = std::next(itr);
     }
-    map_snp.clearOutdatedNodes(map_snp.snapshotSize());
+    map_snp.clearOutdatedNodes();
 
     EXPECT_EQ(map_snp.snapshotSize(), 4);
     EXPECT_EQ(map_snp.size(), 4);
@@ -960,13 +960,13 @@ TEST_P(CoordinationTest, SnapshotableHashMapDataSize)
     hello.updateValue("hello", [](IntNode & value) { value = 2; });
     EXPECT_EQ(hello.getApproximateDataSize(), 18);
 
-    hello.clearOutdatedNodes(hello.snapshotSize());
+    hello.clearOutdatedNodes();
     EXPECT_EQ(hello.getApproximateDataSize(), 9);
 
     hello.erase("hello");
     EXPECT_EQ(hello.getApproximateDataSize(), 9);
 
-    hello.clearOutdatedNodes(hello.snapshotSize());
+    hello.clearOutdatedNodes();
     EXPECT_EQ(hello.getApproximateDataSize(), 0);
     }
 
@@ -1179,7 +1179,7 @@ TEST_P(CoordinationTest, TestStorageSnapshotMode)
     }
     EXPECT_TRUE(fs::exists("./snapshots/snapshot_50.bin" + params.extension));
     EXPECT_EQ(storage.container.size(), 26);
-    storage.clearGarbageAfterSnapshot(storage.container.snapshotSize());
+    storage.clearGarbageAfterSnapshot();
     EXPECT_EQ(storage.container.snapshotSize(), 26);
     for (size_t i = 0; i < 50; ++i)
     {
