@@ -20,7 +20,7 @@ namespace DB
 struct KeeperStorageRequestProcessor;
 using KeeperStorageRequestProcessorPtr = std::shared_ptr<KeeperStorageRequestProcessor>;
 using ResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr &)>;
-using ChildrenSet = std::shared_ptr<my_unordered_set<StringRef>>;
+using ChildrenSet = std::shared_ptr<my_unordered_set<StringRef, StringRefHash>>;
 using SessionAndTimeout = std::unordered_map<int64_t, int64_t>;
 
 struct KeeperStorageSnapshot;
@@ -53,7 +53,7 @@ public:
         bool addChild(const StringRef & child)
         {
             if (children == nullptr)
-                children = std::make_shared<my_unordered_set<StringRef>>();
+                children = std::make_shared<my_unordered_set<StringRef, StringRefHash>>();
             return children->insert(child).second;
         }
         bool removeChild(const StringRef & child)

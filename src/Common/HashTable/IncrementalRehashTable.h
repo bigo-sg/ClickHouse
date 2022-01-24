@@ -19,9 +19,9 @@ public:
     using hasher = Hash;
     using key_equal = KeyEqual;
     using Self = IncrementalRehashTable<IsFlat, MaxLoadFactor100, Key, T, Hash, KeyEqual>;
+private:
     using US = robin_hood::detail::Table<IsFlat, MaxLoadFactor100, Key, T, Hash, KeyEqual>;
     using inner_iterator = typename US::iterator;
-private:
     std::shared_ptr<US> store[2];
     bool rehashing{false};
     inner_iterator cur; // rehash iterator
@@ -111,7 +111,7 @@ public:
             store[1].reset(new US());
         }
     }
-    // only insert table 1 if rehashing
+    /// only insert table 1 if rehashing
     std::pair<iterator,bool> insert(const value_type & t)
     {
         if (rehashing) [[unlikely]]
@@ -237,7 +237,7 @@ public:
         count = 0;
     }
     template< class... Args >
-    std::pair<iterator,bool> emplace(Args&&... args)
+    std::pair<iterator, bool> emplace(Args&&... args)
     {
         if (rehashing)
         {
