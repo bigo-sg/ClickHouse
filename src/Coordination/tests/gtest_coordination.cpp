@@ -995,10 +995,8 @@ TEST_P(CoordinationTest, SnapshotableHashMapDataSize)
     world.updateValue("world", [&](Node & value) { value = n2; });
     EXPECT_EQ(world.getApproximateDataSize(), 188);
 
-    //world.clearOutdatedNodes();
-    //EXPECT_EQ(world.getApproximateDataSize(), 94);
-    world.clearOutdatedNodes(world.snapshotSize());
-    EXPECT_EQ(world.getApproximateDataSize(), 98);
+    world.clearOutdatedNodes();
+    EXPECT_EQ(world.getApproximateDataSize(), 94);
 
     world.erase("world");
     EXPECT_EQ(world.getApproximateDataSize(), 94);
@@ -1012,7 +1010,6 @@ void addNode(DB::KeeperStorage & storage, const std::string & path, const std::s
 {
     using Node = DB::KeeperStorage::Node;
     Node node{};
-    std::cout << "node size " << sizeof(Node) << std::endl;
     node.data = data;
     node.stat.ephemeralOwner = ephemeral_owner;
     storage.container.insertOrReplace(path, node);

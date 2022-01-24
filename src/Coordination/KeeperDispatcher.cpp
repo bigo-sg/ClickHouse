@@ -113,10 +113,8 @@ void KeeperDispatcher::requestThread(size_t myid)
     /// Requests from previous iteration. We store them to be able
     /// to send errors to the client.
     KeeperStorage::RequestsForSessions prev_batch;
-    size_t counter = 0;
     while (!shutdown_called)
     {
-        ++counter;
         KeeperStorage::RequestForSession request;
 
         auto coordination_settings = configuration_and_settings->coordination_settings;
@@ -176,8 +174,6 @@ void KeeperDispatcher::requestThread(size_t myid)
 
                 if (shutdown_called)
                     break;
-                if (counter % 10000 == 0)
-                    LOG_INFO(log, "KeeperDispatcher: requests_queues[{}] size: {}, batch {}", myid, requests_queues[myid]->size(), current_batch.size());
 
                 /// Process collected write requests batch
                 if (!current_batch.empty())

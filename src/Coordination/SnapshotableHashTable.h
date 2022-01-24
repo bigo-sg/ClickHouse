@@ -20,10 +20,10 @@ struct ListNode
 {
     StringRef key;
     V value;
+    size_t distance_from_begin{0};
 
     bool active_in_map{true};
     bool free_key{false};
-    size_t distance_from_begin{0};
 };
 
 template <class V>
@@ -135,7 +135,7 @@ public:
     using const_iterator = typename List::const_iterator;
     using ValueUpdater = std::function<void(V & value)>;
 
-    explicit SnapshotableHashTable(size_t n)
+    explicit SnapshotableHashTable(size_t n = 1024)
     {
         map.reserve(n);
     }
@@ -145,7 +145,7 @@ public:
         auto it = map.find(key);
         if (it == map.end())
         {
-            ListElem elem{copyStringInArena(key), value, true, list.back().distance_from_begin + 1};
+            ListElem elem{copyStringInArena(key), value, list.empty() ? 0 : list.back().distance_from_begin + 1, true};
             auto itr = list.insert(list.end(), elem);
             updateDataSize(INSERT, key.size(), value.sizeInBytes(), 0);
             return map.emplace(itr->key, itr);
@@ -160,7 +160,7 @@ public:
 
         if (it == map.end())
         {
-            ListElem elem{copyStringInArena(key), value, true, list.back().distance_from_begin + 1};
+            ListElem elem{copyStringInArena(key), value, list.empty() ? 0 : list.back().distance_from_begin + 1, true};
             auto itr = list.insert(list.end(), elem);
             map.emplace(itr->key, itr);
         }
@@ -169,7 +169,7 @@ public:
             auto list_itr = it->second;
             if (snapshot_mode)
             {
-                ListElem elem{list_itr->key, value, true, list.back().distance_from_begin + 1};
+                ListElem elem{list_itr->key, value, list.back().distance_from_begin + 1, true};
                 list_itr->active_in_map = false;
                 auto new_list_itr = list.insert(list.end(), elem);
                 map.erase(it);
@@ -222,17 +222,16 @@ public:
         uint64_t old_value_size = list_itr->value.sizeInBytes();
 
         const_iterator ret;
-
         /// We in snapshot mode but updating some node which is already more
         /// fresh than snapshot distance. So it will not participate in
         /// snapshot and we don't need to copy it.
-        /// size_t distance = std::distance(list.begin(), list_itr);
         if (snapshot_mode && list_itr->distance_from_begin < snapshot_up_to_size)
         {
             auto elem_copy = *(list_itr);
             list_itr->active_in_map = false;
             map.erase(it);
             updater(elem_copy.value);
+            elem_copy.distance_from_begin = list.back().distance_from_begin + 1;
             auto itr = list.insert(list.end(), elem_copy);
             map.emplace(itr->key, itr);
             ret = itr;
