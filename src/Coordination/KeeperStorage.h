@@ -9,18 +9,18 @@
 #include <iterator>
 #include <IO/WriteBufferFromString.h>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 #include <set>
 #include <Common/HashTable/robin_hood.h>
+#include <absl/container/flat_hash_set.h>
+#include <base/StringRef.h>
 
 namespace DB
 {
 struct KeeperStorageRequestProcessor;
 using KeeperStorageRequestProcessorPtr = std::shared_ptr<KeeperStorageRequestProcessor>;
 using ResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr &)>;
-using ChildrenSet = std::shared_ptr<my_unordered_set<std::string>>;
-//using ChildrenSet = std::vector<std::string>;
+using ChildrenSet = std::shared_ptr<my_unordered_set<StringRef>>;
 using SessionAndTimeout = std::unordered_map<int64_t, int64_t>;
 
 struct KeeperStorageSnapshot;
@@ -39,7 +39,6 @@ public:
         Coordination::Stat stat{};
         int32_t seq_num = 0;
         ChildrenSet children{nullptr};
-        //ChildrenSet children;
         uint32_t size_bytes; // save size to avoid calculate every time
 
         Node()
@@ -51,13 +50,13 @@ public:
             size_bytes += sizeof(stat);
             size_bytes += sizeof(seq_num);
         }
-        bool addChild(const std::string& child)
+        bool addChild(const StringRef & child)
         {
             if (children == nullptr)
-                children = std::make_shared<my_unordered_set<std::string>>();
+                children = std::make_shared<my_unordered_set<StringRef>>();
             return children->insert(child).second;
         }
-        bool removeChild(const std::string& child)
+        bool removeChild(const StringRef & child)
         {
             if (children)
             {
@@ -80,38 +79,6 @@ public:
         {
             return children ? children->end() : ChildrenSet::element_type::const_iterator();
         }
-
-        /*
-        bool addChild(const std::string& child)
-        {
-            children.push_back(child);
-            return true;
-        }
-        bool removeChild(const std::string& child)
-        {
-            for (auto it = children.begin(); it != children.end(); ++it)
-            {
-                if (*it == child)
-                {
-                    children.erase(it);
-                    return true;
-                }
-            }
-            return false;
-        }
-        size_t childSize() const
-        {
-            return children.size();
-        }
-        typename ChildrenSet::const_iterator childrenBegin() const
-        {
-            return children.begin();
-        }
-        typename ChildrenSet::const_iterator childrenEnd() const
-        {
-            return children.end();
-        }
-        */
 
         /// Object memory size
         uint64_t sizeInBytes() const
@@ -224,9 +191,9 @@ public:
     /// Set of methods for creating snapshots
 
     /// Turn on snapshot mode, so data inside Container is not deleted, but replaced with new version.
-    void enableSnapshotMode()
+    void enableSnapshotMode(size_t up_to_size)
     {
-        container.enableSnapshotMode();
+        container.enableSnapshotMode(up_to_size);
     }
 
     /// Turn off snapshot mode.
@@ -241,9 +208,9 @@ public:
     }
 
     /// Clear outdated data from internal container.
-    void clearGarbageAfterSnapshot()
+    void clearGarbageAfterSnapshot(size_t up_to_size)
     {
-        container.clearOutdatedNodes();
+        container.clearOutdatedNodes(up_to_size);
     }
 
     /// Get all active sessions
@@ -268,6 +235,12 @@ public:
     {
         return container.getApproximateDataSize();
     }
+
+    uint64_t getArenaDataSize() const
+    {
+        return container.keyArenaSize();
+    }
+
 
     uint64_t getTotalWatchesCount() const;
 
