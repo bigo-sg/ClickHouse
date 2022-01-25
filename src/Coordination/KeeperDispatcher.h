@@ -20,6 +20,7 @@ namespace DB
 {
 using ZooKeeperResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr & response)>;
 
+class Timer;
 /// Highlevel wrapper for ClickHouse Keeper.
 /// Process user requests via consensus and return responses.
 class KeeperDispatcher
@@ -27,14 +28,18 @@ class KeeperDispatcher
 private:
     mutable std::mutex push_request_mutex;
 
+    constexpr static size_t thread_num = 2;
     using RequestsQueue = ConcurrentBoundedQueue<KeeperStorage::RequestForSession>;
     using SessionToResponseCallback = std::unordered_map<int64_t, ZooKeeperResponseCallback>;
     using UpdateConfigurationQueue = ConcurrentBoundedQueue<ConfigUpdateAction>;
+    using RaftResult = nuraft::cmd_result<nuraft::ptr<nuraft::buffer>>;
 
     /// Size depends on coordination settings
-    std::unique_ptr<RequestsQueue> requests_queue;
-    ResponsesQueue responses_queue;
-    SnapshotsQueue snapshots_queue{1};
+    //std::unique_ptr<RequestsQueue> requests_queue;
+    ResponsesQueue responses_queue{128};
+    SnapshotsQueue snapshots_queue{128};
+    std::vector<std::unique_ptr<RequestsQueue>> requests_queues;
+    std::array<std::atomic<int>, thread_num> pending_results{};
 
     /// More than 1k updates is definitely misconfiguration.
     UpdateConfigurationQueue update_configuration_queue{1000};
@@ -54,7 +59,7 @@ private:
     SessionToResponseCallback new_session_id_response_callback;
 
     /// Reading and batching new requests from client handlers
-    ThreadFromGlobalPool request_thread;
+    std::vector<ThreadFromGlobalPool> request_threads;
     /// Pushing responses to clients client handlers
     /// using session_id.
     ThreadFromGlobalPool responses_thread;
@@ -80,7 +85,7 @@ private:
 
 private:
     /// Thread put requests to raft
-    void requestThread();
+    void requestThread(size_t myid);
     /// Thread put responses for subscribed sessions
     void responseThread();
     /// Thread clean disconnected sessions from memory
@@ -99,6 +104,8 @@ private:
     /// Forcefully wait for result and sets errors if something when wrong.
     /// Clears both arguments
     void forceWaitAndProcessResult(RaftAppendResult & result, KeeperStorage::RequestsForSessions & requests_for_sessions);
+
+    void onResultReady(KeeperStorage::RequestsForSessions requests_for_sessions, std::shared_ptr<Timer>t, size_t myid, RaftResult & result, nuraft::ptr<std::exception>& err);
 
 public:
     /// Just allocate some objects, real initialization is done by `intialize method`
