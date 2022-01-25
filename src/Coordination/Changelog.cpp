@@ -4,6 +4,7 @@
 #include <IO/ReadBufferFromFile.h>
 #include <IO/ZstdDeflatingAppendableWriteBuffer.h>
 #include <filesystem>
+#include <thread>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/trim.hpp>
@@ -298,6 +299,23 @@ Changelog::Changelog(
 
     if (existing_changelogs.empty())
         LOG_WARNING(log, "No logs exists in {}. It's Ok if it's the first run of clickhouse-keeper.", changelogs_dir);
+
+    clean_log_thread = ThreadFromGlobalPool([this] { cleanThread(); });
+}
+
+void Changelog::cleanThread()
+{
+    while (!shutdown_clean_thread.load(std::memory_order_relaxed))
+    {
+        std::string path;
+        if (del_log_q.pop(path))
+        {
+            std::filesystem::remove(path);
+            LOG_INFO(log, "Removed changelog {} because of compaction.", path);
+        }
+        else
+            std::this_thread::sleep_for(std::chrono::microseconds(10));
+    }
 }
 
 void Changelog::readChangelogAndInitWriter(uint64_t last_commited_log_index, uint64_t logs_to_keep)
@@ -586,7 +604,7 @@ void Changelog::compact(uint64_t up_to_log_index)
             }
 
             LOG_INFO(log, "Removing changelog {} because of compaction", itr->second.path);
-            std::filesystem::remove(itr->second.path);
+            del_log_q.push(itr->second.path);
             itr = existing_changelogs.erase(itr);
         }
         else /// Files are ordered, so all subsequent should exist
@@ -710,6 +728,8 @@ Changelog::~Changelog()
     try
     {
         flush();
+        shutdown_clean_thread.store(true);
+        clean_log_thread.join();
     }
     catch (...)
     {
