@@ -7,6 +7,10 @@
 #include <Common/hex.h>
 #include <filesystem>
 #include <Common/checkStackSize.h>
+#include <iostream>
+#include <set>
+#include <fstream>
+
 
 namespace fs = std::filesystem;
 
@@ -63,7 +67,6 @@ private:
 void KeeperDispatcher::onResultReady(KeeperStorage::RequestsForSessions requests_for_sessions, std::shared_ptr<Timer> t,
                     size_t myid, RaftResult & result, nuraft::ptr<std::exception> & err)
 {
-    pending_results[myid].fetch_sub(1);
     if (result.get_result_code() != nuraft::cmd_result_code::OK)
     {
         // Something went wrong.
@@ -77,11 +80,50 @@ void KeeperDispatcher::onResultReady(KeeperStorage::RequestsForSessions requests
     else if (result.get_result_code() != nuraft::cmd_result_code::OK)
         addErrorResponses(requests_for_sessions, Coordination::Error::ZCONNECTIONLOSS);
     requests_for_sessions.clear();
+    pending_results[myid].fetch_sub(1);
+}
+
+static ushort getCPUcount(){
+    std::ifstream cpuinfo;
+    cpuinfo.open("/proc/cpuinfo");
+    std::string line;
+    /*
+    I read somewhere that the processor ID could be repeated. I don't know if
+    that's true or not.
+    */
+    std::set<unsigned> IDs;
+    while (!cpuinfo.eof()){
+        std::getline(cpuinfo,line);
+        if (!line.size())
+            continue;
+        if (line.find("processor")!=0)
+            continue;
+        size_t start=line.find(':'),
+            end;
+        for (;line[start]<'0' || line[start]>'9';start++);
+        for (end=start;line[end]>='0' && line[end]<='9';end++);
+        line=line.substr(start,end-start);
+        IDs.insert(atoi(line.c_str()));
+    }
+    cpuinfo.close();
+    return IDs.size();
 }
 
 void KeeperDispatcher::requestThread(size_t myid)
 {
     setThreadName(("KeeperReqT" + std::to_string(myid)).c_str());
+    {
+        int cpuid = myid % getCPUcount(); // bind to first core
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(cpuid, &cpuset);
+        int rc = pthread_setaffinity_np(pthread_self(),
+                                        sizeof(cpu_set_t), &cpuset);
+        if (rc != 0)
+        {
+            LOG_WARNING(log, "Error calling pthread_setaffinity_np, return code {}.", rc);
+        }
+    }
 
     /// Result of requests batch from previous iteration
     RaftAppendResult prev_result = nullptr;
@@ -154,30 +196,21 @@ void KeeperDispatcher::requestThread(size_t myid)
                 if (shutdown_called)
                     break;
 
-                if (++counter % 1000 == 0)
+                if (++counter % 10000 == 0)
                     LOG_INFO(log, "KeeperDispatcher: requests_queues[{}] size: {}, batch {}", myid, requests_queues[myid]->size(), current_batch.size());
 
                 /// Process collected write requests batch
                 if (!current_batch.empty())
                 {
                     auto result = server->putRequestBatch(current_batch);
-
                     if (result)
                     {
-                        pending_results[myid].fetch_add(1);
-                        if (has_read_request) /// If we will execute read request next, than we have to process result now
-                        {
-                            while (pending_results[myid].load() > 0)
-                            {
-
-                                std::this_thread::yield();
-                            }
-                        }
                         auto t = std::make_shared<Timer>();
                         result->when_ready([this, current_batch, myid, t](RaftResult & res, nuraft::ptr<std::exception> & err)
                         {
                             onResultReady(current_batch, t, myid, res, err);
                         });
+                        pending_results[myid].fetch_add(1);
                     }
                     else
                     {
@@ -192,6 +225,10 @@ void KeeperDispatcher::requestThread(size_t myid)
                 /// Read request always goes after write batch (last request)
                 if (has_read_request)
                 {
+                    while (pending_results[myid].load() > 0)
+                    {
+                        std::this_thread::yield();
+                    }
                     if (server->isLeaderAlive())
                         server->putLocalReadRequest(request);
                     else
@@ -333,6 +370,7 @@ void KeeperDispatcher::initialize(const Poco::Util::AbstractConfiguration & conf
     {
         requests_queues.emplace_back(std::make_unique<RequestsQueue>(configuration_and_settings->coordination_settings->max_requests_batch_size * 10));
         request_threads.emplace_back(ThreadFromGlobalPool([this, i] { requestThread(i); }));
+        pending_results[i].store(0);
     }
     responses_thread = ThreadFromGlobalPool([this] { responseThread(); });
     snapshot_thread = ThreadFromGlobalPool([this] { snapshotThread(); });
