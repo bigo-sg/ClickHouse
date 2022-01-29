@@ -319,7 +319,8 @@ struct KeeperStorageCreateRequestProcessor final : public KeeperStorageRequestPr
 
         auto [map_key, _] = container.insert(path_created, std::move(created_node));
         /// Take child path from key owned by map.
-        auto child_path = getBaseName(map_key->getKey());
+        //auto child_path = getBaseName(map_key->getKey());
+        auto child_path = getBaseName(map_key->first);
 
         int32_t parent_cversion = request.parent_cversion;
         int64_t prev_parent_zxid;
@@ -516,7 +517,8 @@ struct KeeperStorageRemoveRequestProcessor final : public KeeperStorageRequestPr
                 /// Dangerous place: we are adding StringRef to child into children unordered_hash set.
                 /// That's why we are taking getBaseName from inserted key, not from the path from request object.
                 auto [map_key, _] = storage.container.insert(path, prev_node);
-                storage.container.updateValue(parentPath(path), [child_name = getBaseName(map_key->getKey())] (KeeperStorage::Node & parent)
+                //storage.container.updateValue(parentPath(path), [child_name = getBaseName(map_key->getKey())] (KeeperStorage::Node & parent)
+                storage.container.updateValue(parentPath(path), [child_name = getBaseName(map_key->first)] (KeeperStorage::Node & parent)
                 {
                     ++parent.stat.numChildren;
                     --parent.stat.cversion;

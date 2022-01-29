@@ -9,8 +9,9 @@
 #include <IO/WriteBufferFromString.h>
 #include <unordered_map>
 #include <vector>
+#include <Common/HashTable/robin_hood.h>
 
-#include <absl/container/flat_hash_set.h>
+//#include <absl/container/flat_hash_set.h>
 
 namespace DB
 {
@@ -18,7 +19,8 @@ namespace DB
 struct KeeperStorageRequestProcessor;
 using KeeperStorageRequestProcessorPtr = std::shared_ptr<KeeperStorageRequestProcessor>;
 using ResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr &)>;
-using ChildrenSet = absl::flat_hash_set<StringRef, StringRefHash>;
+//using ChildrenSet = absl::flat_hash_set<StringRef, StringRefHash>;
+using ChildrenSet = robin_hood::unordered_set<StringRef, StringRefHash>;
 using SessionAndTimeout = std::unordered_map<int64_t, int64_t>;
 
 struct KeeperStorageSnapshot;
