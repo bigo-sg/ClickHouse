@@ -10,8 +10,11 @@
 #include <unordered_map>
 #include <vector>
 #include <Common/HashTable/robin_hood.h>
+#include <Common/HashTable/IncrementalRehashTable.h>
+#include "base/types.h"
 
-//#include <absl/container/flat_hash_set.h>
+
+#include <absl/container/flat_hash_set.h>
 
 namespace DB
 {
@@ -20,7 +23,9 @@ struct KeeperStorageRequestProcessor;
 using KeeperStorageRequestProcessorPtr = std::shared_ptr<KeeperStorageRequestProcessor>;
 using ResponseCallback = std::function<void(const Coordination::ZooKeeperResponsePtr &)>;
 //using ChildrenSet = absl::flat_hash_set<StringRef, StringRefHash>;
-using ChildrenSet = robin_hood::unordered_set<StringRef, StringRefHash>;
+//using ChildrenSet = my_unordered_set<StringRef, StringRefHash>;
+using ChildrenType = robin_hood::unordered_set<StringRef, StringRefHash>;
+using ChildrenSet = std::shared_ptr<ChildrenType>;
 using SessionAndTimeout = std::unordered_map<int64_t, int64_t>;
 
 struct KeeperStorageSnapshot;
@@ -32,14 +37,14 @@ class KeeperStorage
 {
 public:
 
-    struct Node
+    struct alignas(8) Node
     {
         String data;
         uint64_t acl_id = 0; /// 0 -- no ACL by default
         bool is_sequental = false;
         Coordination::Stat stat{};
         int32_t seq_num = 0;
-        ChildrenSet children{};
+        ChildrenSet children{nullptr};
         uint64_t size_bytes; // save size to avoid calculate every time
 
         Node()
@@ -56,6 +61,37 @@ public:
         {
             return size_bytes;
         }
+
+        bool addChild(const StringRef & child)
+        {
+            if (children == nullptr)
+                children = std::make_shared<ChildrenType>();
+            return children->insert(child).second;
+        }
+        bool removeChild(const StringRef & child)
+        {
+            if (children)
+            {
+                return children->erase(child);
+            }
+            return false;
+        }
+        size_t childSize() const
+        {
+            return children ? children->size() : 0;
+        }
+        typename ChildrenSet::element_type::const_iterator childrenBegin() const
+        {
+            if (!children)
+                return ChildrenSet::element_type::const_iterator();
+            const auto & ce = *children;
+            return ce.begin();
+        }
+        typename ChildrenSet::element_type::const_iterator childrenEnd() const
+        {
+            return children ? children->end() : ChildrenSet::element_type::const_iterator();
+        }
+
     };
 
     struct ResponseForSession
