@@ -28,7 +28,7 @@ class KeeperDispatcher
 private:
     mutable std::mutex push_request_mutex;
 
-    constexpr static size_t thread_num = 8;
+    constexpr static size_t thread_num = 1;
     using RequestsQueue = ConcurrentBoundedQueue<KeeperStorage::RequestForSession>;
     using SessionToResponseCallback = std::unordered_map<int64_t, ZooKeeperResponseCallback>;
     using UpdateConfigurationQueue = ConcurrentBoundedQueue<ConfigUpdateAction>;

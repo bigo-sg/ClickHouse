@@ -1,6 +1,7 @@
 #include <Coordination/KeeperDispatcher.h>
 #include <Common/setThreadName.h>
 #include <Common/ZooKeeper/KeeperException.h>
+#include <atomic>
 #include <future>
 #include <chrono>
 #include <Poco/Path.h>
@@ -74,13 +75,17 @@ void KeeperDispatcher::onResultReady(KeeperStorage::RequestsForSessions requests
         // but the log itself is still in the log store.
         LOG_WARNING(log, "Failed: rc{}, time us: {}, message: {}", result.get_result_code(), t->getTimeUs(), err->what());
     }
+    if (t->getTimeUs() > 1000000)
+    {
+        LOG_WARNING(log, "slow time: time us: {}, id: {}" , t->getTimeUs(), myid);
+    }
     /// If we get some errors, than send them to clients
     if (!result.get_accepted() || result.get_result_code() == nuraft::cmd_result_code::TIMEOUT)
         addErrorResponses(requests_for_sessions, Coordination::Error::ZOPERATIONTIMEOUT);
     else if (result.get_result_code() != nuraft::cmd_result_code::OK)
         addErrorResponses(requests_for_sessions, Coordination::Error::ZCONNECTIONLOSS);
     requests_for_sessions.clear();
-    pending_results[myid].fetch_sub(1);
+    pending_results[myid].fetch_sub(1, std::memory_order_release);
 }
 
 static ushort getCPUcount(){
@@ -210,7 +215,7 @@ void KeeperDispatcher::requestThread(size_t myid)
                         {
                             onResultReady(current_batch, t, myid, res, err);
                         });
-                        pending_results[myid].fetch_add(1);
+                        pending_results[myid].fetch_add(1, std::memory_order_release);
                     }
                     else
                     {
@@ -225,7 +230,7 @@ void KeeperDispatcher::requestThread(size_t myid)
                 /// Read request always goes after write batch (last request)
                 if (has_read_request)
                 {
-                    while (pending_results[myid].load() > 0)
+                    while (pending_results[myid].load(std::memory_order_acquire) > 0)
                     {
                         std::this_thread::yield();
                     }
