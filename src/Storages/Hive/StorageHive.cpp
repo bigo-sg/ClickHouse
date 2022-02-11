@@ -191,7 +191,8 @@ public:
                         std::make_shared<StorageHiveMetadata>(
                             "Hive", getNameNodeCluster(hdfs_namenode_url), uri_with_path, curr_file->getSize(), curr_file->getLastModTs()),
                         std::move(raw_read_buf),
-                        buff_size);
+                        buff_size,
+                        format == "Parquet" || format == "ORC");
                 }
                 else
                     remote_read_buf = std::move(raw_read_buf);
