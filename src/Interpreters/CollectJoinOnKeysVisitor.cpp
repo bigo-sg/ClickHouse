@@ -218,6 +218,7 @@ JoinIdentifierPos CollectJoinOnKeysMatcher::getTableForIdentifiers(const ASTPtr 
         JoinIdentifierPos membership = JoinIdentifierPos::Unknown;
         if (auto opt = IdentifierSemantic::getMembership(*identifier); opt.has_value())
         {
+            LOG_TRACE(&Poco::Logger::get("TreeRewriter"), "get membership hash value:{}", *opt);
             if (*opt == 0)
                 membership = JoinIdentifierPos::Left;
             else if (*opt == 1)
@@ -233,6 +234,8 @@ JoinIdentifierPos CollectJoinOnKeysMatcher::getTableForIdentifiers(const ASTPtr 
             const String & name = identifier->name();
             bool in_left_table = data.left_table.hasColumn(name);
             bool in_right_table = data.right_table.hasColumn(name);
+
+            LOG_TRACE(&Poco::Logger::get("TreeRewriter"), "check columns: is left:{}, is right:{}", in_left_table, in_right_table);
 
             if (in_left_table && in_right_table)
             {

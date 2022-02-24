@@ -377,6 +377,7 @@ InterpreterSelectQuery::InterpreterSelectQuery(
         if (view)
             view->replaceWithSubquery(getSelectQuery(), view_table, metadata_snapshot);
 
+        LOG_TRACE(&Poco::Logger::get("InterpreterSelectQuery"), "tree rewrite source header:{}", source_header.getNamesAndTypesList().toString());
         syntax_analyzer_result = TreeRewriter(context).analyzeSelect(
             query_ptr,
             TreeRewriterResult(source_header.getNamesAndTypesList(), storage, metadata_snapshot),

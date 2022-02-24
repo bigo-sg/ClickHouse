@@ -124,6 +124,7 @@ add_headers_and_sources(dbms Storages/Cache)
 if (TARGET ch_contrib::hivemetastore)
     add_headers_and_sources(dbms Storages/Hive)
 endif()
+add_headers_and_sources(dbms Interpreters/TreeReWriter)
 
 if (OS_LINUX)
     add_headers_and_sources(dbms Storages/FileLog)

@@ -49,6 +49,7 @@
 #include <Interpreters/SelectQueryOptions.h>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
+#include <Interpreters/TreeReWriter/MultiStageTreeRewriter.h>
 #include <Common/ProfileEvents.h>
 
 #include <Common/SensitiveDataMasker.h>
@@ -63,8 +64,13 @@
 #include <base/EnumReflection.h>
 #include <base/demangle.h>
 
+#include <memory>
 #include <random>
+#include <Parsers/queryToString.h>
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
+#include <Parsers/ASTStagedSelectQuery.h>
 
 namespace ProfileEvents
 {
@@ -629,6 +635,42 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         }
         else
         {
+            if (context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY && std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast))
+            {
+                {
+                    auto select_with_union = std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "union_mode:{}, SelectUnionModes.size:{}, SelectUnionModesSet.size:{}, list_of_selects:{}",
+                        select_with_union->union_mode,
+                        select_with_union->list_of_modes.size(),
+                        select_with_union->set_of_modes.size(),
+                        select_with_union->list_of_selects->getID());
+                }
+                if (context->getSettings().use_distributed_join)
+                {
+                    DistributedJoinRewriteMatcher::Data data;
+                    data.context = context;
+                    auto new_ast = ast->clone();
+                    DistributedJoinRewriteVisitor(data).visit(new_ast);
+                    //LOG_TRACE(&Poco::Logger::get("executeQuery"), "visit result : {}", queryToString(data.rewritten_query));
+                    auto staged_ast = std::make_shared<ASTStagedSelectQuery>();
+                    String my_insert_query("insert into left_t1 select * from right_t1");
+                    ParserQuery parser(my_insert_query.c_str() + my_insert_query.size());
+                    auto insert_ast = parseQuery(
+                        parser,
+                        my_insert_query.c_str(),
+                        my_insert_query.c_str() + my_insert_query.size(),
+                        "",
+                        max_query_size,
+                        settings.max_parser_depth);
+                    staged_ast->staged_insert_queries.emplace_back(insert_ast);
+                    staged_ast->final_select_query = ast->clone();
+                    auto select_with_union_ast = std::make_shared<ASTSelectWithUnionQuery>();
+                    select_with_union_ast->list_of_selects = std::make_shared<ASTExpressionList>();
+                    select_with_union_ast->list_of_selects->children.emplace_back(staged_ast);
+                    ast = select_with_union_ast;
+                }
+            }
+            
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
 
             if (!interpreter->ignoreQuota())
@@ -668,6 +710,13 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
             if (const auto * insert_interpreter = typeid_cast<const InterpreterInsertQuery *>(&*interpreter))
             {
+                QueryPipelineBuilder builder;
+                builder.init(std::move(res.pipeline));
+                auto pipe = QueryPipelineBuilder::getPipe(std::move(builder));
+                //LOG_TRACE(&Poco::Logger::get("executeQuery"), "insert pipe output is null:{} {}\nheader:{}", pipe.numOutputPorts(),pipe.getHeader().dumpStructure());
+                QueryPipelineBuilder builder1;
+                builder1.init(std::move(pipe));
+                res.pipeline = builder1.getPipeline(std::move(builder1));
                 /// Save insertion table (not table function). TODO: support remote() table function.
                 auto table_id = insert_interpreter->getDatabaseTable();
                 if (!table_id.empty())
@@ -687,6 +736,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         res.process_list_entry = process_list_entry;
 
         auto & pipeline = res.pipeline;
+        LOG_TRACE(&Poco::Logger::get("executeQuery"), "pushing : {}, pulling: {}, complete:{}", pipeline.pushing(), pipeline.pulling(), pipeline.completed());
 
         if (pipeline.pulling() || pipeline.completed())
         {

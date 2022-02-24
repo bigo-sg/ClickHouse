@@ -460,6 +460,7 @@ Pipe StorageHive::read(
             compression_method,
             sample_block,
             to_read_block,
+            //sample_block,
             context_,
             max_block_size,
             text_input_field_names));
