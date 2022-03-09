@@ -34,6 +34,7 @@
 #include <Storages/Hive/StorageHiveMetadata.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/StorageFactory.h>
+#include <Storages/Hive/SingleHiveQueryTaskBuilder.h>
 
 namespace DB
 {
@@ -41,20 +42,11 @@ namespace ErrorCodes
 {
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int NOT_IMPLEMENTED;
-    extern const int INVALID_PARTITION_VALUE;
     extern const int BAD_ARGUMENTS;
     extern const int CANNOT_OPEN_FILE;
     extern const int LOGICAL_ERROR;
     extern const int TOO_MANY_PARTITIONS;
 }
-
-
-static std::string getBaseName(const String & path)
-{
-    size_t basename_start = path.rfind('/');
-    return path.substr(basename_start + 1);
-}
-
 class StorageHiveSource : public SourceWithProgress, WithContext
 {
 public:
@@ -338,7 +330,8 @@ StorageHive::StorageHive(
     const String & comment_,
     const ASTPtr & partition_by_ast_,
     std::unique_ptr<HiveSettings> storage_settings_,
-    ContextPtr context_)
+    ContextPtr context_,
+    std::shared_ptr<HiveQueryTaskFilesCollectorBuilder> hive_task_files_collector_builder_)
     : IStorage(table_id_)
     , WithContext(context_)
     , hive_metastore_url(hive_metastore_url_)
@@ -346,6 +339,7 @@ StorageHive::StorageHive(
     , hive_table(hive_table_)
     , partition_by_ast(partition_by_ast_)
     , storage_settings(std::move(storage_settings_))
+    , hive_task_files_collector_builder(hive_task_files_collector_builder_)
 {
     /// Check hive metastore url.
     getContext()->getRemoteHostFilter().checkURL(Poco::URI(hive_metastore_url));
@@ -409,35 +403,15 @@ void StorageHive::lazyInitialize()
         }
     }
 
-    initMinMaxIndexExpression();
-    has_initialized = true;
-}
-
-void StorageHive::initMinMaxIndexExpression()
-{
-    auto metadata_snapshot = getInMemoryMetadataPtr();
     ASTPtr partition_key_expr_list = extractKeyExpressionList(partition_by_ast);
+    NamesAndTypesList all_name_and_types = getInMemoryMetadata().getColumns().getAllPhysical();
     if (!partition_key_expr_list->children.empty())
     {
-        auto syntax_result = TreeRewriter(getContext()).analyze(partition_key_expr_list, metadata_snapshot->getColumns().getAllPhysical());
-        partition_key_expr = ExpressionAnalyzer(partition_key_expr_list, syntax_result, getContext()).getActions(false);
-
-        /// Add all columns used in the partition key to the min-max index.
+        auto syntax_result = TreeRewriter(getContext()).analyze(partition_key_expr_list, all_name_and_types);
+        auto partition_key_expr = ExpressionAnalyzer(partition_key_expr_list, syntax_result, getContext()).getActions(false);
         partition_name_types = partition_key_expr->getRequiredColumnsWithTypes();
-        partition_names = partition_name_types.getNames();
-        partition_types = partition_name_types.getTypes();
-        partition_minmax_idx_expr = std::make_shared<ExpressionActions>(
-            std::make_shared<ActionsDAG>(partition_name_types), ExpressionActionsSettings::fromContext(getContext()));
     }
-
-    NamesAndTypesList all_name_types = metadata_snapshot->getColumns().getAllPhysical();
-    for (const auto & column : all_name_types)
-    {
-        if (!partition_name_types.contains(column.name))
-            hivefile_name_types.push_back(column);
-    }
-    hivefile_minmax_idx_expr = std::make_shared<ExpressionActions>(
-        std::make_shared<ActionsDAG>(hivefile_name_types), ExpressionActionsSettings::fromContext(getContext()));
+    has_initialized = true;
 }
 
 ASTPtr StorageHive::extractKeyExpressionList(const ASTPtr & node)
@@ -451,221 +425,10 @@ ASTPtr StorageHive::extractKeyExpressionList(const ASTPtr & node)
         /// Primary key is specified in tuple, extract its arguments.
         return expr_func->arguments->clone();
     }
-    else
-    {
-        /// Primary key consists of one column.
-        auto res = std::make_shared<ASTExpressionList>();
-        res->children.push_back(node);
-        return res;
-    }
-}
-
-
-static HiveFilePtr createHiveFile(
-    const String & format_name,
-    const FieldVector & fields,
-    const String & namenode_url,
-    const String & path,
-    UInt64 ts,
-    size_t size,
-    const NamesAndTypesList & index_names_and_types,
-    const std::shared_ptr<HiveSettings> & hive_settings,
-    const ContextPtr & context)
-{
-    HiveFilePtr hive_file;
-    if (format_name == "HiveText")
-    {
-        hive_file = std::make_shared<HiveTextFile>(fields, namenode_url, path, ts, size, index_names_and_types, hive_settings, context);
-    }
-    else if (format_name == "ORC")
-    {
-        hive_file = std::make_shared<HiveORCFile>(fields, namenode_url, path, ts, size, index_names_and_types, hive_settings, context);
-    }
-    else if (format_name == "Parquet")
-    {
-        hive_file = std::make_shared<HiveParquetFile>(fields, namenode_url, path, ts, size, index_names_and_types, hive_settings, context);
-    }
-    else
-    {
-        throw Exception("IHiveFile not implemented for format " + format_name, ErrorCodes::NOT_IMPLEMENTED);
-    }
-    return hive_file;
-}
-
-HiveFiles StorageHive::collectHiveFilesFromPartition(
-    const Apache::Hadoop::Hive::Partition & partition,
-    const SelectQueryInfo & query_info,
-    const HiveTableMetadataPtr & hive_table_metadata,
-    const HDFSFSPtr & fs,
-    const ContextPtr & context_,
-    PruneLevel prune_level) const
-{
-    LOG_DEBUG(
-        log, "Collect hive files from partition {}, prune_level:{}", boost::join(partition.values, ","), pruneLevelToString(prune_level));
-
-    /// Skip partition "__HIVE_DEFAULT_PARTITION__"
-    bool has_default_partition = false;
-    for (const auto & value : partition.values)
-    {
-        if (value == "__HIVE_DEFAULT_PARTITION__")
-        {
-            has_default_partition = true;
-            break;
-        }
-    }
-    if (has_default_partition)
-        return {};
-
-    /// Check partition values
-    if (partition.values.size() != partition_names.size())
-        throw Exception(
-            fmt::format("Partition value size not match, expect {}, but got {}", partition_names.size(), partition.values.size()),
-            ErrorCodes::INVALID_PARTITION_VALUE);
-
-    /// Join partition values in CSV format
-    WriteBufferFromOwnString wb;
-    for (size_t i = 0; i < partition.values.size(); ++i)
-    {
-        if (i != 0)
-            writeString(",", wb);
-        writeString(partition.values[i], wb);
-    }
-    writeString("\n", wb);
-
-    ReadBufferFromString buffer(wb.str());
-    auto format = FormatFactory::instance().getInputFormat(
-        "CSV", buffer, partition_key_expr->getSampleBlock(), getContext(), getContext()->getSettingsRef().max_block_size);
-    auto pipeline = QueryPipeline(std::move(format));
-    auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
-    Block block;
-    if (!reader->pull(block) || !block.rows())
-        throw Exception("Could not parse partition value: " + wb.str(), ErrorCodes::INVALID_PARTITION_VALUE);
-
-    /// Get partition values
-    FieldVector fields(partition_names.size());
-    for (size_t i = 0; i < partition_names.size(); ++i)
-        block.getByPosition(i).column->get(0, fields[i]);
-
-    if (prune_level >= PruneLevel::Partition)
-    {
-        std::vector<Range> ranges;
-        ranges.reserve(partition_names.size());
-        for (size_t i = 0; i < partition_names.size(); ++i)
-            ranges.emplace_back(fields[i]);
-
-        const KeyCondition partition_key_condition(query_info, getContext(), partition_names, partition_minmax_idx_expr);
-        if (!partition_key_condition.checkInHyperrectangle(ranges, partition_types).can_be_true)
-            return {};
-    }
-
-    HiveFiles hive_files;
-    auto file_infos = listDirectory(partition.sd.location, hive_table_metadata, fs);
-    hive_files.reserve(file_infos.size());
-    for (const auto & file_info : file_infos)
-    {
-        auto hive_file = getHiveFileIfNeeded(file_info, fields, query_info, hive_table_metadata, context_, prune_level);
-        if (hive_file)
-        {
-            LOG_TRACE(
-                log,
-                "Append hive file {} from partition {}, prune_level:{}",
-                hive_file->getPath(),
-                boost::join(partition.values, ","),
-                pruneLevelToString(prune_level));
-            hive_files.push_back(hive_file);
-        }
-    }
-    return hive_files;
-}
-
-std::vector<StorageHive::FileInfo>
-StorageHive::listDirectory(const String & path, const HiveTableMetadataPtr & hive_table_metadata, const HDFSFSPtr & fs)
-{
-    return hive_table_metadata->getFilesByLocation(fs, path);
-}
-
-HiveFilePtr StorageHive::getHiveFileIfNeeded(
-    const FileInfo & file_info,
-    const FieldVector & fields,
-    const SelectQueryInfo & query_info,
-    const HiveTableMetadataPtr & hive_table_metadata,
-    const ContextPtr & context_,
-    PruneLevel prune_level) const
-{
-    String filename = getBaseName(file_info.path);
-    /// Skip temporary files starts with '.'
-    if (startsWith(filename, "."))
-        return {};
-
-    auto cache = hive_table_metadata->getHiveFilesCache();
-    auto hive_file = cache->get(file_info.path);
-    if (!hive_file || hive_file->getLastModTs() < file_info.last_modify_time)
-    {
-        LOG_TRACE(log, "Create hive file {}, prune_level {}", file_info.path, pruneLevelToString(prune_level));
-        hive_file = createHiveFile(
-            format_name,
-            fields,
-            hdfs_namenode_url,
-            file_info.path,
-            file_info.last_modify_time,
-            file_info.size,
-            hivefile_name_types,
-            storage_settings,
-            context_->getGlobalContext());
-        cache->set(file_info.path, hive_file);
-    }
-    else
-    {
-        LOG_TRACE(log, "Get hive file {} from cache, prune_level {}", file_info.path, pruneLevelToString(prune_level));
-    }
-
-    if (prune_level >= PruneLevel::File)
-    {
-        const KeyCondition hivefile_key_condition(query_info, getContext(), hivefile_name_types.getNames(), hivefile_minmax_idx_expr);
-        if (hive_file->useFileMinMaxIndex())
-        {
-            /// Load file level minmax index and apply
-            hive_file->loadFileMinMaxIndex();
-            if (!hivefile_key_condition.checkInHyperrectangle(hive_file->getMinMaxIndex()->hyperrectangle, hivefile_name_types.getTypes())
-                     .can_be_true)
-            {
-                LOG_TRACE(
-                    log,
-                    "Skip hive file {} by index {}",
-                    hive_file->getPath(),
-                    hive_file->describeMinMaxIndex(hive_file->getMinMaxIndex()));
-                return {};
-            }
-        }
-
-        if (prune_level >= PruneLevel::Split)
-        {
-            if (hive_file->useSplitMinMaxIndex())
-            {
-                /// Load sub-file level minmax index and apply
-                std::unordered_set<int> skip_splits;
-                hive_file->loadSplitMinMaxIndexes();
-                const auto & sub_minmax_idxes = hive_file->getSubMinMaxIndexes();
-                for (size_t i = 0; i < sub_minmax_idxes.size(); ++i)
-                {
-                    if (!hivefile_key_condition.checkInHyperrectangle(sub_minmax_idxes[i]->hyperrectangle, hivefile_name_types.getTypes())
-                             .can_be_true)
-                    {
-                        LOG_TRACE(
-                            log,
-                            "Skip split {} of hive file {} by index {}",
-                            i,
-                            hive_file->getPath(),
-                            hive_file->describeMinMaxIndex(sub_minmax_idxes[i]));
-
-                        skip_splits.insert(i);
-                    }
-                }
-                hive_file->setSkipSplits(skip_splits);
-            }
-        }
-    }
-    return hive_file;
+    /// Primary key consists of one column.
+    auto res = std::make_shared<ASTExpressionList>();
+    res->children.push_back(node);
+    return res;
 }
 
 bool StorageHive::isColumnOriented() const
@@ -683,16 +446,36 @@ Pipe StorageHive::read(
     unsigned num_streams)
 {
     lazyInitialize();
+    std::shared_ptr<IHiveQueryTaskFilesCollector> hive_task_files_collector;
+    IHiveQueryTaskFilesCollector::Arguments args
+        = {.context = getContext(),
+           .query_info = &query_info,
+           .hive_metastore_url = hive_metastore_url,
+           .hive_database = hive_database,
+           .hive_table = hive_table,
+           .storage_settings = storage_settings,
+           .columns = getInMemoryMetadata().getColumns(),
+           .num_streams = num_streams,
+           .partition_by_ast = partition_by_ast};
+    /**
+     * Hdfs files collection action is wrapped into IHiveQueryTaskFilesCollector.
+     * On Hive() engine, hive_task_files_collector_builder is nullptr.
+     * SingleHiveQueryTaskFilesCollector will collect all files.
+     *
+     */
+    if (!hive_task_files_collector_builder)
+    {
+        hive_task_files_collector = std::make_shared<SingleHiveQueryTaskFilesCollector>();
+    }
+    else
+        hive_task_files_collector = (*hive_task_files_collector_builder)();
 
-    HDFSBuilderWrapper builder = createHDFSBuilder(hdfs_namenode_url, context_->getGlobalContext()->getConfigRef());
-    HDFSFSPtr fs = createHDFSFS(builder.get());
-    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url);
-    auto hive_table_metadata = hive_metastore_client->getTableMetadata(hive_database, hive_table);
+    // Pass all infos into hive_task_files_collector that be needed to collect hdfs files
+    hive_task_files_collector->setupArgs(args);
+    /// Hive files to read
+    HiveFiles hive_files = hive_task_files_collector->collectHiveFiles();
 
-    /// Collect Hive files to read
-    HiveFiles hive_files = collectHiveFiles(num_streams, query_info, hive_table_metadata, fs, context_);
-    if (hive_files.empty())
-        return {};
+    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url, getContext());
 
     auto sources_info = std::make_shared<StorageHiveSource::SourcesInfo>();
     sources_info->hive_files = std::move(hive_files);
@@ -711,6 +494,9 @@ Pipe StorageHive::read(
         if (column == "_file")
             sources_info->need_file_column = true;
     }
+
+    auto partition_names = partition_name_types.getNames();
+    getActualColumnsToRead(sample_block, header_block, NameSet{partition_names.begin(), partition_names.end()});
 
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();

@@ -740,6 +740,7 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     \
     M(String, input_format_mysql_dump_table_name, "", "Name of the table in MySQL dump from which to read data", 0) \
     M(Bool, input_format_mysql_dump_map_column_names, true, "Match columns from table in MySQL dump and columns from ClickHouse table by names", 0) \
+    M(String, hive_cluster_task_iterate_policy, "hive_task_node_hash_policy", "Define the task iterator policy for StorageHiveCluster query", 0)\
 
 // End of FORMAT_FACTORY_SETTINGS
 // Please add settings non-related to formats into the COMMON_SETTINGS above.
