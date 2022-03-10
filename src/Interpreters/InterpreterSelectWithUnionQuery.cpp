@@ -3,9 +3,12 @@
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <Interpreters/InterpreterSelectIntersectExceptQuery.h>
+#include <Interpreters/InterpreterSelectIntersectExceptQuery.h>
+#include <Interpreters/InterpreterDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTSelectIntersectExceptQuery.h>
+#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/queryToString.h>
 #include <Processors/QueryPlan/DistinctStep.h>
 #include <Processors/QueryPlan/ExpressionStep.h>
@@ -86,7 +89,17 @@ InterpreterSelectWithUnionQuery::InterpreterSelectWithUnionQuery(
     if (num_children == 1 && settings_limit_offset_needed && !options.settings_limit_offset_done)
     {
         const ASTPtr first_select_ast = ast->list_of_selects->children.at(0);
-        ASTSelectQuery * select_query = dynamic_cast<ASTSelectQuery *>(first_select_ast.get());
+        ASTSelectQuery * select_query = nullptr;
+        if (auto shuffle_join_select_query = std::dynamic_pointer_cast<ASTDistributedShuffleJoinSelectQuery>(first_select_ast))
+        {
+            auto select_with_union_query = std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(shuffle_join_select_query->select_query);
+            select_query = dynamic_cast<ASTSelectQuery *>(select_with_union_query->list_of_selects->children.at(0).get());
+        }
+        else
+        {
+            select_query = dynamic_cast<ASTSelectQuery *>(first_select_ast.get());
+        }
+
         if (!select_query)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Invalid type in list_of_selects: {}", first_select_ast->getID());
 
@@ -210,6 +223,12 @@ Block InterpreterSelectWithUnionQuery::getCurrentChildResultHeader(const ASTPtr 
             .getSampleBlock();
     else if (ast_ptr_->as<ASTSelectQuery>())
         return InterpreterSelectQuery(ast_ptr_, context, options.copy().analyze().noModify()).getSampleBlock();
+    else if (auto shuffle_join_select_query = std::dynamic_pointer_cast<ASTDistributedShuffleJoinSelectQuery>(ast_ptr_))
+    {
+        return InterpreterSelectWithUnionQuery(
+                   shuffle_join_select_query->select_query, context, options.copy().analyze().noModify(), required_result_column_names)
+            .getSampleBlock();
+    }
     else
         return InterpreterSelectIntersectExceptQuery(ast_ptr_, context, options.copy().analyze().noModify()).getSampleBlock();
 }
@@ -221,6 +240,10 @@ InterpreterSelectWithUnionQuery::buildCurrentChildInterpreter(const ASTPtr & ast
         return std::make_unique<InterpreterSelectWithUnionQuery>(ast_ptr_, context, options, current_required_result_column_names);
     else if (ast_ptr_->as<ASTSelectQuery>())
         return std::make_unique<InterpreterSelectQuery>(ast_ptr_, context, options, current_required_result_column_names);
+    else if (ast_ptr_->as<ASTDistributedShuffleJoinSelectQuery>())
+    {
+        return std::make_unique<InterpreterDistributedShuffleJoinSelectQuery>(ast_ptr_, context, options);
+    }
     else
         return std::make_unique<InterpreterSelectIntersectExceptQuery>(ast_ptr_, context, options);
 }

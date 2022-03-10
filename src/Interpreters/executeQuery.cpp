@@ -49,6 +49,7 @@
 #include <Interpreters/SelectQueryOptions.h>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
+#include <Interpreters/TreeDistributedShuffleJoinRewriter.h>
 #include <Common/ProfileEvents.h>
 
 #include <Common/SensitiveDataMasker.h>
@@ -64,6 +65,16 @@
 #include <base/demangle.h>
 
 #include <random>
+
+#include <Parsers/queryToString.h>
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
+
+#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
+#include <Interpreters/Cluster.h>
+#include <QueryPipeline/RemoteInserter.h>
+#include <TableFunctions/parseColumnsListForTableFunction.h>
+#include <DataTypes/DataTypesNumber.h>
 
 
 namespace ProfileEvents
@@ -630,6 +641,63 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         }
         else
         {
+            if (context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY && std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast))
+            {
+                {
+                    auto select_with_union = std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "union_mode:{}, SelectUnionModes.size:{}, SelectUnionModesSet.size:{}, list_of_selects:{}",
+                        select_with_union->union_mode,
+                        select_with_union->list_of_modes.size(),
+                        select_with_union->set_of_modes.size(),
+                        select_with_union->list_of_selects->getID());
+                }
+                if (context->getSettings().use_distributed_shuffle_join)
+                {
+                    TreeDistributedShuffleJoinRewriteMatcher::Data data;
+                    data.context = context;
+                    auto new_ast = ast->clone();
+                    TreeDistributedShuffleJoinRewriteVisitor(data).visit(new_ast);
+                    //LOG_TRACE(&Poco::Logger::get("executeQuery"), "visit result : {}", queryToString(data.rewritten_query));
+                    auto shuffle_join_ast = std::make_shared<ASTDistributedShuffleJoinSelectQuery>();
+                    String my_insert_query("insert into left_t1 select * from right_t1");
+                    ParserQuery parser(my_insert_query.c_str() + my_insert_query.size());
+                    auto insert_ast = parseQuery(
+                        parser,
+                        my_insert_query.c_str(),
+                        my_insert_query.c_str() + my_insert_query.size(),
+                        "",
+                        max_query_size,
+                        settings.max_parser_depth);
+                    shuffle_join_ast->shuffle_queries.emplace_back(insert_ast);
+                    shuffle_join_ast->select_query = ast->clone();
+                    auto select_with_union_ast = std::make_shared<ASTSelectWithUnionQuery>();
+                    select_with_union_ast->list_of_selects = std::make_shared<ASTExpressionList>();
+                    select_with_union_ast->list_of_selects->children.emplace_back(shuffle_join_ast);
+                    ast = select_with_union_ast;
+
+                    auto cluster = context->getCluster("ck_cluster_new")->getClusterWithReplicasAsShards(context->getSettingsRef());
+                    const auto & node = cluster->getShardsAddresses()[0][0];
+                    auto connection = std::make_shared<Connection>(
+                        node.host_name,
+                        node.port,
+                        context->getGlobalContext()->getCurrentDatabase(),
+                        node.user,
+                        node.password,
+                        node.cluster,
+                        node.cluster_secret,
+                        "S3ClusterInititiator",
+                        node.compression,
+                        node.secure);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "run on node:{}", node.host_name);
+                    RemoteInserter inserter(*connection, ConnectionTimeouts{10000, 10000, 10000}, "insert into t1 values", context->getSettings(), context->getClientInfo());
+                    Block write_block;
+                    auto dt = std::make_shared<DataTypeUInt16>();
+                    write_block.insert({dt->createColumnConst(5, Field(UInt16(1))), dt, "a"});
+                    write_block.insert({dt->createColumnConst(5, Field(UInt16(2))), dt, "b"});
+                    inserter.write(write_block);
+                    inserter.onFinish();
+                }
+            }
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
 
             if (!interpreter->ignoreQuota())
