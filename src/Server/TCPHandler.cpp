@@ -56,6 +56,9 @@
 
 #include <Common/config_version.h>
 
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
+
 using namespace std::literals;
 
 
@@ -609,6 +612,7 @@ void TCPHandler::skipData()
 
 void TCPHandler::processInsertQuery()
 {
+    LOG_TRACE(&Poco::Logger::get("TCPHandler"), "processInsertQuery:{}", state.query);
     size_t num_threads = state.io.pipeline.getNumThreads();
 
     auto run_executor = [&](auto & executor)
@@ -638,7 +642,10 @@ void TCPHandler::processInsertQuery()
         sendLogs();
 
         while (readDataNext())
+        {
+            LOG_TRACE(&Poco::Logger::get("TCPHandler"), "recieve one insert block. row:{}", state.block_for_insert.rows());
             executor.push(std::move(state.block_for_insert));
+        }
 
         executor.finish();
     };
