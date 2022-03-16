@@ -121,6 +121,7 @@ if (TARGET ch_contrib::hdfs)
 endif()
 
 add_headers_and_sources(dbms Storages/Cache)
+add_headers_and_sources(dbms Storages/DistributedShuffleJoin)
 if (TARGET ch_contrib::hivemetastore)
     add_headers_and_sources(dbms Storages/Hive)
 endif()

@@ -104,6 +104,7 @@ struct ScopeStack : WithContext
 class ASTIdentifier;
 class ASTFunction;
 class ASTLiteral;
+class ASTExpressionList;
 
 /// Collect ExpressionAction from AST. Returns PreparedSets and SubqueriesForSets too.
 class ActionsMatcher

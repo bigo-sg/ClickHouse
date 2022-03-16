@@ -24,6 +24,7 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSubquery.h>
+
 namespace DB
 {
 namespace ErrorCodes
@@ -32,7 +33,7 @@ namespace ErrorCodes
     extern const int NOT_IMPLEMENTED;
 
 }
-
+#define TABLE_FUNCTION_HASHED_CHUNK_STORAGE "HashedChunksStorage"
 void TreeDistributedShuffleJoinRewriteMatcher::visit(ASTPtr & ast_, Data & data_)
 {
     ASTPtr final_ast;
@@ -419,7 +420,7 @@ ASTPtr TreeDistributedShuffleJoinRewriter::createRightTableQuery(const String & 
 ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const String & table_id, NamesAndTypesList & columns, ASTPtr & hash_keys)
 {
     auto table_func = std::make_shared<ASTFunction>();
-    table_func->name = "HashTable";
+    table_func->name = TABLE_FUNCTION_HASHED_CHUNK_STORAGE;
     table_func->arguments = std::make_shared<ASTExpressionList>();
 
     Field id(table_id);
@@ -446,8 +447,11 @@ ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const Strin
 ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const Strings & table_id, NamesAndTypesList & columns, ASTPtr & hash_keys)
 {
     auto table_func = std::make_shared<ASTFunction>();
-    table_func->name = "HashTable";
+    table_func->name = TABLE_FUNCTION_HASHED_CHUNK_STORAGE;
     table_func->arguments = std::make_shared<ASTExpressionList>();
+
+    Field cluster_name(getContext()->getSettings().distributed_shuffle_join_cluster.value);
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(cluster_name));
 
     Field session_id(table_id[0]);
     table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(session_id));
