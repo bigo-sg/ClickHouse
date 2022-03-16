@@ -65,7 +65,7 @@ private:
     ASTPtr createNewJoinSelectQuery(ASTPtr & left_query, ASTPtr & right_query);
     ASTPtr createLeftTableQuery(const String & hash_table_id);
     ASTPtr createRightTableQuery(const String & hash_table_id);
-    ASTPtr createHashTableExpression(const String & table_id, NamesAndTypesList & columns, ASTPtr & hash_keys);
+    static ASTPtr createHashTableExpression(const String & table_id, NamesAndTypesList & columns, ASTPtr & hash_keys);
     ASTPtr createHashTableExpression(const Strings & table_id, NamesAndTypesList & columns, ASTPtr & hash_keys);
 
 };

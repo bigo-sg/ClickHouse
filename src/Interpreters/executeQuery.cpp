@@ -64,6 +64,7 @@
 #include <base/EnumReflection.h>
 #include <base/demangle.h>
 
+#include <memory>
 #include <random>
 
 #include <Parsers/queryToString.h>
@@ -76,6 +77,11 @@
 #include <TableFunctions/parseColumnsListForTableFunction.h>
 #include <DataTypes/DataTypesNumber.h>
 
+#include <Parsers/ExpressionListParsers.h>
+#include <Interpreters/ActionsVisitor.h>
+#include <Parsers/DumpASTNode.h>
+
+#include <Storages/DistributedShuffleJoin/StorageShuffleJoin.h>
 
 namespace ProfileEvents
 {
@@ -651,12 +657,65 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                         select_with_union->set_of_modes.size(),
                         select_with_union->list_of_selects->getID());
                 }
-                if (context->getSettings().use_distributed_shuffle_join)
+                if (!context->getSettings().distributed_shuffle_join_cluster.value.empty())
                 {
                     TreeDistributedShuffleJoinRewriteMatcher::Data data;
                     data.context = context;
                     auto new_ast = ast->clone();
                     TreeDistributedShuffleJoinRewriteVisitor(data).visit(new_ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "join rewrite ast:{}", queryToString(data.rewritten_query));
+                    ParserExpressionList my_parser(true);
+                    ASTPtr partition_by_ast = parseQuery(
+                        my_parser,
+                        "`a`,`b`",
+                        "partition by declaration list",
+                        settings.max_query_size,
+                        settings.max_parser_depth);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "expr list:{}", queryToString(partition_by_ast));
+                    
+                    ParserExpressionList my_parser2(true);
+                    ASTPtr fun_ast = parseQuery(
+                        my_parser2,
+                        "cityHash64(" + queryToString(partition_by_ast) + ")%5=0," + "cityHash64(" + queryToString(partition_by_ast) + ")%5=1",
+                        "partition by declaration list",
+                        settings.max_query_size,
+                        settings.max_parser_depth);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "expr list:{}", queryToString(fun_ast));
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "expr column name: {}", fun_ast->children[0]->getColumnName());
+#if 0
+                    DebugASTLog<true> log;
+                    String names_and_types_str = "columns format version: 1\n2 columns:\n`a` Int32\n`b` Int32\n";
+                    auto names_and_types = NamesAndTypesList::parse(names_and_types_str);
+                    ActionsDAGPtr actions = std::make_shared<ActionsDAG>(names_and_types);
+                    PreparedSets prepared_sets;
+                    SubqueriesForSets subqueries_for_sets;
+                    /*
+                    for (const auto & name_and_type : names_and_types)
+                    {
+                        LOG_TRACE(&Poco::Logger::get("executeQuery"), "name_and_type:{}:{}", name_and_type.name, name_and_type.type->getName());
+                        actions->addInput(name_and_type.name, name_and_type.type);
+                    }
+                    */
+                    ActionsVisitor::Data visitor_data(
+                        context,
+                        SizeLimits{settings.max_rows_in_set, settings.max_bytes_in_set, settings.set_overflow_mode},
+                        0,
+                        names_and_types,
+                        std::move(actions),
+                        prepared_sets,
+                        subqueries_for_sets,
+                        false,
+                        false,
+                        false,
+                        false);
+                     ActionsVisitor(visitor_data, log.stream()).visit(fun_ast);
+                     actions = visitor_data.getActions();
+                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "action dag:{}", actions->dumpDAG());
+                     ExpressionActions action_expr(actions);
+                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "action exprt:{}", action_expr.dumpActions());
+#endif
+
+#if 0
                     //LOG_TRACE(&Poco::Logger::get("executeQuery"), "visit result : {}", queryToString(data.rewritten_query));
                     auto shuffle_join_ast = std::make_shared<ASTDistributedShuffleJoinSelectQuery>();
                     String my_insert_query("insert into left_t1 select * from right_t1");
@@ -674,7 +733,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     select_with_union_ast->list_of_selects = std::make_shared<ASTExpressionList>();
                     select_with_union_ast->list_of_selects->children.emplace_back(shuffle_join_ast);
                     ast = select_with_union_ast;
-
+#endif
+#if 0
                     auto cluster = context->getCluster("ck_cluster_new")->getClusterWithReplicasAsShards(context->getSettingsRef());
                     const auto & node = cluster->getShardsAddresses()[0][0];
                     auto connection = std::make_shared<Connection>(
@@ -696,6 +756,11 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     write_block.insert({dt->createColumnConst(5, Field(UInt16(2))), dt, "b"});
                     inserter.write(write_block);
                     inserter.onFinish();
+#endif
+#if 1
+                   testSinker(context);
+
+#endif
                 }
             }
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));

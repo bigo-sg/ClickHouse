@@ -1,0 +1,78 @@
+#pragma once
+#include <Interpreters/Context.h>
+#include <Storages/IStorage.h>
+#include <base/shared_ptr_helper.h>
+#include <Poco/Logger.h>
+
+namespace DB
+{
+
+class StorageShuffleJoin : public shared_ptr_helper<StorageShuffleJoin>, public IStorage, WithContext
+{
+public:
+    String getName() const override { return "StorageShuffleJoin"; }
+    Pipe read(
+        const Names & column_names_,
+        const StorageMetadataPtr & metadata_snapshot_,
+        SelectQueryInfo & query_info_,
+        ContextPtr context_,
+        QueryProcessingStage::Enum processed_stage_,
+        size_t max_block_size_,
+        unsigned num_streams_) override;
+
+    SinkToStoragePtr write(
+        const ASTPtr & ast,
+        const StorageMetadataPtr & storage_metadata,
+        ContextPtr context
+    ) override;
+protected:
+    explicit StorageShuffleJoin(
+        ContextPtr context_,
+        const String & cluster,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_,
+        ASTPtr hash_expr_list_
+    );
+private:
+    Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
+    String cluster;
+    String session_id;
+    String table_id;
+    ASTPtr hash_expr_list;
+};
+
+class StorageShuffleJoinPart : public shared_ptr_helper<StorageShuffleJoin>, public IStorage, WithContext
+{
+public:
+    String getName() const override { return "StorageShuffleJoinPart"; }
+    Pipe read(
+        const Names & column_names_,
+        const StorageMetadataPtr & metadata_snapshot_,
+        SelectQueryInfo & query_info_,
+        ContextPtr context_,
+        QueryProcessingStage::Enum processed_stage_,
+        size_t max_block_size_,
+        unsigned num_streams_) override;
+
+    SinkToStoragePtr write(
+        const ASTPtr & ast,
+        const StorageMetadataPtr & storage_metadata,
+        ContextPtr context
+    ) override;
+protected:
+    explicit StorageShuffleJoinPart(
+        ContextPtr context_,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_
+    );
+private:
+    Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinPart");
+    String session_id;
+    String table_id;
+};
+
+
+void testSinker(ContextPtr context);
+}
