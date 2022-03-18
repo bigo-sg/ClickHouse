@@ -45,12 +45,13 @@ private:
     Poco::Logger * logger = &Poco::Logger::get("TableFunctionShuffleJoin");
 
     // followings are args
+    String cluster_name;
     String session_id;
     String table_id;
     String table_structure;
     String table_hash_exprs;
 
     ColumnsDescription columns;
-
+    ASTPtr hash_expr_list_ast;
 };
 }

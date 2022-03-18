@@ -55,6 +55,10 @@ void registerTableFunctions()
     registerTableFunctionDictionary(factory);
 
     registerTableFunctionFormat(factory);
+
+    registerTableFunctionDistShuffleJoin(factory);
+
+    registerTableFunctionShuffleJoin(factory);
 }
 
 }
