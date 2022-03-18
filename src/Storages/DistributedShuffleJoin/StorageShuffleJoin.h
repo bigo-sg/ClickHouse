@@ -25,24 +25,25 @@ public:
         const StorageMetadataPtr & storage_metadata,
         ContextPtr context
     ) override;
-protected:
-    explicit StorageShuffleJoin(
+
+    StorageShuffleJoin(
         ContextPtr context_,
+        ASTPtr query_,
         const String & cluster,
         const String & session_id_,
         const String & table_id_,
         const ColumnsDescription & columns_,
-        ASTPtr hash_expr_list_
-    );
+        ASTPtr hash_expr_list_);
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
+    ASTPtr query;
     String cluster;
     String session_id;
     String table_id;
     ASTPtr hash_expr_list;
 };
 
-class StorageShuffleJoinPart : public shared_ptr_helper<StorageShuffleJoin>, public IStorage, WithContext
+class StorageShuffleJoinPart : public shared_ptr_helper<StorageShuffleJoinPart>, public IStorage, WithContext
 {
 public:
     String getName() const override { return "StorageShuffleJoinPart"; }
@@ -60,19 +61,21 @@ public:
         const StorageMetadataPtr & storage_metadata,
         ContextPtr context
     ) override;
-protected:
-    explicit StorageShuffleJoinPart(
+
+    StorageShuffleJoinPart(
         ContextPtr context_,
+        ASTPtr query_,
         const String & session_id_,
         const String & table_id_,
         const ColumnsDescription & columns_
     );
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinPart");
+    ASTPtr query;
     String session_id;
     String table_id;
 };
 
 
-void testSinker(ContextPtr context);
+//void testSinker(ContextPtr context);
 }

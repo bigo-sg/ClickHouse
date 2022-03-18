@@ -17,6 +17,7 @@
 #include <Parsers/ASTSetQuery.h>
 #include <Parsers/ASTShowProcesslistQuery.h>
 #include <Parsers/ASTShowTablesQuery.h>
+#include <Parsers/ASTShufflePhasesSelectQuery.h>
 #include <Parsers/ASTUseQuery.h>
 #include <Parsers/ASTWatchQuery.h>
 #include <Parsers/MySQL/ASTCreateQuery.h>
@@ -35,6 +36,7 @@
 #include <Parsers/Access/ASTShowCreateAccessEntityQuery.h>
 #include <Parsers/Access/ASTShowGrantsQuery.h>
 #include <Parsers/Access/ASTShowPrivilegesQuery.h>
+#include <Parsers/ASTShufflePhasesSelectQuery.h>
 
 #include <Interpreters/Context.h>
 #include <Interpreters/InterpreterAlterQuery.h>
@@ -61,6 +63,7 @@
 #include <Interpreters/InterpreterShowCreateQuery.h>
 #include <Interpreters/InterpreterShowProcesslistQuery.h>
 #include <Interpreters/InterpreterShowTablesQuery.h>
+#include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
 #include <Interpreters/InterpreterSystemQuery.h>
 #include <Interpreters/InterpreterUseQuery.h>
 #include <Interpreters/InterpreterWatchQuery.h>
@@ -259,6 +262,10 @@ std::unique_ptr<IInterpreter> InterpreterFactory::get(ASTPtr & query, ContextMut
     else if (query->as<ASTShowCreateAccessEntityQuery>())
     {
         return std::make_unique<InterpreterShowCreateAccessEntityQuery>(query, context);
+    }
+    else if (query->as<ASTShufflePhasesSelectQuery>())
+    {
+        return std::make_unique<InterpreterShufflePhasesSelectQuery>(query, context, options);
     }
     else if (query->as<ASTShowGrantsQuery>())
     {

@@ -98,8 +98,15 @@ public:
         , hash_expr_list(hash_expr_list_)
     {
     }
+    ~StorageShuffleJoinSink() override
+    {
+        for (auto & inserter : node_inserters)
+        {
+            inserter->onFinish();
+        }
+    }
     String getName() const override { return "StorageShuffleJoinSink"; }
-//protected:
+protected:
     // split the block into multi blocks, and send to different nodes
     void consume(Chunk chunk) override
     {
@@ -172,7 +179,7 @@ private:
                 "StorageShuffleJoinSink",
                 node.compression,
                 node.secure);
-            #if 0
+            #if 1
             auto inserter = std::make_shared<RemoteInserter>(
                 *connection,
                 ConnectionTimeouts{30000, 30000, 30000},
@@ -297,12 +304,18 @@ private:
             }
         } 
     }
-    void sendBlocks(std::vector<Block> & /*blocks*/)
+    void sendBlocks(std::vector<Block> & blocks)
     {
-
+        for(size_t i = 0; i < blocks.size(); ++i)
+        {
+            auto & block = blocks[i];
+            auto & inserter = node_inserters[i];
+            inserter->write(block);
+        }
     }
 };
 
+#if 0
 void testSinker(ContextPtr context)
 {
     String names_and_types_str = "columns format version: 1\n2 columns:\n`a` Int32\n`b` Int32\n";
@@ -325,14 +338,17 @@ void testSinker(ContextPtr context)
     block.insert({dt->createColumnConst(5, Field(Int32(1))), dt, "a"});
     block.insert({dt->createColumnConst(5, Field(Int32(2))), dt, "b"});
     chunk.setColumns(block.getColumns(), 5);
+    // make consume public
     sinker.consume(std::move(chunk));
 }
+#endif
 
 /**
  * FIXEDME: Maybe need the initiator pass the cluster nodes, not query by the worker nodes. Since the cluster nodes set may change
  */
 StorageShuffleJoin::StorageShuffleJoin(
     ContextPtr context_,
+    ASTPtr query_,
     const String & cluster_,
     const String & session_id_,
     const String & table_id_,
@@ -340,6 +356,7 @@ StorageShuffleJoin::StorageShuffleJoin(
     ASTPtr hash_expr_list_)
     : IStorage(StorageID(session_id_, table_id_))
     , WithContext(context_)
+    , query(query_)
     , cluster(cluster_)
     , session_id(session_id_)
     , table_id(table_id_)
@@ -399,9 +416,10 @@ private:
 
 
 StorageShuffleJoinPart::StorageShuffleJoinPart(
-    ContextPtr context_, const String & session_id_, const String & table_id_, const ColumnsDescription & columns_)
+    ContextPtr context_, ASTPtr query_, const String & session_id_, const String & table_id_, const ColumnsDescription & columns_)
     : IStorage(StorageID(session_id_, table_id_ + "_part"))
     , WithContext(context_)
+    , query(query_)
     , session_id(session_id_)
     , table_id(table_id_)
 {

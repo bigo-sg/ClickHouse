@@ -757,10 +757,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     inserter.write(write_block);
                     inserter.onFinish();
 #endif
-#if 1
-                   testSinker(context);
-
-#endif
+                   //testSinker(context);
                 }
             }
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
