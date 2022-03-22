@@ -51,28 +51,26 @@ public:
         tryInitialize();
         if (unlikely(!table_storage))
         {
-            LOG_TRACE(logger, "{}-{} is not found.", session_id, table_id);
+            LOG_INFO(logger, "{}.{} is not found.", session_id, table_id);
             return {};
         }
-        if (unlikely(chunk_iter == chunk_end))
+        if (unlikely(!table_storage->getChunkSizeWithoutMutex()))
         {
             LOG_INFO(
                 logger,
-                "Finished reading table({}-{}). chunks: {}, rows: {}",
+                "Finished reading table({}.{}). chunks: {}, rows: {}",
                 table_storage->getSessionId(),
                 table_storage->getTableId(),
                 table_storage->getChunksNum(),
                 read_rows);
             return {};
         }
-        Chunk res;
-        LOG_TRACE(logger, "{}-{} read rows:{}. ", table_storage->getSessionId(), table_storage->getTableId(), chunk_iter->getNumRows());
-        res.swap(*chunk_iter);
-        chunk_iter++;
+        Chunk res = table_storage->popChunkWithoutMutex();
+        LOG_TRACE(logger, "{}.{} read rows:{}. ", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows());
         read_rows += res.getNumRows();
         if (!res.getNumRows())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "The chunk should not be empty. table {}.{}", session_id, table_id);
-        LOG_TRACE(logger, "{}-{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
+        LOG_TRACE(logger, "{}.{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
         return res;
     }
 private:
@@ -81,8 +79,6 @@ private:
     String session_id;
     String table_id;
     TableHashedBlocksStoragePtr table_storage;
-    TableHashedBlocksStorage::ChunkIterator chunk_iter;
-    TableHashedBlocksStorage::ChunkIterator chunk_end;
     size_t read_rows = 0;
 
     void tryInitialize()
@@ -97,8 +93,6 @@ private:
             if (table_storage)
             {
                 table_storage->getMutex().lock();
-                chunk_iter = table_storage->getChunksBegin();
-                chunk_end = table_storage->getChunksEnd();
             }
             else
             {

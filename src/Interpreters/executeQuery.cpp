@@ -71,7 +71,6 @@
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
 
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Interpreters/Cluster.h>
 #include <QueryPipeline/RemoteInserter.h>
 #include <TableFunctions/parseColumnsListForTableFunction.h>

@@ -5,7 +5,6 @@
 #include <Interpreters/DatabaseAndTableWithAlias.h>
 #include <Interpreters/InDepthNodeVisitor.h>
 #include <Interpreters/JoinedTables.h>
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
@@ -41,7 +40,6 @@ public:
 
     std::shared_ptr<ASTInsertQuery> createSubJoinTable(const Strings & table_id, std::shared_ptr<ASTTableExpression> table_expression, UInt32 left_or_right);
 private:
-    friend class TreeDistributedShuffleJoinRewriteMatcher;
     JoinedTables joined_tables;
     std::shared_ptr<ASTSelectQuery> query;
     size_t assigned_id;
