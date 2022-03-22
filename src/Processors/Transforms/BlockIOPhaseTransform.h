@@ -6,6 +6,8 @@
 #include <QueryPipeline/Pipe.h>
 #include <Processors/ISource.h>
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
+#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Poco/Logger.h>
 namespace DB
 {
 class SourceBlockIOPhaseTransform : public ISource
@@ -17,7 +19,10 @@ public:
 private:
     std::shared_ptr<BlockIO> block_io;
     bool run_finished;
-    std::unique_ptr<PullingAsyncPipelineExecutor> pulling_exetuor;
+    bool is_pulling_pipeline = false;
+    bool is_completed_pipeline = false;
+    std::unique_ptr<PullingAsyncPipelineExecutor> pulling_executor;
+    Poco::Logger * logger = &Poco::Logger::get("SourceBlockIOPhaseTransform");
 };
 
 class WaitBlockIOPhaseFinishedTransform : public IProcessor
@@ -29,6 +34,7 @@ public:
     void work() override;
 private:
     std::list<InputPort*> running_inputs;
+    Poco::Logger * logger = &Poco::Logger::get("WaitBlockIOPhaseFinishedTransform");
 };
 
 class SignalBlockIOPhaseFinishedTransform : public IProcessor
@@ -40,6 +46,8 @@ public:
     void work() override;
 
     static OutputPorts makeOutputPorts(const Block & header, size_t down_stream_size);
+private:
+    Poco::Logger * logger = &Poco::Logger::get("SignalBlockIOPhaseFinishedTransform");
 };
 
 
@@ -55,6 +63,9 @@ private:
     bool has_output = false;
     bool has_input = false;
     std::shared_ptr<BlockIO> block_io;
-    std::unique_ptr<PullingAsyncPipelineExecutor> pulling_exetuor;
+    bool is_pulling_pipeline = false;
+    bool is_completed_pipeline = false;
+    std::unique_ptr<PullingAsyncPipelineExecutor> pulling_executor;
+    Poco::Logger * logger = &Poco::Logger::get("BlockIOPhaseTransform");
 };
 }

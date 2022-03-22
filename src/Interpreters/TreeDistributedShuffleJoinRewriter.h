@@ -39,7 +39,7 @@ public:
         return tables_hash_keys_list[idx];
     }
 
-    std::shared_ptr<ASTInsertQuery> createSubJoinTable(const Strings & table_id, std::shared_ptr<ASTTableExpression> table_expression);
+    std::shared_ptr<ASTInsertQuery> createSubJoinTable(const Strings & table_id, std::shared_ptr<ASTTableExpression> table_expression, UInt32 left_or_right);
 private:
     friend class TreeDistributedShuffleJoinRewriteMatcher;
     JoinedTables joined_tables;
@@ -61,6 +61,7 @@ private:
     bool collectHashKeysList();
     bool collectHashKeysListOnEqual(ASTPtr ast, ASTs & keys_list);
     bool collectHashKeysListOnAnd(ASTPtr ast, ASTs & keys_list);
+    //void rewriteHashKeysIdentifier(ASTPtr ast, const TableWithColum);
 
     ASTPtr createNewJoinSelectQuery(ASTPtr & left_query, ASTPtr & right_query);
     ASTPtr createLeftTableQuery(const String & hash_table_id);

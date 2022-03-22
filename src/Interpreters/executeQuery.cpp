@@ -82,7 +82,10 @@
 #include <Parsers/DumpASTNode.h>
 
 #include <Storages/DistributedShuffleJoin/StorageShuffleJoin.h>
-
+#include <Interpreters/TreeShufflePhasesSelectQueryRewriter.h>
+#include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
+#include <Processors/Executors/PullingAsyncPipelineExecutor.h>
+#include <Processors/Executors/PullingPipelineExecutor.h>
 namespace ProfileEvents
 {
     extern const Event QueryMaskingRulesMatch;
@@ -441,8 +444,10 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
     {
         ParserQuery parser(end);
 
+        LOG_TRACE(&Poco::Logger::get("executeQuery"), "to parse query:{}", begin);
         /// TODO: parser should fail early when max_query_size limit is reached.
         ast = parseQuery(parser, begin, end, "", max_query_size, settings.max_parser_depth);
+        LOG_TRACE(&Poco::Logger::get("executeQuery"), "finished ast parsing:{}", queryToString(ast));
 
         /// Interpret SETTINGS clauses as early as possible (before invoking the corresponding interpreter),
         /// to allow settings to take effect.
@@ -659,6 +664,24 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 }
                 if (!context->getSettings().distributed_shuffle_join_cluster.value.empty())
                 {
+                    TreeShufflePhasesSelectQueryRewriterMatcher::Data data;
+                    data.context = context;
+                    auto new_ast = ast->clone();
+                    TreeShufflePhasesSelectQueryRewriterVistor(data).visit(new_ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "rewrite ast:\n{}", queryToString(data.rewritten_query));
+                    ast = data.rewritten_query;
+#if 0               
+                    InterpreterShufflePhasesSelectQuery minterpreter(data.rewritten_query, context, SelectQueryOptions(stage).setInternal(internal));
+                    BlockIO block_io = minterpreter.execute();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "block_io: pulling={}", block_io.pipeline.pulling());
+                    PullingAsyncPipelineExecutor pulling_executor(block_io.pipeline);
+                    Block test_block;
+                    while(pulling_executor.pull(test_block))
+                    {
+                        LOG_TRACE(&Poco::Logger::get("executeQuery"), "{} block size:{}, {}, names:{}", reinterpret_cast<UInt64>(&pulling_executor), test_block.rows(), test_block.columns(), test_block.dumpNames());
+                    }
+#endif                  
+#if 0
                     TreeDistributedShuffleJoinRewriteMatcher::Data data;
                     data.context = context;
                     auto new_ast = ast->clone();
@@ -682,6 +705,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                         settings.max_parser_depth);
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "expr list:{}", queryToString(fun_ast));
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "expr column name: {}", fun_ast->children[0]->getColumnName());
+#endif
 #if 0
                     DebugASTLog<true> log;
                     String names_and_types_str = "columns format version: 1\n2 columns:\n`a` Int32\n`b` Int32\n";
@@ -816,8 +840,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
         /// Hold element of process list till end of query execution.
         res.process_list_entry = process_list_entry;
-
         auto & pipeline = res.pipeline;
+        if (pipeline.pulling())
+            LOG_TRACE(&Poco::Logger::get("executeQuery"), "interpreter res header:{}", res.pipeline.getHeader().dumpNames());
 
         if (pipeline.pulling() || pipeline.completed())
         {

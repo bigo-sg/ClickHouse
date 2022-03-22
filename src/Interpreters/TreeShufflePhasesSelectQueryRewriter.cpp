@@ -152,8 +152,8 @@ ASTPtr TreeShufflePhasesSelectQueryRewriterMatcher::visitSelectWithJoin(std::sha
     auto left_table_id = rewriter.getHashTableId("left");
     auto right_table_id = rewriter.getHashTableId("right");
     
-    auto left_insert_query = rewriter.createSubJoinTable(left_table_id, new_left_table_expression);
-    auto right_insert_query = rewriter.createSubJoinTable(right_table_id, new_right_table_expression);
+    auto left_insert_query = rewriter.createSubJoinTable(left_table_id, new_left_table_expression, 0);
+    auto right_insert_query = rewriter.createSubJoinTable(right_table_id, new_right_table_expression, 1);
     auto new_query = rewriter.createNewJoinSelectQuery(left_table_id, right_table_id);
     
     auto & left_phase = data_.shuffle_phases[left_frame_index];

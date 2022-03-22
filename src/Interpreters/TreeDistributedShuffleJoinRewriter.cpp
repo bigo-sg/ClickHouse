@@ -20,6 +20,7 @@
 #include <base/logger_useful.h>
 #include <Poco/Logger.h>
 #include <Common/ErrorCodes.h>
+#include "Parsers/IAST_fwd.h"
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
@@ -208,6 +209,55 @@ bool TreeDistributedShuffleJoinRewriter::collectHashKeysList()
     return true;
 }
 
+class IdentifierShorNameRewriter
+{
+public:
+    explicit IdentifierShorNameRewriter(const ASTPtr & ast) : original_ast(ast->clone())
+    {}
+
+    ASTPtr rewrite()
+    {
+        return rewrite(original_ast);
+    }
+
+private:
+    ASTPtr original_ast;
+
+    ASTPtr static rewrite(ASTPtr ast)
+    {
+        ASTPtr result;
+        if(auto function = std::dynamic_pointer_cast<ASTFunction>(ast))
+        {
+            result = rewrite(function);
+        }
+        else if (auto literal = std::dynamic_pointer_cast<ASTLiteral>(ast))
+        {
+            result = ast;
+        }
+        else if (auto identifier = std::dynamic_pointer_cast<ASTIdentifier>(ast))
+        {
+            result = std::make_shared<ASTIdentifier>(identifier->shortName());
+        }
+        else {
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Invalid ast:{}", queryToString(ast));
+        }
+
+        return result;
+    }
+    static ASTPtr rewrite(std::shared_ptr<ASTFunction> function_)
+    {
+        std::shared_ptr<ASTFunction> final_function = std::make_shared<ASTFunction>();
+        final_function->name = function_->name;
+        final_function->arguments = std::make_shared<ASTExpressionList>();
+        final_function->children.push_back(final_function->arguments);
+        for (auto & child : function_->arguments->children)
+        {
+            final_function->arguments->children.push_back(rewrite(child));
+        }
+        return final_function;
+    }
+};
+
 bool TreeDistributedShuffleJoinRewriter::collectHashKeysListOnEqual(ASTPtr ast, ASTs & keys_list)
 {
     auto * func = ast->as<ASTFunction>();
@@ -253,6 +303,10 @@ bool TreeDistributedShuffleJoinRewriter::collectHashKeysListOnEqual(ASTPtr ast, 
         LOG_INFO(&Poco::Logger::get("TreeDistributedShuffleJoinRewriter"), "Invalid join condition: {}", queryToString(ast));
         return false;
     }
+    IdentifierShorNameRewriter left_key_writer(left_key);
+    left_key = left_key_writer.rewrite();
+    IdentifierShorNameRewriter right_key_writer(right_key);
+    right_key = right_key_writer.rewrite();
     keys_list[0]->children.push_back(left_key);
     keys_list[1]->children.push_back(right_key);
     return true;
@@ -448,12 +502,14 @@ ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const Strin
     auto table_func = std::make_shared<ASTFunction>();
     table_func->name = TABLE_FUNCTION_HASHED_CHUNK_STORAGE;
     table_func->arguments = std::make_shared<ASTExpressionList>();
+    table_func->children.push_back(table_func->arguments );
 
     String cluster_name = getContext()->getSettings().distributed_shuffle_join_cluster.value;
     Field cluster_name_field(cluster_name);
     table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(cluster_name_field));
   
     Field session_id(table_id[0]);
+    //Field session_id("test_session");
     table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(session_id));
     Field id(table_id[1]);
     table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(id));
@@ -475,7 +531,7 @@ ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const Strin
     return table_func;
 }
 
-std::shared_ptr<ASTInsertQuery> TreeDistributedShuffleJoinRewriter::createSubJoinTable(const Strings & table_id, std::shared_ptr<ASTTableExpression> table_expression)
+std::shared_ptr<ASTInsertQuery> TreeDistributedShuffleJoinRewriter::createSubJoinTable(const Strings & table_id, std::shared_ptr<ASTTableExpression> table_expression, UInt32 left_or_right)
 {
     auto select_query = std::make_shared<ASTSelectQuery>();
 
@@ -487,7 +543,7 @@ std::shared_ptr<ASTInsertQuery> TreeDistributedShuffleJoinRewriter::createSubJoi
     tables_in_select->children.push_back(table_element);
 
     auto select_expression = std::make_shared<ASTExpressionList>();
-    for (const auto & name_and_type : tables_columns[0])
+    for (const auto & name_and_type : tables_columns[left_or_right])
     {
         auto ident = std::make_shared<ASTIdentifier>(name_and_type.name);
         select_expression->children.push_back(ident);
@@ -502,11 +558,11 @@ std::shared_ptr<ASTInsertQuery> TreeDistributedShuffleJoinRewriter::createSubJoi
     select_with_union_query->children.push_back(list_of_selects);
     select_with_union_query->list_of_selects = list_of_selects;
 
-    auto hash_table = createHashTableExpression(table_id, tables_columns[0], tables_hash_keys_list[0]);
+    auto hash_table = createHashTableExpression(table_id, tables_columns[left_or_right], tables_hash_keys_list[left_or_right]);
     auto insert_query = std::make_shared<ASTInsertQuery>();
     insert_query->table_function = hash_table;
     insert_query->select = select_with_union_query;
-    LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriter"), "new left insert  query: {}", queryToString(insert_query));
+    LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriter"), "new sub insert  query: {}", queryToString(insert_query));
 
     return insert_query;
 }
@@ -600,8 +656,8 @@ ASTPtr TreeDistributedShuffleJoinRewriteMatcher::visitSelectWithJoin(std::shared
     auto left_table_id = rewriter.getHashTableId("left");
     auto right_table_id = rewriter.getHashTableId("right");
     
-    auto left_insert_query = rewriter.createSubJoinTable(left_table_id, new_left_table_expression);
-    auto right_insert_query = rewriter.createSubJoinTable(right_table_id, new_right_table_expression);
+    auto left_insert_query = rewriter.createSubJoinTable(left_table_id, new_left_table_expression, 0);
+    auto right_insert_query = rewriter.createSubJoinTable(right_table_id, new_right_table_expression, 1);
     auto new_query = rewriter.createNewJoinSelectQuery(left_table_id, right_table_id);
 
     auto shuffle_join_query = std::make_shared<ASTDistributedShuffleJoinSelectQuery>();

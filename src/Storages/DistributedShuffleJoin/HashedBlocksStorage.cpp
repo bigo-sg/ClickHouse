@@ -29,6 +29,7 @@ TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getOrSetTable(cons
     auto iter = tables.find(table_id_);
     if (iter == tables.end())
     {
+        LOG_TRACE(logger, "create new blocks table:{}-{}", session_id, table_id_);
         auto table = std::make_shared<TableStorage>(session_id, table_id_, header_);
         tables[table_id_] = table;
         return table;
@@ -74,6 +75,7 @@ SessionHashedBlocksTablesStoragePtr HashedBlocksStorage::getOrSetSession(const S
     auto iter = sessions.find(session_id_);
     if (iter == sessions.end())
     {
+        LOG_TRACE(logger, "create new session:{}", session_id_);
         auto session = std::make_shared<SessionStorage>(session_id_);
         sessions[session_id_] = session;
         return session;
