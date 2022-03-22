@@ -71,37 +71,4 @@ private:
 
 };
 
-class TreeDistributedShuffleJoinRewriteMatcher
-{
-public:
-    using Visitor = InDepthNodeVisitor<TreeDistributedShuffleJoinRewriteMatcher, true>;
-    struct VisitFrame
-    {
-
-    };
-    struct Data
-    {
-        ContextPtr context;
-        ASTPtr rewritten_query;
-        //std::shared_ptr<ASTDistributedShuffleJoinSelectQuery> stage_query;
-        size_t id_count = 0;
-    };
-
-    static void visit(ASTPtr & ast_, Data & data_);
-
-    static bool needChildVisit(ASTPtr &, const ASTPtr &)
-    {
-        return false;
-    }
-
-private:
-    static ASTPtr visit(std::shared_ptr<ASTSelectQuery> & query_, Data & data_);
-    static ASTPtr visit(std::shared_ptr<ASTSelectWithUnionQuery> & query_, Data & data_);
-    static ASTPtr visitChild(ASTPtr & query_, Data & data_);
-    static ASTPtr visitSelectWithJoin(std::shared_ptr<ASTSelectQuery> & query_, Data & data_);
-
-    static std::shared_ptr<ASTTableExpression> visitJoinSelectTableExpression(const ASTTableExpression * table_expression, Data & data);
-};
-
-using TreeDistributedShuffleJoinRewriteVisitor = TreeDistributedShuffleJoinRewriteMatcher::Visitor;
 }
