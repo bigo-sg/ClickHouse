@@ -20,5 +20,7 @@ private:
     Poco::Logger * logger = &Poco::Logger::get("BlockIOPhaseStep");
     std::shared_ptr<BlockIO> select_block_io;
     std::vector<std::vector<std::shared_ptr<BlockIO>>> shuffle_block_ios;
+
+    size_t getNextBlockIOInputsSize(size_t shuffle_block_io_index);
 };  
 }

@@ -6,7 +6,6 @@
 #include <Interpreters/InDepthNodeVisitor.h>
 #include <Interpreters/JoinedTables.h>
 #include <Interpreters/InDepthNodeVisitor.h>
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>

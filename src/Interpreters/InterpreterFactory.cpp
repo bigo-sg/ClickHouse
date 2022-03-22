@@ -3,7 +3,6 @@
 #include <Parsers/ASTCheckQuery.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTCreateFunctionQuery.h>
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTDropFunctionQuery.h>
 #include <Parsers/ASTDropQuery.h>
 #include <Parsers/ASTExplainQuery.h>
@@ -45,7 +44,6 @@
 #include <Interpreters/InterpreterCreateFunctionQuery.h>
 #include <Interpreters/InterpreterCreateQuery.h>
 #include <Interpreters/InterpreterDescribeQuery.h>
-#include <Interpreters/InterpreterDistributedShuffleJoinSelectQuery.h>
 #include <Interpreters/InterpreterDropFunctionQuery.h>
 #include <Interpreters/InterpreterDropQuery.h>
 #include <Interpreters/InterpreterExistsQuery.h>
@@ -298,10 +296,6 @@ std::unique_ptr<IInterpreter> InterpreterFactory::get(ASTPtr & query, ContextMut
     else if (query->as<ASTBackupQuery>())
     {
         return std::make_unique<InterpreterBackupQuery>(query, context);
-    }
-    else if (query->as<ASTDistributedShuffleJoinSelectQuery>())
-    {
-        return std::make_unique<InterpreterDistributedShuffleJoinSelectQuery>(query, context, options);
     }
     else
     {

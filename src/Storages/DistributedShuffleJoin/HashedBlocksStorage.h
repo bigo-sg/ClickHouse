@@ -41,7 +41,7 @@ public:
     // TODO : Should make merge action to reduce small size chunks?
     void addChunk(Chunk && chunk)
     {
-        if (chunk)
+        if (likely(chunk))
         {
             LOG_TRACE(logger, "{}.{} add chunk. rows:{}", session_id, table_id, chunk.getNumRows());
             std::lock_guard lock(mutex);
@@ -57,6 +57,13 @@ public:
     {
         return chunks.end();
     }
+
+    inline size_t getChunkSizeWithoutMutex()
+    {
+        return chunks.size();
+    }
+
+    Chunk popChunkWithoutMutex();
 
     std::mutex & getMutex()
     {

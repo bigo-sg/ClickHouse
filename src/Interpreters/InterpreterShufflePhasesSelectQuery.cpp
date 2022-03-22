@@ -1,11 +1,9 @@
 #include <memory>
-#include <Interpreters/InterpreterDistributedShuffleJoinSelectQuery.h>
 #include <Interpreters/InterpreterFactory.h>
 #include <Interpreters/InterpreterInsertQuery.h>
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTShufflePhasesSelectQuery.h>

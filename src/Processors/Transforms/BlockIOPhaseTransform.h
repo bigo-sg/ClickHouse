@@ -25,32 +25,6 @@ private:
     Poco::Logger * logger = &Poco::Logger::get("SourceBlockIOPhaseTransform");
 };
 
-class WaitBlockIOPhaseFinishedTransform : public IProcessor
-{
-public:
-    explicit WaitBlockIOPhaseFinishedTransform(InputPorts input_ports);
-    String getName() const override { return "WaitBlockIOPhaseFinishedTransform"; }
-    Status prepare() override;
-    void work() override;
-private:
-    std::list<InputPort*> running_inputs;
-    Poco::Logger * logger = &Poco::Logger::get("WaitBlockIOPhaseFinishedTransform");
-};
-
-class SignalBlockIOPhaseFinishedTransform : public IProcessor
-{
-public:
-    explicit SignalBlockIOPhaseFinishedTransform(const Block & header, size_t down_stream_size);
-    String getName() const override { return "SignalBlockIOPhaseFinishedTransform"; }
-    Status prepare() override;
-    void work() override;
-
-    static OutputPorts makeOutputPorts(const Block & header, size_t down_stream_size);
-private:
-    Poco::Logger * logger = &Poco::Logger::get("SignalBlockIOPhaseFinishedTransform");
-};
-
-
 class BlockIOPhaseTransform : public IProcessor
 {
 public:

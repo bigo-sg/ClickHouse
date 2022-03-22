@@ -9,6 +9,19 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
+    extern const int LOGICAL_ERROR;
+}
+
+Chunk TableHashedBlocksStorage::popChunkWithoutMutex()
+{
+    if (unlikely(chunks.empty()))
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "table({}.{}) has empty chunks", session_id, table_id);
+    }
+    Chunk res;
+    res.swap(chunks.front());
+    chunks.pop_front();
+    return res;
 }
 
 TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getTable(const String & table_id_) const

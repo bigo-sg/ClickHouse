@@ -11,7 +11,6 @@
 #include <Interpreters/TreeDistributedShuffleJoinRewriter.h>
 #include <Interpreters/getTableExpressions.h>
 #include <Parsers/ASTFunction.h>
-#include <Parsers/ASTDistributedShuffleJoinSelectQuery.h>
 #include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
