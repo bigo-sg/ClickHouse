@@ -129,8 +129,8 @@ ASTPtr TreeShufflePhasesSelectQueryRewriterMatcher::visitChild(ASTPtr & query_, 
     }
     if (!new_query)
     {
-        //throw Exception(ErrorCodes::LOGICAL_ERROR, "Rewrite ast failed. {}", queryToString(query_));
-        LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriteMatcher"), "Rewrite ast failed. {}", queryToString(query_));
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Rewrite ast failed. {}", queryToString(query_));
+        //LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriteMatcher"), "Rewrite ast failed. {}", queryToString(query_));
     }
     return new_query;
 }
