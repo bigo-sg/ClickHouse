@@ -16,6 +16,7 @@
 #include <base/logger_useful.h>
 #include <Poco/Logger.h>
 #include <Common/ErrorCodes.h>
+#include "Core/QueryProcessingStage.h"
 #include "Interpreters/Context.h"
 #include "Parsers/queryToString.h"
 #include "QueryPipeline/QueryPipelineBuilder.h"
@@ -92,7 +93,7 @@ void InterpreterShufflePhasesSelectQuery::buildQueryPlan(QueryPlan & query_plan)
     }
     BlockIOPtr select_block_io = buildSelectPhaseBlockIO(shuffle_phases_select_query->final_query);
     DataStream input_stream = {.header = select_block_io->pipeline.getHeader()};
-    query_plan.addStep(std::make_unique<BlockIOPhaseStep>(input_stream, select_block_io, shuffle_block_ios));
+    query_plan.addStep(std::make_unique<BlockIOPhaseStep>(select_block_io, shuffle_block_ios));
 }
 
 BlockIOPtr InterpreterShufflePhasesSelectQuery::buildShufflePhaseBlockIO(ASTPtr query)
@@ -160,8 +161,8 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr q
     }
 #if 0
     auto select_interpreter = std::make_shared<InterpreterSelectWithUnionQuery>(query, context, options);
-    auto block_io = std::make_shared<BlockIO>();
-    return block_io;
+    auto block_io = select_interpreter->execute();
+    return std::make_shared<BlockIO>(std::move(block_io));
 #else
     auto cluster = context->getCluster(context->getSettings().distributed_shuffle_join_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
     Pipes pipes;
@@ -192,7 +193,7 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr q
                 nullptr,
                 scalars,
                 Tables(),
-                QueryProcessingStage::FetchColumns,
+                QueryProcessingStage::Complete,
                 RemoteQueryExecutor::Extension{});
             pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, false, false));
         }

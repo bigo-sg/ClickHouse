@@ -7,7 +7,10 @@
 #include <vector>
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
+#include <Common/Exception.h>
 #include <Common/ErrorCodes.h>
+#include <Processors/QueryPlan/IQueryPlanStep.h>
+#include <base/logger_useful.h>
 
 namespace DB
 {
@@ -15,6 +18,7 @@ namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
 }
+/*
 static ITransformingStep::Traits getTraits()
 {
     return ITransformingStep::Traits
@@ -30,21 +34,26 @@ static ITransformingStep::Traits getTraits()
         }
     };
 }
-BlockIOPhaseStep::BlockIOPhaseStep(const DataStream & input_stream, std::shared_ptr<BlockIO> select_block_io_, std::vector<std::vector<std::shared_ptr<BlockIO>>> & shuffle_block_ios_)
-    : ITransformingStep(input_stream, input_stream.header, getTraits())
-    , select_block_io(select_block_io_)
+*/
+BlockIOPhaseStep::BlockIOPhaseStep(std::shared_ptr<BlockIO> select_block_io_, std::vector<std::vector<std::shared_ptr<BlockIO>>> & shuffle_block_ios_)
+    : select_block_io(select_block_io_)
     , shuffle_block_ios(shuffle_block_ios_)
 {
-
+    LOG_TRACE(logger, "select block io header:{}", select_block_io->pipeline.getHeader().dumpNames());
 }
 
-void BlockIOPhaseStep::transformPipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings & /*settings*/)
+QueryPipelineBuilderPtr BlockIOPhaseStep::updatePipeline(QueryPipelineBuilders pipelines, const BuildQueryPipelineSettings & /*settings*/)
 {
-
+    if (!pipelines.empty())
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Input pipelines should be empty");
+    }
+    auto pipeline_ptr = std::make_unique<QueryPipelineBuilder>();
+    QueryPipelineBuilder & pipeline = *pipeline_ptr;
     auto source_tranform_builder = [&](OutputPortRawPtrs ports, const std::vector<std::shared_ptr<BlockIO>> & block_ios) -> Processors
     {
         if (!ports.empty())
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Output ports should be empty");
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Output ports should be empty. size:{}", ports.size());
 
         Processors processors;
         Processors upstream_processors;
@@ -52,7 +61,7 @@ void BlockIOPhaseStep::transformPipeline(QueryPipelineBuilder & pipeline, const 
         {
             upstream_processors.emplace_back(std::make_shared<SourceBlockIOPhaseTransform>(block_io));
         }
-        processors.emplace_back(upstream_processors.begin(), upstream_processors.end());
+        processors.insert(processors.end(), upstream_processors.begin(), upstream_processors.end());
 
         InputPorts inputs;
         std::vector<OutputPort*> outputs;
@@ -76,7 +85,11 @@ void BlockIOPhaseStep::transformPipeline(QueryPipelineBuilder & pipeline, const 
         }
         return processors;
     };
-    pipeline.transform([&](OutputPortRawPtrs ports) { return source_tranform_builder(ports, shuffle_block_ios[0]); });
+    OutputPortRawPtrs output_ports;
+    LOG_TRACE(logger, "output_ports size:{}", output_ports.size());
+    Pipe source_pipe(source_tranform_builder(output_ports, shuffle_block_ios[0]));
+    pipeline.init(std::move(source_pipe));
+    //pipeline.transform([&](OutputPortRawPtrs ports) { return source_tranform_builder(ports, shuffle_block_ios[0]); });
 
     auto block_io_transform_builder = [&](OutputPortRawPtrs ports, const std::vector<std::shared_ptr<BlockIO>> & block_ios) -> Processors
     {
@@ -98,14 +111,14 @@ void BlockIOPhaseStep::transformPipeline(QueryPipelineBuilder & pipeline, const 
             ouput_port_iter++;
             unit_processors.emplace_back(block_io_transform);
         }
-        processors.emplace_back(unit_processors.begin(), unit_processors.end());
+        processors.insert(processors.end(), unit_processors.begin(), unit_processors.end());
 
         InputPorts inputs;
         std::vector<OutputPort*> outputs;
         for (auto & processor : unit_processors)
         {
             auto & processor_outputs = processor->getOutputs();
-            for (const auto & output : processor_outputs)
+            for (auto & output : processor_outputs)
             {
                 inputs.emplace_back(InputPort{output.getHeader()});
                 outputs.emplace_back(&output);
@@ -140,5 +153,6 @@ void BlockIOPhaseStep::transformPipeline(QueryPipelineBuilder & pipeline, const 
         return processors;
     };
     pipeline.transform(select_block_io_transform);
+    return pipeline_ptr;
 }
 }

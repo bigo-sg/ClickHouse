@@ -66,7 +66,7 @@ void TableFunctionShuffleJoin::parseArguments(const ASTPtr & ast_function_, Cont
         "- cluster_name, session_id, table_id, table structure descrition, hash key expression list",
         getName());
     
-    if (args.size() != 3)
+    if (args.size() != 5)
         throw Exception(ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH, usage_message);
     
     for (auto & arg : args)

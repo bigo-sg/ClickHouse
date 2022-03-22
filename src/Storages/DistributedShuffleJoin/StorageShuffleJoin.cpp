@@ -17,6 +17,8 @@
 #include <base/logger_useful.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Columns/FilterDescription.h>
+#include "Common/Exception.h"
+#include "base/defines.h"
 
 namespace DB
 {
@@ -30,17 +32,9 @@ public:
     StorageShuffleJoinSource(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_)
         : SourceWithProgress(header_)
         , WithContext(context_)
+        , session_id(session_id_)
+        , table_id(table_id_)
     {
-        auto session_storage = HashedBlocksStorage::getInstance().getSession(session_id_);
-        if (session_storage)
-        {
-            table_storage = session_storage->getTable(table_id_);
-            if (table_storage)
-            {
-                table_storage->getMutex().lock();
-                chunk_iter = table_storage->getChunksBegin();
-            }
-        }
     }
 
     ~StorageShuffleJoinSource() override
@@ -54,8 +48,10 @@ public:
     String getName() const override { return "StorageShuffleJoinSource"; }
     Chunk generate() override
     {
+        tryInitialize();
         if (unlikely(!table_storage))
         {
+            LOG_TRACE(logger, "{}-{} is not found.", session_id, table_id);
             return {};
         }
         if (unlikely(chunk_iter == chunk_end))
@@ -70,16 +66,51 @@ public:
             return {};
         }
         Chunk res;
+        LOG_TRACE(logger, "{}-{} read rows:{}. ", table_storage->getSessionId(), table_storage->getTableId(), chunk_iter->getNumRows());
         res.swap(*chunk_iter);
+        chunk_iter++;
         read_rows += res.getNumRows();
+        if (!res.getNumRows())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "The chunk should not be empty. table {}.{}", session_id, table_id);
+        LOG_TRACE(logger, "{}-{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
         return res;
     }
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinSource");
+    bool has_initialized = false;
+    String session_id;
+    String table_id;
     TableHashedBlocksStoragePtr table_storage;
     TableHashedBlocksStorage::ChunkIterator chunk_iter;
     TableHashedBlocksStorage::ChunkIterator chunk_end;
     size_t read_rows = 0;
+
+    void tryInitialize()
+    {
+        if (likely(has_initialized))
+            return;
+        LOG_TRACE(logger, "initialize table source. {}.{}", session_id, table_id);
+        auto session_storage = HashedBlocksStorage::getInstance().getSession(session_id);
+        if (session_storage)
+        {
+            table_storage = session_storage->getTable(table_id);
+            if (table_storage)
+            {
+                table_storage->getMutex().lock();
+                chunk_iter = table_storage->getChunksBegin();
+                chunk_end = table_storage->getChunksEnd();
+            }
+            else
+            {
+                LOG_TRACE(logger, "Not found table:{}-{}", session_id, table_id);
+            }
+        }
+        else {
+            LOG_TRACE(logger, "Not found session:{}", session_id);
+        }
+        
+        has_initialized = true;
+    }
 };
 
 class StorageShuffleJoinSink : public SinkToStorage
@@ -117,6 +148,7 @@ protected:
         std::vector<Block> splited_blocks;
         auto chunk_columns = chunk.detachColumns();
         Block original_block = getInputPort().getHeader().cloneWithColumns(chunk_columns);
+        LOG_TRACE(logger, "header:{}, block names:{}", getInputPort().getHeader().dumpNames(), original_block.dumpNames());
         splitBlock(original_block, &splited_blocks);
         sendBlocks(splited_blocks);
     }
@@ -133,6 +165,7 @@ private:
     std::mutex init_mutex;
     std::atomic<bool> has_initialized = false;
     std::vector<std::shared_ptr<RemoteInserter>> node_inserters;
+    std::vector<std::shared_ptr<Connection>> node_connections;
     std::shared_ptr<ExpressionActions> hash_expr_cols_actions;
 
     void initOnce()
@@ -159,7 +192,7 @@ private:
                 write_buf << ",";
             write_buf << names[i] << " " << types[i]->getName();
         }
-        insert_sql = fmt::format("insert into dist_hashed_chunks_storage('{}', '{}', '{}')", session_id, table_id, write_buf.str());
+        insert_sql = fmt::format("INSERT INTO FUNCTION dist_hashed_chunks_storage('{}', '{}', '{}') VALUES", session_id, table_id, write_buf.str());
         LOG_TRACE(logger, "insert sql: {}", insert_sql);
 
 
@@ -179,6 +212,7 @@ private:
                 "StorageShuffleJoinSink",
                 node.compression,
                 node.secure);
+            node_connections.emplace_back(connection);
             #if 1
             auto inserter = std::make_shared<RemoteInserter>(
                 *connection,
@@ -207,6 +241,7 @@ private:
             if (i)
                 write_buf << ",";
             write_buf << "cityHash64(" << hash_expr_list_str << ")%" << n << "=" << i;
+            //write_buf << "cityHash64(" << "a" << ")%" << n << "=" << i;
         }
         hash_expr_cols_str = write_buf.str();
         LOG_TRACE(logger, "hash_expr_cols_str: {}", hash_expr_cols_str);
@@ -230,6 +265,7 @@ private:
             names_and_types,
             std::move(actions),
             prepared_sets,
+            //write_buf << "cityHash64(" << hash_expr_list_str << ")%" << n << "=" << i;
             subqueries_for_sets,
             true,
             false,
@@ -261,12 +297,19 @@ private:
     void splitBlock(Block & original_block, std::vector<Block> * splited_blocks)
     {
         size_t num_rows_before_filtration = original_block.rows();
+        LOG_TRACE(logger, "before trans, columns size:{}", original_block.columns());
+        LOG_TRACE(logger, "expression actions:{}", hash_expr_cols_actions->dumpActions());
         hash_expr_cols_actions->execute(original_block, num_rows_before_filtration);
         LOG_TRACE(logger, "after trans, columns size:{}", original_block.columns());
 
         for (const auto & column_name : hash_expr_columns_names)
         {
+            
             auto * column = original_block.findByName(column_name);
+            if (unlikely(!column))
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Not found column ({}) in block({})", column_name, original_block.dumpNames());
+            }
             size_t rows = column->column->size();
             for (size_t i = 0 ; i < rows; ++i)
             {
@@ -280,26 +323,26 @@ private:
             auto full_column = original_block.findByName(filter_column_name)->column->convertToFullColumnIfConst();
             auto filter_desc = std::make_unique<FilterDescription>(*full_column);
             auto num_filtered_rows = filter_desc->countBytesInFilter();
-            LOG_TRACE(logger, "num_filtered_rows:{} @ {}", num_filtered_rows, filter_column_name);
+            LOG_TRACE(logger, "num_filtered_rows:{} @ {} for {}", num_filtered_rows, filter_column_name, table_id);
             ColumnsWithTypeAndName new_columns;
             for (size_t i = 0; i < header.columns(); ++i)
             {
                 auto & from_column = original_block.getByPosition(i);
-                LOG_TRACE(logger, "@{} colums size:{}, filter size:{}", i, from_column.column->size(), filter_desc->data->size());
+                LOG_TRACE(logger, "@{} colums size:{}, filter size:{} for {}", i, from_column.column->size(), filter_desc->data->size(), table_id);
                 auto new_column = filter_desc->filter(*from_column.column, num_filtered_rows);
                 new_columns.emplace_back(new_column, from_column.type, from_column.name);
 
             }
             splited_blocks->emplace_back(new_columns);
             Block & splited_block = splited_blocks->back();
-            LOG_TRACE(logger, "new block cols: {}, rows:{}", splited_block.columns(), splited_block.rows());
+            LOG_TRACE(logger, "new block cols: {}, rows:{} for {}", splited_block.columns(), splited_block.rows(), table_id);
             for (size_t i = 0; i < splited_block.columns(); ++i)
             {
                 auto column = splited_block.getByPosition(i);
                 size_t rows = column.column->size();
                 for (size_t k = 0; k < rows; ++k)
                 {
-                    LOG_TRACE(logger, "column pos:{}, row: {}, value:{}", i, k, column.column->get64(i));
+                    LOG_TRACE(logger, "column pos:{}, row: {}, value:{} for {}", i, k, column.column->get64(i), table_id);
                 }
             }
         } 
@@ -310,7 +353,9 @@ private:
         {
             auto & block = blocks[i];
             auto & inserter = node_inserters[i];
-            inserter->write(block);
+            LOG_TRACE(logger, "send block. rows:{}, cols:{}, names:{}, inserter:{}", block.rows(), block.columns(), block.dumpNames(), i);
+            if (block.rows())
+                inserter->write(block);
         }
     }
 };
@@ -395,6 +440,8 @@ public:
     explicit StorageShuffleJoinPartSink(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_)
         : SinkToStorage(header_)
         , context(context_)
+        , session_id(session_id_)
+        , table_id(table_id_)
     {
         auto session_storage = HashedBlocksStorage::getInstance().getOrSetSession(session_id_);
         if (!session_storage)
@@ -407,11 +454,15 @@ public:
 protected:
     void consume(Chunk chunk) override
     {
+        LOG_TRACE(logger, "table {}-{} sink a chunk. rows:{}", session_id, table_id, chunk.getNumRows());
         table_storage->addChunk(std::move(chunk));
     }
 private:
     ContextPtr context;
+    String session_id;
+    String table_id;
     TableHashedBlocksStoragePtr table_storage;
+    Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinPartSink");
 };
 
 

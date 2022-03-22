@@ -24,6 +24,7 @@ ASTPtr ASTShufflePhasesSelectQuery::clone() const
 void ASTShufflePhasesSelectQuery::formatImpl(const FormatSettings & settings, FormatState & /*state*/, FormatStateStacked /*frame*/) const
 {
     final_query->format(settings);
+    settings.ostr << "\n";
     if (!shuffle_phases.empty())
     {
         for (int i = shuffle_phases.size() - 1; i >= 0; i--)
@@ -31,9 +32,10 @@ void ASTShufflePhasesSelectQuery::formatImpl(const FormatSettings & settings, Fo
             const auto & phase = shuffle_phases[i];
             for (const auto & ast : phase)
             {
-                for (int j = 0; j < i; ++j)
+                for (int j = 0; j < static_cast<int>(i - shuffle_phases.size()); ++j)
                     settings.ostr << " ";
                 ast->format(settings);
+                settings.ostr << "\n";
             }
 
         }

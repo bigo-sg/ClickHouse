@@ -6,7 +6,9 @@
 #include <Core/Block.h>
 #include <Processors/Chunk.h>
 #include <base/types.h>
+#include <Poco/Glob.h>
 #include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 namespace DB
 {
@@ -39,8 +41,12 @@ public:
     // TODO : Should make merge action to reduce small size chunks?
     void addChunk(Chunk && chunk)
     {
-        std::lock_guard lock(mutex);
-        chunks.emplace_back(std::move(chunk));
+        if (chunk)
+        {
+            LOG_TRACE(logger, "{}.{} add chunk. rows:{}", session_id, table_id, chunk.getNumRows());
+            std::lock_guard lock(mutex);
+            chunks.emplace_back(std::move(chunk));
+        }
     }
 
     ChunkIterator getChunksBegin()
@@ -63,6 +69,7 @@ private:
     String table_id;
     Block header;
     std::list<Chunk> chunks;
+    Poco::Logger * logger = &Poco::Logger::get("TableHashedBlocksStorage");
 };
 using TableHashedBlocksStoragePtr = std::shared_ptr<TableHashedBlocksStorage>;
 
