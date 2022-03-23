@@ -32,7 +32,7 @@ public:
 protected:
     const Params params;
 
-    inline static const String REST_URL_SERVICE_DEFINITION{"/service/plugins/definition/name/{}"};
+    inline static const String REST_URL_SERVICE_DEFINITIONS{"/service/plugins/definitions/name/{}"};
     inline static const String REST_URL_SERVICE_POLICIES{"/plugins/policies/service/name/{}"};
 };
 }
