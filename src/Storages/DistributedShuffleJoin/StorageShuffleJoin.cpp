@@ -42,6 +42,7 @@ public:
         if (table_storage)
         {
             table_storage->getMutex().unlock();
+            session_storage->releaseTable(table_id);
         }
     }
 
@@ -78,6 +79,7 @@ private:
     bool has_initialized = false;
     String session_id;
     String table_id;
+    SessionHashedBlocksTablesStoragePtr session_storage;
     TableHashedBlocksStoragePtr table_storage;
     size_t read_rows = 0;
 
@@ -86,7 +88,7 @@ private:
         if (likely(has_initialized))
             return;
         LOG_TRACE(logger, "initialize table source. {}.{}", session_id, table_id);
-        auto session_storage = HashedBlocksStorage::getInstance().getSession(session_id);
+        session_storage = HashedBlocksStorage::getInstance().getSession(session_id);
         if (session_storage)
         {
             table_storage = session_storage->getTable(table_id);

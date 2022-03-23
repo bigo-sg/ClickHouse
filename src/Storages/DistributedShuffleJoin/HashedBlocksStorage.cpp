@@ -60,8 +60,17 @@ TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getOrSetTable(cons
 
 void SessionHashedBlocksTablesStorage::releaseTable(const String & table_id_)
 {
-    std::lock_guard lock(mutex);
-    tables.erase(table_id_);
+    LOG_INFO(logger, "release table {}.{}", session_id, table_id_);
+    size_t table_count = 0;
+    {
+        std::lock_guard lock(mutex);
+        tables.erase(table_id_);
+        table_count = tables.size();
+    }
+    if (!table_count)
+    {
+        HashedBlocksStorage::getInstance().tryCloseSession(session_id);
+    }
 }
 
 HashedBlocksStorage & HashedBlocksStorage::getInstance()
@@ -98,7 +107,28 @@ SessionHashedBlocksTablesStoragePtr HashedBlocksStorage::getOrSetSession(const S
 
 void HashedBlocksStorage::closeSession(const String & session_id_)
 {
+    LOG_TRACE(logger, "close session:{}", session_id_);
     std::lock_guard lock(mutex);
+    sessions.erase(session_id_);
+}
+
+void HashedBlocksStorage::tryCloseSession(const String & session_id_)
+{
+    std::lock_guard lock(mutex);
+    auto iter = sessions.find(session_id_);
+    if (iter == sessions.end())
+    {
+        LOG_TRACE(logger, "try to close a non-exists session:{}", session_id_);
+        return;
+    }
+    auto & session = iter->second;
+    std::lock_guard session_lock(session->getMutex());
+    if (session->getTablesNumberWithoutMutex())
+    {
+        LOG_INFO(logger, "session({}) has tables which are in used", session_id_);
+        return;
+    }
+    LOG_INFO(logger, "close session:{}", session_id_);
     sessions.erase(session_id_);
 }
 
