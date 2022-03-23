@@ -13,7 +13,18 @@
 namespace DB
 {
 /**
- * FIXME : need lock protection ?
+ * How to clear all the data when a query session has finished ?
+ * The following measures were taken at current
+ * 1）Chunks in TableHashedBlocksStorage are read only once, so we use popChunkWithoutMutex() for loading a chunk.
+ *   That ensures that all chunks are released after the loading finish.
+ * 2) When TableHashedBlocksStorage becomes empty, it will call SessionHashedBlocksTablesStorage::releaseTable() to 
+ *   release it-self.
+ * 3) When SessionHashedBlocksTablesStorage becomes empty, it will call HashedBlocksStorage::tryCloseSession() to 
+ *   release it-self.
+ * All above will ensure all datas are released in normal processing. But more need be considered, exceptions could
+ * happen during the processing which make the release actions not be called. Some measures may be token.
+ * 1) In TCPHandler, catch all exceptions , and make a session releasing action on all nodes
+ * 2) All sessions have a max TTL, make background routine to check timeout sessions and clear them.
  * 
  */
 class TableHashedBlocksStorage
@@ -91,6 +102,14 @@ public:
     TableStoragePtr getTable(const String & table_id_) const;
     TableStoragePtr getOrSetTable(const String & table_id_, const Block & header_);
     void releaseTable(const String & table_id_);
+    std::mutex & getMutex()
+    {
+        return mutex;
+    }
+    size_t getTablesNumberWithoutMutex() const
+    {
+        return tables.size();
+    }
 private:
     Poco::Logger * logger = &Poco::Logger::get("SessionHashedBlocksTablesStorage");
     String session_id;
@@ -110,6 +129,7 @@ public:
     SessionStoragePtr getOrSetSession(const String & session_id_);
 
     void closeSession(const String & session_id_);
+    void tryCloseSession(const String & session_id_);
 protected:
     HashedBlocksStorage() = default;
 private:
