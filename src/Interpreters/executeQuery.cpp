@@ -85,6 +85,8 @@
 #include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Interpreters/TreeQueryRewriter.h>
+
 namespace ProfileEvents
 {
     extern const Event QueryMaskingRulesMatch;
@@ -663,12 +665,21 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 }
                 if (!context->getSettings().distributed_shuffle_join_cluster.value.empty())
                 {
+                    #if 0
                     TreeShufflePhasesSelectQueryRewriterMatcher::Data data;
                     data.context = context;
                     auto new_ast = ast->clone();
                     TreeShufflePhasesSelectQueryRewriterVistor(data).visit(new_ast);
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "rewrite ast:\n{}", queryToString(data.rewritten_query));
                     ast = data.rewritten_query;
+                    #else
+                    TreeQueryRewriterMatcher::Data data;
+                    data.context = context;
+                    auto new_ast = ast->clone();
+                    TreeQueryRewriterVisitor(data).visit(new_ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "result query:{};{}", data.rewritten_query->getID(), queryToString(data.rewritten_query));
+                    ast = data.rewritten_query;
+                    #endif
                 }
             }
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
