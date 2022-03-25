@@ -166,6 +166,7 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::s
     auto distributed_queries = tryToMakeDistributedSelectQueries(select_query);
     if (!distributed_queries)
     {   
+        LOG_TRACE(logger, "initiator run, query:{}", queryToString(select_query));
         InterpreterSelectWithUnionQuery interpreter(select_query, context, options);
         auto res = std::make_shared<BlockIO>(interpreter.execute());
         return res;
@@ -214,7 +215,7 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::s
 std::optional<std::list<std::pair<Cluster::Address, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
 {
     LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
-    #if 1
+    #if 0
     // just for test
     std::list<std::pair<Cluster::Address, String>> res;
     String query_str = queryToString(from_query);

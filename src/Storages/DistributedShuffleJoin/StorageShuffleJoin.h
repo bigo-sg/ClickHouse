@@ -3,6 +3,7 @@
 #include <Storages/IStorage.h>
 #include <base/shared_ptr_helper.h>
 #include <Poco/Logger.h>
+#include <Storages/SelectQueryInfo.h>
 
 namespace DB
 {
@@ -29,15 +30,20 @@ public:
     StorageShuffleJoin(
         ContextPtr context_,
         ASTPtr query_,
-        const String & cluster,
+        const String & cluster_name_,
         const String & session_id_,
         const String & table_id_,
         const ColumnsDescription & columns_,
         ASTPtr hash_expr_list_);
+
+    #if 0
+    QueryProcessingStage::Enum getQueryProcessingStage(
+        ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageMetadataPtr &, SelectQueryInfo &) const override;
+    #endif
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
     ASTPtr query;
-    String cluster;
+    String cluster_name;
     String session_id;
     String table_id;
     ASTPtr hash_expr_list;

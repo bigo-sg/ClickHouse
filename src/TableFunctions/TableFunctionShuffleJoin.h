@@ -3,11 +3,15 @@
 #include <Poco/Logger.h>
 namespace DB
 {
+/**
+ * Only for inserting chunks into different nodes.
+ * 
+ */
 class DistTableFunctionShuffleJoin : public ITableFunction
 {
 public:
-    static constexpr auto name = "dist_hashed_chunks_storage";
-    static constexpr auto storage_type_name = "dist_hashed_chunks_storage";
+    static constexpr auto name = "distHashedChunksStorage";
+    static constexpr auto storage_type_name = "DistHashedChunksStorage";// but no storage is registered
     std::string getName() const override { return name; }
     bool hasStaticStructure() const override { return true; }
     StoragePtr executeImpl(
@@ -31,8 +35,8 @@ private:
 class TableFunctionShuffleJoin : public ITableFunction
 {
 public:
-    static constexpr auto name = "hashed_chunks_storage";
-    static constexpr auto storage_type_name = "hashed_chunks_storage";
+    static constexpr auto name = "hashedChunksStorage";
+    static constexpr auto storage_type_name = "HashedChunksStorage";// but no storage is registered
     std::string getName() const override { return name; }
     bool hasStaticStructure() const override { return true; }
     StoragePtr executeImpl(

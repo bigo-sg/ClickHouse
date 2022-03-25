@@ -32,7 +32,7 @@ namespace ErrorCodes
     extern const int NOT_IMPLEMENTED;
 
 }
-#define TABLE_FUNCTION_HASHED_CHUNK_STORAGE "hashed_chunks_storage"
+#define TABLE_FUNCTION_HASHED_CHUNK_STORAGE "hashedChunksStorage"
 
 TreeDistributedShuffleJoinRewriter::TreeDistributedShuffleJoinRewriter(std::shared_ptr<ASTSelectQuery> query_, ContextPtr context_, size_t assigned_id_)
     :WithContext(context_)
