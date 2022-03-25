@@ -26,7 +26,6 @@
 
 #include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
-#include <Interpreters/TreeStorageShuffleJoinLeftTableQueryRewriter.h>
 
 namespace DB
 {
@@ -445,34 +444,13 @@ Pipe StorageShuffleJoin::read(
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageShuffleJoin doesn't support two phases merge processing. current processing stage:{}", processed_stage_);
     }
-    /**
-     * In this case, find the releated StorageShuffleJoin table, and build a pure select query only with this
-     * table as the remote query.
-     * For example, the input query is 
-     * ```
-     * SELECT a, b FROM 
-     * hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_left', 'a UInt16', 'a') AS l 
-     * ALL INNER JOIN hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_right', 'b UInt16,a UInt16', 'a') AS r 
-     * ON a = r.a SETTINGS distributed_shuffle_join_cluster = 'ck_cluster_new'
-     * ```
-     * the query for the remote sides is 
-     * ```
-     * select a from hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_left', 'a UInt16', 'a') AS l
-     * ```
-     * Since we only need to load datas in the table, Other contents not related to this table should be dropped.
-     */
-    #if 0
-    TreeStorageShuffleJoinLeftTableQueryRewriteMatcher::Data rewrite_data{.context = context_, .session_id = session_id, .table_id = table_id};
-    TreeStorageShuffleJoinLeftTableQueryRewriterVisitor(rewrite_data).visit(query_info_.original_query);
-    auto remote_query = queryToString(rewrite_data.rewritten_query);
-    #else
+
+    // Since the query_info_.query has been rewritten, it may cause the an ambiguous column exception in join case.
+    // So we use the original_query here.
     auto remote_query = queryToString(query_info_.original_query);
-    #endif
     auto cluster = context_->getCluster(cluster_name)->getClusterWithReplicasAsShards(context_->getSettings());
     const Scalars & scalars = context_->hasQueryContext() ? context_->getQueryContext()->getScalars() : Scalars{};
     Pipes pipes;
-    //const bool add_agg_info = processed_stage_ == QueryProcessingStage::WithMergeableState;
-
     for (const auto & replicas : cluster->getShardsAddresses())
     {
         for (const auto & node : replicas)
@@ -515,17 +493,6 @@ SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMeta
         context_, cluster_name, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list);
     return sinker;
 }
-
-#if 0
-QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
-        ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageMetadataPtr &, SelectQueryInfo &) const
-{
-    if (context_->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
-        if (to_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
-            return QueryProcessingStage::Enum::WithMergeableState;
-    return QueryProcessingStage::Enum::FetchColumns;
-}
-#endif
 class StorageShuffleJoinPartSink : public SinkToStorage
 {
 public:
