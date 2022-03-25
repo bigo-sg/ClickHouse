@@ -36,10 +36,6 @@ public:
         const ColumnsDescription & columns_,
         ASTPtr hash_expr_list_);
 
-    #if 0
-    QueryProcessingStage::Enum getQueryProcessingStage(
-        ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageMetadataPtr &, SelectQueryInfo &) const override;
-    #endif
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
     ASTPtr query;
