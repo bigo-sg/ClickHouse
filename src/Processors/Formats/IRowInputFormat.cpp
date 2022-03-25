@@ -63,6 +63,9 @@ Chunk IRowInputFormat::generate()
     if (total_rows == 0)
         readPrefix();
 
+    if (is_stopped)
+        return {};
+
     const Block & header = getPort().getHeader();
 
     size_t num_columns = header.columns();
@@ -70,7 +73,6 @@ Chunk IRowInputFormat::generate()
 
     ///auto chunk_missing_values = std::make_unique<ChunkMissingValues>();
     block_missing_values.clear();
-
     size_t num_rows = 0;
 
     try

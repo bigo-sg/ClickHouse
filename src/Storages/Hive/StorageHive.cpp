@@ -260,46 +260,30 @@ public:
                 }
                 return Chunk(std::move(columns), num_rows);
             }
-            reader.reset();
-            pipeline.reset();
-            read_buf.reset();
+
+            {
+                std::lock_guard lock(reader_mutex);
+                reader.reset();
+                pipeline.reset();
+                read_buf.reset();
+            }
         }
     }
 
-    Chunk generateChunkByPartitionKeys()
+    void onCancel() override
     {
-        size_t max_rows = getContext()->getSettings().max_block_size;
-        size_t rows = 0;
-        if (max_rows > current_file_remained_rows)
-        {
-            rows = current_file_remained_rows;
-            current_file_remained_rows = 0;
-        }
-        else
-        {
-            rows = max_rows;
-            current_file_remained_rows -= max_rows;
-        }
-
-        Columns cols;
-        auto types = source_info->partition_name_types.getTypes();
-        auto names = source_info->partition_name_types.getNames();
-        auto fields = current_file->getPartitionValues();
-        for (size_t i = 0, sz = types.size(); i < sz; ++i)
-        {
-            if (!sample_block.has(names[i]))
-                continue;
-            auto col = types[i]->createColumnConst(rows, fields[i]);
-            auto col_idx = sample_block.getPositionByName(names[i]);
-            cols.insert(cols.begin() + col_idx, col);
-        }
-        return Chunk(std::move(cols), rows);
+        std::lock_guard lock(reader_mutex);
+        if (reader)
+            reader->cancel();
     }
 
 private:
     std::unique_ptr<ReadBuffer> read_buf;
     std::unique_ptr<QueryPipeline> pipeline;
     std::unique_ptr<PullingPipelineExecutor> reader;
+    /// onCancel and generate can be called concurrently
+    std::mutex reader_mutex;
+
     SourcesInfoPtr source_info;
     String hdfs_namenode_url;
     String format;
