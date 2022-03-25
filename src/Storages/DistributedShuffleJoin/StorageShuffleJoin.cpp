@@ -17,8 +17,16 @@
 #include <base/logger_useful.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Columns/FilterDescription.h>
-#include "Common/Exception.h"
-#include "base/defines.h"
+#include <Common/Exception.h>
+#include <Core/QueryProcessingStage.h>
+#include <base/defines.h>
+#include <Interpreters/Cluster.h>
+#include <Processors/Sources/RemoteSource.h>
+#include <QueryPipeline/RemoteQueryExecutor.h>
+
+#include <IO/WriteBufferFromString.h>
+#include <IO/Operators.h>
+#include <Interpreters/TreeStorageShuffleJoinLeftTableQueryRewriter.h>
 
 namespace DB
 {
@@ -188,7 +196,7 @@ private:
                 write_buf << ",";
             write_buf << names[i] << " " << types[i]->getName();
         }
-        insert_sql = fmt::format("INSERT INTO FUNCTION dist_hashed_chunks_storage('{}', '{}', '{}') VALUES", session_id, table_id, write_buf.str());
+        insert_sql = fmt::format("INSERT INTO FUNCTION distHashedChunksStorage('{}', '{}', '{}') VALUES", session_id, table_id, write_buf.str());
         LOG_TRACE(logger, "insert sql: {}", insert_sql);
 
 
@@ -209,7 +217,6 @@ private:
                 node.compression,
                 node.secure);
             node_connections.emplace_back(connection);
-            #if 1
             auto inserter = std::make_shared<RemoteInserter>(
                 *connection,
                 ConnectionTimeouts{30000, 30000, 30000},
@@ -217,9 +224,6 @@ private:
                 context->getSettings(),
                 context->getClientInfo());
             node_inserters.emplace_back(inserter);
-            #else
-            node_inserters.emplace_back(nullptr);
-            #endif
         }
 
     }
@@ -390,7 +394,7 @@ void testSinker(ContextPtr context)
 StorageShuffleJoin::StorageShuffleJoin(
     ContextPtr context_,
     ASTPtr query_,
-    const String & cluster_,
+    const String & cluster_name_,
     const String & session_id_,
     const String & table_id_,
     const ColumnsDescription & columns_,
@@ -398,7 +402,7 @@ StorageShuffleJoin::StorageShuffleJoin(
     : IStorage(StorageID(session_id_, table_id_))
     , WithContext(context_)
     , query(query_)
-    , cluster(cluster_)
+    , cluster_name(cluster_name_)
     , session_id(session_id_)
     , table_id(table_id_)
     , hash_expr_list(hash_expr_list_)
@@ -409,27 +413,119 @@ StorageShuffleJoin::StorageShuffleJoin(
 }
 
 Pipe StorageShuffleJoin::read(
-    const Names & /*column_names_*/,
-    const StorageMetadataPtr & /*metadata_snapshot_*/,
-    SelectQueryInfo & /*query_info_*/,
+    const Names & column_names_,
+    const StorageMetadataPtr & metadata_snapshot_,
+    SelectQueryInfo & query_info_,
     ContextPtr context_,
-    QueryProcessingStage::Enum /*processed_stage_*/,
+    QueryProcessingStage::Enum processed_stage_,
     size_t /*max_block_size_*/,
     unsigned /*num_streams_*/)
 {
     auto header = getInMemoryMetadata().getSampleBlock();
-    auto source = std::make_shared<StorageShuffleJoinSource>(context_, session_id, table_id, header);
-    return Pipe(source);
+    WriteBufferFromOwnString write_buf;
+    for (const auto & name : column_names_)
+    {
+        write_buf << name << ",";
+    }
+    
+    auto query_kind = context_->getClientInfo().query_kind;
+    LOG_TRACE(logger, "header:{}. to read columns:{}. query_kind:{}, stage:{}",
+        header.dumpNames(), write_buf.str(), query_kind,
+        processed_stage_);
+    LOG_TRACE(logger, "query:{}", queryToString(query_info_.query));
+    LOG_TRACE(logger, "original query:{}", queryToString(query_info_.original_query));
+    if (query_kind != ClientInfo::QueryKind::INITIAL_QUERY)
+    {
+        LOG_TRACE(logger, "Run local query. query_kind:{}, query:{}", query_kind, queryToString(query_info_.query));
+        auto source = std::make_shared<StorageShuffleJoinSource>(context_, session_id, table_id, header);
+        return Pipe(source);
+    }
+
+    if (processed_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageShuffleJoin doesn't support two phases merge processing. current processing stage:{}", processed_stage_);
+    }
+    /**
+     * In this case, find the releated StorageShuffleJoin table, and build a pure select query only with this
+     * table as the remote query.
+     * For example, the input query is 
+     * ```
+     * SELECT a, b FROM 
+     * hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_left', 'a UInt16', 'a') AS l 
+     * ALL INNER JOIN hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_right', 'b UInt16,a UInt16', 'a') AS r 
+     * ON a = r.a SETTINGS distributed_shuffle_join_cluster = 'ck_cluster_new'
+     * ```
+     * the query for the remote sides is 
+     * ```
+     * select a from hashedChunksStorage('ck_cluster_new', '01734fa3-fdab-4cee-a851-0909f8faec29', '0_left', 'a UInt16', 'a') AS l
+     * ```
+     * Since we only need to load datas in the table, Other contents not related to this table should be dropped.
+     */
+    #if 0
+    TreeStorageShuffleJoinLeftTableQueryRewriteMatcher::Data rewrite_data{.context = context_, .session_id = session_id, .table_id = table_id};
+    TreeStorageShuffleJoinLeftTableQueryRewriterVisitor(rewrite_data).visit(query_info_.original_query);
+    auto remote_query = queryToString(rewrite_data.rewritten_query);
+    #else
+    auto remote_query = queryToString(query_info_.original_query);
+    #endif
+    auto cluster = context_->getCluster(cluster_name)->getClusterWithReplicasAsShards(context_->getSettings());
+    const Scalars & scalars = context_->hasQueryContext() ? context_->getQueryContext()->getScalars() : Scalars{};
+    Pipes pipes;
+    //const bool add_agg_info = processed_stage_ == QueryProcessingStage::WithMergeableState;
+
+    for (const auto & replicas : cluster->getShardsAddresses())
+    {
+        for (const auto & node : replicas)
+        {
+            auto connection = std::make_shared<Connection>(
+                node.host_name,
+                node.port,
+                context_->getGlobalContext()->getCurrentDatabase(),
+                node.user,
+                node.password,
+                node.cluster,
+                node.cluster_secret,
+                "StorageShuffleJoin",
+                node.compression,
+                node.secure);
+
+            auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
+                connection,
+                remote_query,
+                header,
+                context_,
+                nullptr,
+                scalars,
+                Tables(),
+                processed_stage_,
+                RemoteQueryExecutor::Extension{});
+            LOG_TRACE(logger, "run query on node:{}. query:{}", node.host_name, remote_query);
+            pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, false, false));
+        }
+    }
+    metadata_snapshot_->check(column_names_, getVirtuals(), getStorageID());
+    return Pipe::unitePipes(std::move(pipes));
+
 }
 
 SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMetadataPtr & /*storage_metadata*/, ContextPtr context_)
 {
     LOG_TRACE(logger, "write query: {}", queryToString(ast));
     auto sinker = std::make_shared<StorageShuffleJoinSink>(
-        context_, cluster, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list);
+        context_, cluster_name, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list);
     return sinker;
 }
 
+#if 0
+QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
+        ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageMetadataPtr &, SelectQueryInfo &) const
+{
+    if (context_->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
+        if (to_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
+            return QueryProcessingStage::Enum::WithMergeableState;
+    return QueryProcessingStage::Enum::FetchColumns;
+}
+#endif
 class StorageShuffleJoinPartSink : public SinkToStorage
 {
 public:
