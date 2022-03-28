@@ -2,7 +2,10 @@
 #include <mutex>
 #include <Storages/DistributedShuffleJoin/HashedBlocksStorage.h>
 #include <base/logger_useful.h>
+#include "Common/Exception.h"
 #include <Common/ErrorCodes.h>
+#include "base/defines.h"
+#include "base/types.h"
 
 namespace DB
 {
@@ -12,6 +15,60 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+void TableHashedBlocksStorage::addChunk(Chunk && chunk)
+{
+    if (likely(chunk.hasRows()))
+    {
+        LOG_TRACE(logger, "{}.{} add chunk. rows:{}", session_id, table_id, chunk.getNumRows());
+        std::unique_lock lock(mutex);
+        chunks.emplace_back(std::move(chunk));
+    }
+    else
+    {
+        LOG_TRACE(logger, "add empty chunk");
+    }
+    wait_more_data.notify_one();
+}
+
+Chunk TableHashedBlocksStorage::popChunk()
+{
+    std::unique_lock lock(mutex);
+    while(!isSinkFinished() && chunks.empty())
+    {
+        wait_more_data.wait(lock, [&] { return isSinkFinished() || !chunks.empty(); });
+    }
+
+    Chunk res;
+    if (likely(!chunks.empty()))
+    {
+        res.swap(chunks.front());
+        chunks.pop_front();
+        if (unlikely(!res.hasRows()))
+        {
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should not be empty");
+        }
+    }
+    lock.unlock();
+    return res;
+}
+
+void TableHashedBlocksStorage::increaseFinishedSinkCount()
+{
+    finshed_sink_count++;
+    if (finshed_sink_count >= active_sinks)
+    {
+        LOG_INFO(logger, "sinking into table({}.{}) finished. sinks:{}", session_id, table_id, active_sinks);
+    }
+    if (finshed_sink_count > active_sinks)
+    {
+        // It is based on the truth that each node would only start one sink for each table
+        // If this was broken, we cannot use this too judge whether the sinking phase finish.
+        // Need to be careful with what happen in InterpreterInsertQuery
+        // Otherwise we need to use the block mode in TreeQueryTransform
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Only {} sinks are expected. but we get {} now.", active_sinks, finshed_sink_count);
+    }
+    wait_more_data.notify_all();
+}
 Chunk TableHashedBlocksStorage::popChunkWithoutMutex()
 {
     if (unlikely(chunks.empty()))
@@ -36,21 +93,21 @@ TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getTable(const Str
     return iter->second;
 }
 
-TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getOrSetTable(const String & table_id_, const Block & header_)
+TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getOrSetTable(const String & table_id_, const Block & header_, UInt64 active_sinks_)
 {
     std::lock_guard lock(mutex);
     auto iter = tables.find(table_id_);
     if (iter == tables.end())
     {
-        LOG_TRACE(logger, "create new blocks table:{}-{}", session_id, table_id_);
-        auto table = std::make_shared<TableStorage>(session_id, table_id_, header_);
+        LOG_TRACE(logger, "create new blocks table:{}.{}", session_id, table_id_);
+        auto table = std::make_shared<TableStorage>(session_id, table_id_, header_, active_sinks_);
         tables[table_id_] = table;
         return table;
     }
 
     auto & table = iter->second;
     const auto & table_header = table->getHeader();
-    if (!blocksHaveEqualStructure(table_header, header_))
+    if (!blocksHaveEqualStructure(table_header, header_) || table->getActiveSinks() != active_sinks_)
     {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Table({}-{}) exists with different header(), input header is :{}",
             session_id, table_id_, table_header.dumpNames(), header_.dumpNames());

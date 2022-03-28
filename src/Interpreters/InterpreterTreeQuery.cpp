@@ -5,8 +5,11 @@
 #include "Core/QueryProcessingStage.h"
 #include "Interpreters/InterpreterInsertQuery.h"
 #include "Interpreters/InterpreterSelectWithUnionQuery.h"
+#include "Parsers/ASTInsertQuery.h"
+#include "Parsers/IAST_fwd.h"
 #include "QueryPipeline/QueryPipeline.h"
 #include "base/logger_useful.h"
+#include "base/types.h"
 #include <Parsers/ASTTreeQuery.h>
 #include <QueryPipeline/RemoteQueryExecutor.h>
 #include <Processors/Sources/RemoteSource.h>
@@ -18,6 +21,8 @@
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Parsers/queryToString.h>
+#include <Parsers/ASTFunction.h>
+#include <TableFunctions/TableFunctionShuffleJoin.h>
 
 namespace DB
 {
@@ -90,15 +95,7 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildInsertBlockIO(std::s
     if (!distributed_queries)
     {
         auto interpreter = InterpreterInsertQuery(insert_query, context);
-        #if 0
-        auto insert_block_io = interpreter.execute();
-        QueryPipelineBuilder pipeline_builder;
-        pipeline_builder.init(Pipe(Processors{std::make_shared<BlockIOSourceTransform>(insert_block_io)}));
-        auto res = std::make_shared<BlockIO>();
-        res->pipeline = QueryPipelineBuilder::getPipeline(std::move(pipeline_builder));
-        #else
         auto res = std::make_shared<BlockIO>(interpreter.execute());
-        #endif
         return res;
     }
 
@@ -140,14 +137,53 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildInsertBlockIO(std::s
     return res;
 }
 
+ASTPtr InterpreterTreeQuery::fillHashedChunksStorageSinks(ASTPtr from_query, UInt64 sinks)
+{
+    auto insert_query = std::dynamic_pointer_cast<ASTInsertQuery>(from_query);
+    if (!insert_query)
+    {
+        LOG_TRACE(logger, "not insert query: {}", from_query->getID());
+        return from_query;
+    }
+    if (!insert_query->table_function)
+    {
+        LOG_TRACE(logger, "table_function is null. query:{}", queryToString(from_query));
+        return from_query;
+    }
+    auto table_function = std::dynamic_pointer_cast<ASTFunction>(insert_query->table_function);
+    if (table_function->name != TableFunctionShuffleJoin::name)
+    {
+        LOG_TRACE(logger, "Not {}, query: {}", TableFunctionShuffleJoin::name, queryToString(from_query));
+        return from_query;
+    }
+    auto arg_list = std::dynamic_pointer_cast<ASTExpressionList>(table_function->arguments);
+    if (arg_list->children.size() != 5)
+    {
+        LOG_INFO(logger, "table function's arguments should be 5");
+        return from_query;
+    }
+    auto sinks_arg = std::make_shared<ASTLiteral>(Field(sinks));
+    arg_list->children.push_back(sinks_arg);
+
+    LOG_TRACE(logger, "New query: {}", queryToString(from_query));
+    return from_query;
+    
+}
+
 std::optional<std::list<std::pair<Cluster::Address, String>>> InterpreterTreeQuery::tryToMakeDistributedInsertQueries(ASTPtr from_query)
 {
     LOG_TRACE(logger, "tryToMakeDistributedInsertQueries. query:{}", queryToString(from_query));
     #if 1
     // just for test
     std::list<std::pair<Cluster::Address, String>> res;
-    String query_str = queryToString(from_query);
     auto cluster = context->getCluster(context->getSettings().distributed_shuffle_join_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
+    UInt64 nodes_num = 0;
+    for (const auto & shard : cluster->getShardsAddresses())
+    {
+        nodes_num += shard.size();
+    }
+    auto rewrite_query = fillHashedChunksStorageSinks(from_query, nodes_num);
+    String query_str = queryToString(rewrite_query);
     for (const auto & shard : cluster->getShardsAddresses())
     {
         for (const auto & node : shard)
@@ -215,7 +251,7 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::s
 std::optional<std::list<std::pair<Cluster::Address, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
 {
     LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
-    #if 0
+    #if 1
     // just for test
     std::list<std::pair<Cluster::Address, String>> res;
     String query_str = queryToString(from_query);

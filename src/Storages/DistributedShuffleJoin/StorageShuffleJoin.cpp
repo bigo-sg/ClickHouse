@@ -18,6 +18,7 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <Columns/FilterDescription.h>
 #include <Common/Exception.h>
+#include "base/types.h"
 #include <Core/QueryProcessingStage.h>
 #include <base/defines.h>
 #include <Interpreters/Cluster.h>
@@ -62,6 +63,7 @@ public:
             LOG_INFO(logger, "{}.{} is not found.", session_id, table_id);
             return {};
         }
+        #if 0
         if (unlikely(!table_storage->getChunkSizeWithoutMutex()))
         {
             LOG_INFO(
@@ -80,6 +82,16 @@ public:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "The chunk should not be empty. table {}.{}", session_id, table_id);
         LOG_TRACE(logger, "{}.{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
         return res;
+        #else
+        Chunk res = table_storage->popChunk();
+        if (!res)
+        {
+            LOG_TRACE(logger, "reading finish. table:{}.{}", session_id, table_id);
+        }
+        read_rows += res.getNumRows();
+        LOG_TRACE(logger, "{}.{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
+        return res;
+        #endif
     }
 private:
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinSource");
@@ -101,7 +113,9 @@ private:
             table_storage = session_storage->getTable(table_id);
             if (table_storage)
             {
+                #if 0
                 table_storage->getMutex().lock();
+                #endif
             }
             else
             {
@@ -126,16 +140,27 @@ public:
         const String & table_id_,
         const Block & header_,
         const ColumnsDescription & columns_,
-        ASTPtr hash_expr_list_)
+        ASTPtr hash_expr_list_,
+        UInt64 active_sinks_)
         : SinkToStorage(header_), context(context_), cluster(cluster_), session_id(session_id_), table_id(table_id_)
         , columns_desc(columns_)
         , hash_expr_list(hash_expr_list_)
+        , active_sinks(active_sinks_)
     {
     }
-    ~StorageShuffleJoinSink() override
+
+    void onFinish() override
     {
+        // Just for signal remote nodes that this node has finished loading
+        if (unlikely(!has_initialized))
+        {
+            initOnce();
+        }
         for (auto & inserter : node_inserters)
         {
+            Block empty_block = getInputPort().getHeader();
+            LOG_TRACE(logger, "send an empty block:{} {}", empty_block.dumpNames(), empty_block.rows());
+            inserter->write(empty_block);
             inserter->onFinish();
         }
     }
@@ -163,6 +188,7 @@ private:
     String table_id;
     ColumnsDescription columns_desc;
     ASTPtr hash_expr_list;
+    UInt64 active_sinks;
     Strings hash_expr_columns_names;
 
     std::mutex init_mutex;
@@ -195,7 +221,7 @@ private:
                 write_buf << ",";
             write_buf << names[i] << " " << types[i]->getName();
         }
-        insert_sql = fmt::format("INSERT INTO FUNCTION distHashedChunksStorage('{}', '{}', '{}') VALUES", session_id, table_id, write_buf.str());
+        insert_sql = fmt::format("INSERT INTO FUNCTION distHashedChunksStorage('{}', '{}', '{}', {}) VALUES", session_id, table_id, write_buf.str(), active_sinks);
         LOG_TRACE(logger, "insert sql: {}", insert_sql);
 
 
@@ -359,34 +385,6 @@ private:
     }
 };
 
-#if 0
-void testSinker(ContextPtr context)
-{
-    String names_and_types_str = "columns format version: 1\n2 columns:\n`a` Int32\n`b` Int32\n";
-    auto names_and_types = NamesAndTypesList::parse(names_and_types_str);
-    ColumnsDescription columns_desc(names_and_types);
-    ColumnsWithTypeAndName columns;
-    for (auto & name_type : names_and_types)
-    {
-        columns.emplace_back(name_type.type, name_type.name);
-    }
-    Block header(columns);
-    ParserExpressionList ast_parser(true);
-    auto settings = context->getSettings();
-    ASTPtr hash_expr_list = parseQuery(ast_parser, "a", "test", settings.max_query_size, settings.max_parser_depth);
-    StorageShuffleJoinSink sinker(context, "ck_cluster_new", "session", "table", header, columns_desc, hash_expr_list);
-
-    Chunk chunk;
-    Block block;
-    auto dt = std::make_shared<DataTypeInt32>();
-    block.insert({dt->createColumnConst(5, Field(Int32(1))), dt, "a"});
-    block.insert({dt->createColumnConst(5, Field(Int32(2))), dt, "b"});
-    chunk.setColumns(block.getColumns(), 5);
-    // make consume public
-    sinker.consume(std::move(chunk));
-}
-#endif
-
 /**
  * FIXEDME: Maybe need the initiator pass the cluster nodes, not query by the worker nodes. Since the cluster nodes set may change
  */
@@ -397,7 +395,8 @@ StorageShuffleJoin::StorageShuffleJoin(
     const String & session_id_,
     const String & table_id_,
     const ColumnsDescription & columns_,
-    ASTPtr hash_expr_list_)
+    ASTPtr hash_expr_list_,
+    UInt64 active_sinks_)
     : IStorage(StorageID(session_id_, table_id_))
     , WithContext(context_)
     , query(query_)
@@ -405,6 +404,7 @@ StorageShuffleJoin::StorageShuffleJoin(
     , session_id(session_id_)
     , table_id(table_id_)
     , hash_expr_list(hash_expr_list_)
+    , active_sinks(active_sinks_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -445,7 +445,7 @@ Pipe StorageShuffleJoin::read(
         throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageShuffleJoin doesn't support two phases merge processing. current processing stage:{}", processed_stage_);
     }
 
-    // Since the query_info_.query has been rewritten, it may cause the an ambiguous column exception in join case.
+    // Since the query_info_.query has been rewritten, it may cause an ambiguous column exception in join case.
     // So we use the original_query here.
     auto remote_query = queryToString(query_info_.original_query);
     auto cluster = context_->getCluster(cluster_name)->getClusterWithReplicasAsShards(context_->getSettings());
@@ -490,48 +490,57 @@ SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMeta
 {
     LOG_TRACE(logger, "write query: {}", queryToString(ast));
     auto sinker = std::make_shared<StorageShuffleJoinSink>(
-        context_, cluster_name, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list);
+        context_, cluster_name, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list, active_sinks);
     return sinker;
 }
 class StorageShuffleJoinPartSink : public SinkToStorage
 {
 public:
-    explicit StorageShuffleJoinPartSink(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_)
+    explicit StorageShuffleJoinPartSink(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_, UInt64 active_sinks_)
         : SinkToStorage(header_)
         , context(context_)
         , session_id(session_id_)
         , table_id(table_id_)
+        , active_sinks(active_sinks_)
     {
         auto session_storage = HashedBlocksStorage::getInstance().getOrSetSession(session_id_);
         if (!session_storage)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Get session({}) storage failed.", session_id_);
-        table_storage = session_storage->getOrSetTable(table_id_, header_);
+        table_storage = session_storage->getOrSetTable(table_id_, header_, active_sinks);
         if (!table_storage)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Get session table({}-{}) failed.", session_id_, table_id_);
+    }
+
+    void onFinish() override
+    { 
+        LOG_TRACE(logger, "finish sinking.{} table:{}.{}", reinterpret_cast<UInt64>(this), session_id, table_id);
+        table_storage->increaseFinishedSinkCount();
     }
     String getName() const override { return "StorageShuffleJoinPartSink"; }
 protected:
     void consume(Chunk chunk) override
     {
-        LOG_TRACE(logger, "table {}-{} sink a chunk. rows:{}", session_id, table_id, chunk.getNumRows());
+        LOG_TRACE(logger, "table {}.{} sink a chunk. rows:{}", session_id, table_id, chunk.getNumRows());
         table_storage->addChunk(std::move(chunk));
     }
 private:
     ContextPtr context;
     String session_id;
     String table_id;
+    UInt64 active_sinks;
     TableHashedBlocksStoragePtr table_storage;
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoinPartSink");
 };
 
 
 StorageShuffleJoinPart::StorageShuffleJoinPart(
-    ContextPtr context_, ASTPtr query_, const String & session_id_, const String & table_id_, const ColumnsDescription & columns_)
+    ContextPtr context_, ASTPtr query_, const String & session_id_, const String & table_id_, const ColumnsDescription & columns_, UInt64 active_sinks_)
     : IStorage(StorageID(session_id_, table_id_ + "_part"))
     , WithContext(context_)
     , query(query_)
     , session_id(session_id_)
     , table_id(table_id_)
+    , active_sinks(active_sinks_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -553,7 +562,7 @@ Pipe StorageShuffleJoinPart::read(
 SinkToStoragePtr StorageShuffleJoinPart::write(const ASTPtr & ast, const StorageMetadataPtr & /*storage_metadata*/, ContextPtr context_)
 {
     LOG_TRACE(logger, "write query: {}", queryToString(ast));
-    auto sinker = std::make_shared<StorageShuffleJoinPartSink>(context_, session_id, table_id, getInMemoryMetadata().getSampleBlock());
+    auto sinker = std::make_shared<StorageShuffleJoinPartSink>(context_, session_id, table_id, getInMemoryMetadata().getSampleBlock(), active_sinks);
     return sinker;
 }
 }

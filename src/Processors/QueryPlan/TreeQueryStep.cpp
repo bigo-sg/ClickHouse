@@ -50,7 +50,7 @@ QueryPipelineBuilderPtr TreeQueryStep::updatePipeline(QueryPipelineBuilders pipe
             LOG_TRACE(logger, "upstream output header:{}.", outport->getHeader().dumpNames());
             headers.emplace_back(outport->getHeader());
         }
-        auto processor = std::make_shared<TreeBlockIOsConnectTransform>(output_block_io, headers, true);
+        auto processor = std::make_shared<TreeBlockIOsConnectTransform>(output_block_io, headers, false);
         auto & inports = processor->getInputs();
         size_t i = 0;
         for (auto & inport : inports)

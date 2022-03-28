@@ -38,5 +38,7 @@ private:
 
     std::optional<std::list<std::pair<Cluster::Address, String>>> tryToMakeDistributedInsertQueries(ASTPtr from_query);
     std::optional<std::list<std::pair<Cluster::Address, String>>> tryToMakeDistributedSelectQueries(ASTPtr from_query);
+
+    ASTPtr fillHashedChunksStorageSinks(ASTPtr from_query, UInt64 sinks);
 };
 }
