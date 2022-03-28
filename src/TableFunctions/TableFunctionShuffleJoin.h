@@ -1,6 +1,7 @@
 #pragma once
 #include <TableFunctions/ITableFunction.h>
 #include <Poco/Logger.h>
+#include "base/types.h"
 namespace DB
 {
 /**
@@ -27,6 +28,7 @@ private:
     String session_id;
     String table_id;
     String table_structure;
+    UInt64 active_sinks = 0;
 
     ColumnsDescription columns;
 
@@ -54,6 +56,7 @@ private:
     String table_id;
     String table_structure;
     String table_hash_exprs;
+    UInt64 active_sinks = 0;
 
     ColumnsDescription columns;
     ASTPtr hash_expr_list_ast;

@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -34,10 +35,14 @@ public:
     explicit TableHashedBlocksStorage(
         const String & session_id_,
         const String table_id_,
-        const Block & header_)
+        const Block & header_,
+        UInt64 active_sinks_
+        )
         : session_id(session_id_)
         , table_id(table_id_)
         , header(header_)
+        , active_sinks(active_sinks_)
+        , finshed_sink_count(0)
     {}
 
     inline const Block & getHeader() const
@@ -50,15 +55,9 @@ public:
 
 
     // TODO : Should make merge action to reduce small size chunks?
-    void addChunk(Chunk && chunk)
-    {
-        if (likely(chunk))
-        {
-            LOG_TRACE(logger, "{}.{} add chunk. rows:{}", session_id, table_id, chunk.getNumRows());
-            std::lock_guard lock(mutex);
-            chunks.emplace_back(std::move(chunk));
-        }
-    }
+    void addChunk(Chunk && chunk);
+
+    Chunk popChunk();
 
     ChunkIterator getChunksBegin()
     {
@@ -81,12 +80,23 @@ public:
         return mutex;
     }
 
+    void increaseFinishedSinkCount();
+
+    inline bool isSinkFinished() const
+    {
+        return finshed_sink_count >= active_sinks;
+    }
+
+    inline UInt64 getActiveSinks() const { return active_sinks; }
 private:
     std::mutex mutex;
     String session_id;
     String table_id;
     Block header;
+    UInt64 active_sinks;
+    std::atomic_uint64_t finshed_sink_count;
     std::list<Chunk> chunks;
+    std::condition_variable wait_more_data;
     Poco::Logger * logger = &Poco::Logger::get("TableHashedBlocksStorage");
 };
 using TableHashedBlocksStoragePtr = std::shared_ptr<TableHashedBlocksStorage>;
@@ -100,7 +110,7 @@ public:
     explicit SessionHashedBlocksTablesStorage(const String & session_id_) : session_id(session_id_) {}
 
     TableStoragePtr getTable(const String & table_id_) const;
-    TableStoragePtr getOrSetTable(const String & table_id_, const Block & header_);
+    TableStoragePtr getOrSetTable(const String & table_id_, const Block & header_, UInt64 active_sinks_);
     void releaseTable(const String & table_id_);
     std::mutex & getMutex()
     {
