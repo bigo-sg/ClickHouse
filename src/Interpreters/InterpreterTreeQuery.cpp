@@ -71,7 +71,6 @@ BlockIO InterpreterTreeQuery::execute(BlockIOPtr output_io, BlockIOs & input_blo
 
 InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildBlockIO(ASTPtr query_)
 {
-    LOG_TRACE(logger, "build block io for query:{}", queryToString(query_));
     BlockIOPtr res;
     if (auto insert_query = std::dynamic_pointer_cast<ASTInsertQuery>(query_))
     {
@@ -233,7 +232,6 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
     {
         return {};
     }
-    #if 1
     // just for test
     std::list<std::pair<DistributedTask, String>> res;
     auto rewrite_query = fillHashedChunksStorageSinks(from_query, tasks.size());
@@ -243,9 +241,6 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
         res.emplace_back(std::make_pair(task, query_str));
     }
     return res;
-    #else
-    return {};
-    #endif
 }
 
 InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::shared_ptr<ASTSelectWithUnionQuery> select_query)

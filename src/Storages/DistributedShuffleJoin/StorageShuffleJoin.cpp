@@ -52,7 +52,6 @@ public:
     {
         if (table_storage)
         {
-            //table_storage->getMutex().unlock();
             session_storage->releaseTable(table_id);
         }
     }

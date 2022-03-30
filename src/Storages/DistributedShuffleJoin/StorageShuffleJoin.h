@@ -64,7 +64,6 @@ public:
         QueryProcessingStage::Enum processed_stage_,
         size_t max_block_size_,
         unsigned num_streams_) override;
-
     SinkToStoragePtr write(
         const ASTPtr & ast,
         const StorageMetadataPtr & storage_metadata,
