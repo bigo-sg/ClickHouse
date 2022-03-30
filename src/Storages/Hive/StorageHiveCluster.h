@@ -26,7 +26,7 @@ class StorageHiveCluster : public shared_ptr_helper<StorageHiveCluster>, public 
     friend struct shared_ptr_helper<StorageHiveCluster>;
 
 public:
-    String getName() const override { return "HiveStorage"; }
+    String getName() const override { return "HiveClusterStorage"; }
     bool supportsIndexForIn() const override { return true; }
     bool mayBenefitFromIndexForIn(
         const ASTPtr & /* left_in_operand */,
@@ -73,6 +73,8 @@ private:
     std::shared_ptr<HiveSettings> storage_settings;
 
     Poco::Logger * logger = &Poco::Logger::get("StorageHiveCluster");
+
+    friend class StorageHiveClusterDistributedTasksBuilder;
 };
 }
 

@@ -37,6 +37,7 @@ Chunk TableHashedBlocksStorage::popChunk()
     {
         wait_more_data.wait(lock, [&] { return isSinkFinished() || !chunks.empty(); });
     }
+    LOG_TRACE(logger, "popChunk. isSinkFinished()={}, chunks.size()={}", isSinkFinished(), chunks.size());
 
     Chunk res;
     if (likely(!chunks.empty()))
@@ -81,36 +82,57 @@ Chunk TableHashedBlocksStorage::popChunkWithoutMutex()
     return res;
 }
 
-TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getTable(const String & table_id_) const
+TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getTable(const String & table_id_, bool wait_created)
 {
-    std::lock_guard lock(mutex);
+    std::unique_lock lock(mutex);
     auto iter = tables.find(table_id_);
     if (iter == tables.end())
     {
-        LOG_INFO(logger, "Table({}) not found in session({})", table_id_, session_id);
-        return nullptr;
+        if (!wait_created)
+        {
+            LOG_INFO(logger, "Table({}) not found in session({})", table_id_, session_id);
+            return nullptr;
+        }
+        new_table_cond.wait(lock, [&]{iter = tables.find(table_id_); return iter != tables.end();});
     }
     return iter->second;
 }
 
 TableHashedBlocksStoragePtr SessionHashedBlocksTablesStorage::getOrSetTable(const String & table_id_, const Block & header_, UInt64 active_sinks_)
 {
-    std::lock_guard lock(mutex);
-    auto iter = tables.find(table_id_);
-    if (iter == tables.end())
+    TableHashedBlocksStoragePtr table;
+    bool is_new_table = false;
     {
-        LOG_TRACE(logger, "create new blocks table:{}.{}", session_id, table_id_);
-        auto table = std::make_shared<TableStorage>(session_id, table_id_, header_, active_sinks_);
-        tables[table_id_] = table;
+        std::lock_guard lock(mutex);
+        auto iter = tables.find(table_id_);
+        if (iter == tables.end())
+        {
+            LOG_TRACE(logger, "create new blocks table:{}.{}", session_id, table_id_);
+            table = std::make_shared<TableStorage>(session_id, table_id_, header_, active_sinks_);
+            tables[table_id_] = table;
+            is_new_table = true;
+        }
+        else
+        {
+            table = iter->second;
+        }
+    }
+    if (is_new_table)
+    {
+        new_table_cond.notify_all();
         return table;
     }
 
-    auto & table = iter->second;
     const auto & table_header = table->getHeader();
-    if (!blocksHaveEqualStructure(table_header, header_) || table->getActiveSinks() != active_sinks_)
+    if (!blocksHaveEqualStructure(table_header, header_) || (table->getActiveSinks() != active_sinks_))
     {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Table({}-{}) exists with different header(), input header is :{}",
-            session_id, table_id_, table_header.dumpNames(), header_.dumpNames());
+        throw Exception(
+            ErrorCodes::BAD_ARGUMENTS,
+            "Table({}-{}) exists with different header(), input header is :{}",
+            session_id,
+            table_id_,
+            table_header.dumpNames(),
+            header_.dumpNames());
     }
     return table;
 }

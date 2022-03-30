@@ -591,6 +591,9 @@ InterpreterSelectQuery::InterpreterSelectQuery(
 void InterpreterSelectQuery::buildQueryPlan(QueryPlan & query_plan)
 {
     executeImpl(query_plan, std::move(input_pipe));
+    LOG_TRACE(&Poco::Logger::get("InterpreterSelectQuery"),
+        "headers: {} ; {}",
+        query_plan.getCurrentDataStream().header.dumpNames(), result_header.dumpNames());
 
     /// We must guarantee that result structure is the same as in getSampleBlock()
     ///

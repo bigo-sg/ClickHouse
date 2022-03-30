@@ -128,12 +128,12 @@ Pipe StorageHiveCluster::read(
         return Pipe::unitePipes(std::move(pipes));
     }
 
-    auto files_collector = HiveQueryTaskBuilderFactory::instance().getFilesCollector(policy_name);
-    if (!files_collector)
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive task policy : {}", policy_name);
     String task_resp = context_->getReadTaskCallback()();
     HiveQueryTaskPackage task_package;
     stringToPackage(task_resp, task_package);
+    auto files_collector = HiveQueryTaskBuilderFactory::instance().getFilesCollector(task_package.policy_name);
+    if (!files_collector)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive task policy : {}", policy_name);
     files_collector->setupCallbackData(task_package.data);
     IHiveQueryTaskFilesCollector::Arguments args
         = {.context = context_,

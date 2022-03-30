@@ -16,7 +16,7 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 BlockIOSourceTransform::BlockIOSourceTransform(BlockIOPtr block_io_)
-    : ISource(block_io_->pipeline.getHeader())
+    : ISource(block_io_->pipeline.completed() ? Block{} : block_io_->pipeline.getHeader())
     , block_io(block_io_)
 {
     is_pulling_pipeline = block_io->pipeline.pulling();
@@ -122,9 +122,10 @@ IProcessor::Status TreeBlockIOsConnectTransform::prepare()
         }
     }
 
-    if (need_blocked && !all_input_finished)
+    if ((need_blocked || !has_trigger_inputs) && !all_input_finished)
     {
         LOG_TRACE(logger, "need_blocked && !all_input_finished");
+        has_trigger_inputs = true;
         return Status::NeedData;
     }
 
@@ -146,6 +147,7 @@ IProcessor::Status TreeBlockIOsConnectTransform::prepare()
         Chunk new_chunk;
         while(pulling_executor->pull(new_chunk))
         {
+            LOG_TRACE(logger, "pull chunk rows:{}", new_chunk.getNumRows());
             if (new_chunk)
             {
                 has_input = true;
@@ -153,6 +155,7 @@ IProcessor::Status TreeBlockIOsConnectTransform::prepare()
                 return Status::Ready;
             }
         }
+        LOG_TRACE(logger, "pulling_executor->pull() = false. chunk rows:{}", new_chunk.getNumRows());
     }
     else
     {

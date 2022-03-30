@@ -5,11 +5,13 @@
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSelectWithUnionQuery.h>
 #include <Parsers/ASTTreeQuery.h>
+#include "Interpreters/StorageDistributedTasksBuilder.h"
 #include "Parsers/IAST_fwd.h"
 #include <Parsers/ASTInsertQuery.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/Cluster.h>
+#include <Interpreters/StorageDistributedTasksBuilder.h>
 #include <Poco/Logger.h>
 
 namespace DB
@@ -36,9 +38,11 @@ private:
 
     BlockIO execute(BlockIOPtr output_io, BlockIOs & input_block_ios);
 
-    std::optional<std::list<std::pair<Cluster::Address, String>>> tryToMakeDistributedInsertQueries(ASTPtr from_query);
+    std::optional<std::list<std::pair<DistributedTask, String>>> tryToMakeDistributedInsertQueries(ASTPtr from_query);
     std::optional<std::list<std::pair<Cluster::Address, String>>> tryToMakeDistributedSelectQueries(ASTPtr from_query);
 
     ASTPtr fillHashedChunksStorageSinks(ASTPtr from_query, UInt64 sinks);
+
+    std::vector<StoragePtr> getSelectStorages(ASTPtr ast);
 };
 }

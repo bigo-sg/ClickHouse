@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <condition_variable>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -109,8 +110,8 @@ public:
 
     explicit SessionHashedBlocksTablesStorage(const String & session_id_) : session_id(session_id_) {}
 
-    TableStoragePtr getTable(const String & table_id_) const;
-    TableStoragePtr getOrSetTable(const String & table_id_, const Block & header_, UInt64 active_sinks_);
+    TableStoragePtr getTable(const String & table_id_, bool wait_created = false);
+    TableStoragePtr getOrSetTable(const String & table_id_, const Block & header_, UInt64 active_sinks_ = 0);
     void releaseTable(const String & table_id_);
     std::mutex & getMutex()
     {
@@ -124,6 +125,7 @@ private:
     Poco::Logger * logger = &Poco::Logger::get("SessionHashedBlocksTablesStorage");
     String session_id;
     mutable std::mutex mutex;
+    std::condition_variable new_table_cond;
     std::unordered_map<String, std::shared_ptr<TableStorage>> tables;
 };
 using SessionHashedBlocksTablesStoragePtr = std::shared_ptr<SessionHashedBlocksTablesStorage>;

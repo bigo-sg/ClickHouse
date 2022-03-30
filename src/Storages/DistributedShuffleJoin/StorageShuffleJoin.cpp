@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -24,6 +25,7 @@
 #include <Interpreters/Cluster.h>
 #include <Processors/Sources/RemoteSource.h>
 #include <QueryPipeline/RemoteQueryExecutor.h>
+#include <Parsers/ASTSelectQuery.h>
 
 #include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
@@ -42,6 +44,7 @@ public:
         , WithContext(context_)
         , session_id(session_id_)
         , table_id(table_id_)
+        , header(header_)
     {
     }
 
@@ -49,7 +52,7 @@ public:
     {
         if (table_storage)
         {
-            table_storage->getMutex().unlock();
+            //table_storage->getMutex().unlock();
             session_storage->releaseTable(table_id);
         }
     }
@@ -84,7 +87,7 @@ public:
         return res;
         #else
         Chunk res = table_storage->popChunk();
-        if (!res)
+        if (!res.hasRows())
         {
             LOG_TRACE(logger, "reading finish. table:{}.{}", session_id, table_id);
         }
@@ -98,6 +101,7 @@ private:
     bool has_initialized = false;
     String session_id;
     String table_id;
+    Block header;
     SessionHashedBlocksTablesStoragePtr session_storage;
     TableHashedBlocksStoragePtr table_storage;
     size_t read_rows = 0;
@@ -107,10 +111,10 @@ private:
         if (likely(has_initialized))
             return;
         LOG_TRACE(logger, "initialize table source. {}.{}", session_id, table_id);
-        session_storage = HashedBlocksStorage::getInstance().getSession(session_id);
+        session_storage = HashedBlocksStorage::getInstance().getOrSetSession(session_id);
         if (session_storage)
         {
-            table_storage = session_storage->getTable(table_id);
+            table_storage = session_storage->getTable(table_id, true);
             if (table_storage)
             {
                 #if 0
@@ -244,7 +248,7 @@ private:
             node_connections.emplace_back(connection);
             auto inserter = std::make_shared<RemoteInserter>(
                 *connection,
-                ConnectionTimeouts{30000, 30000, 30000},
+                ConnectionTimeouts{3000000, 3000000, 3000000},
                 insert_sql,
                 context->getSettings(),
                 context->getClientInfo());
@@ -361,6 +365,7 @@ private:
             splited_blocks->emplace_back(new_columns);
             Block & splited_block = splited_blocks->back();
             LOG_TRACE(logger, "new block cols: {}, rows:{} for {}", splited_block.columns(), splited_block.rows(), table_id);
+            #if 0
             for (size_t i = 0; i < splited_block.columns(); ++i)
             {
                 auto column = splited_block.getByPosition(i);
@@ -370,6 +375,7 @@ private:
                     LOG_TRACE(logger, "column pos:{}, row: {}, value:{} for {}", i, k, column.column->get64(i), table_id);
                 }
             }
+            #endif
         } 
     }
     void sendBlocks(std::vector<Block> & blocks)
@@ -439,12 +445,12 @@ Pipe StorageShuffleJoin::read(
         auto source = std::make_shared<StorageShuffleJoinSource>(context_, session_id, table_id, header);
         return Pipe(source);
     }
-
+#if 0
     if (processed_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageShuffleJoin doesn't support two phases merge processing. current processing stage:{}", processed_stage_);
     }
-
+#endif
     // Since the query_info_.query has been rewritten, it may cause an ambiguous column exception in join case.
     // So we use the original_query here.
     auto remote_query = queryToString(query_info_.original_query);
@@ -493,6 +499,38 @@ SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMeta
         context_, cluster_name, session_id, table_id, getInMemoryMetadata().getSampleBlock(), getInMemoryMetadata().getColumns(), hash_expr_list, active_sinks);
     return sinker;
 }
+
+#if 0
+QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
+        ContextPtr local_context,
+        QueryProcessingStage::Enum to_stage,
+        const StorageMetadataPtr & /*metadata_snapshot*/,
+        SelectQueryInfo & query_info) const
+{
+
+    if (local_context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
+    {
+        LOG_TRACE(logger, "to_stage={}", to_stage);
+        const auto & select = query_info.query->as<ASTSelectQuery &>();
+        if (select.groupBy())
+            return std::min(to_stage, QueryProcessingStage::Complete);
+        if (to_stage >= QueryProcessingStage::WithMergeableState)
+            return QueryProcessingStage::WithMergeableState;
+    }
+    
+    return QueryProcessingStage::FetchColumns;
+}
+#else
+QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
+        ContextPtr /*local_context*/,
+        QueryProcessingStage::Enum /*to_stage*/,
+        const StorageMetadataPtr & /*metadata_snapshot*/,
+        SelectQueryInfo & /*query_info*/) const
+{
+    return QueryProcessingStage::FetchColumns;
+}
+
+#endif
 class StorageShuffleJoinPartSink : public SinkToStorage
 {
 public:

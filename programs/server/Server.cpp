@@ -89,6 +89,7 @@
 #include <Interpreters/AsynchronousInsertQueue.h>
 #include <Compression/CompressionCodecEncrypted.h>
 #include <filesystem>
+#include <Interpreters/StorageDistributedTasksBuilder.h>
 
 #include "config_core.h"
 #include "Common/config_version.h"
@@ -573,6 +574,7 @@ if (ThreadFuzzer::instance().isEffective())
     #if USE_HIVE
     registerHiveQueryTaskBuilders();
     #endif
+    registerAllStorageDistributedTaskBuilderMakers();
 
     Poco::ThreadPool server_pool(3, config().getUInt("max_connections", 1024));
     std::mutex servers_lock;

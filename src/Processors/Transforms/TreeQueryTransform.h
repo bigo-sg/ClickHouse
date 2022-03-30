@@ -38,6 +38,7 @@ private:
     bool is_completed_pipeline;
     bool has_output = false;
     bool has_input = false;
+    bool has_trigger_inputs = false;
     Chunk chunk;
     std::unique_ptr<PullingAsyncPipelineExecutor> pulling_executor;
     Poco::Logger * logger = &Poco::Logger::get("TreeBlockIOsConnectTransform");

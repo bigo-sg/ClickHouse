@@ -37,8 +37,12 @@ public:
         const ColumnsDescription & columns_,
         ASTPtr hash_expr_list_,
         UInt64 active_sinks_);
-
-private:
+    QueryProcessingStage::Enum getQueryProcessingStage(
+        ContextPtr local_context,
+        QueryProcessingStage::Enum to_stage,
+        const StorageMetadataPtr & metadata_snapshot,
+        SelectQueryInfo & query_info) const override;
+private :
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
     ASTPtr query;
     String cluster_name;
