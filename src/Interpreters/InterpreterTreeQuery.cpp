@@ -202,14 +202,32 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
                 return {};
             }
         }
+        auto cluster = context->getCluster(cluster_name)->getClusterWithReplicasAsShards(context->getSettings());
+        for (const auto & replicas : cluster->getShardsAddresses())
+        {
+            for (const auto & node : replicas)
+            {
+                DistributedTask task(node, RemoteQueryExecutor::Extension{});
+                tasks.emplace_back(task);
+            }
+        }
     }
-    else if (storages.size() == 1){
+    else if (storages.size() == 1)
+    {
         auto distributed_tasks_builder = StorageDistributedTaskBuilderFactory::getInstance().getBuilder(storages[0]->getName());
         if (!distributed_tasks_builder)
+        {
+            LOG_INFO(logger, "Not found builder for {}", storages[0]->getName());
             return {};
-        tasks = distributed_tasks_builder->getDistributedTasks(cluster_name, context, insert_query->select, storages[0]);
+        }
+        auto select_with_union_query = std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(insert_query->select);
+        tasks = distributed_tasks_builder->getDistributedTasks(
+            cluster_name, context, select_with_union_query->list_of_selects->children[0], storages[0]);
         if (tasks.empty())
+        {
+            LOG_TRACE(logger, "Tasks is empty for {}", storages[0]->getName());
             return {};
+        }
     }
     else
     {

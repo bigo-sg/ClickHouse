@@ -57,7 +57,10 @@ void CollectStoragesMatcher::visit(const std::shared_ptr<ASTSelectQuery> & ast, 
         }
         else
         {
-            visit(table_expression->subquery, data);
+            for (const auto & child : table_expression->subquery->children)
+            {
+                visit(child, data);
+            }
         }
     }
 }

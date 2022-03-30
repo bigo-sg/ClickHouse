@@ -59,6 +59,6 @@ void registerHiveClusterDistributedTaskBuilder()
         return std::make_shared<StorageHiveClusterDistributedTasksBuilder>();
     };
     // HiveClusterStorage need to be the same as StorageHiveCluster::getName();
-    StorageDistributedTaskBuilderFactory::getInstance().registerMaker("HiveClusterStorage", maker);
+    StorageDistributedTaskBuilderFactory::getInstance().registerMaker("HiveCluster", maker);
 }
 }
