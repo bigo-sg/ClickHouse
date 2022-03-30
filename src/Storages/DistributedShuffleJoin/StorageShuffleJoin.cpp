@@ -419,7 +419,7 @@ StorageShuffleJoin::StorageShuffleJoin(
 
 Pipe StorageShuffleJoin::read(
     const Names & column_names_,
-    const StorageMetadataPtr & metadata_snapshot_,
+    const StorageSnapshotPtr & metadata_snapshot_,
     SelectQueryInfo & query_info_,
     ContextPtr context_,
     QueryProcessingStage::Enum processed_stage_,
@@ -487,7 +487,7 @@ Pipe StorageShuffleJoin::read(
             pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, false, false));
         }
     }
-    metadata_snapshot_->check(column_names_, getVirtuals(), getStorageID());
+    metadata_snapshot_->check(column_names_);
     return Pipe::unitePipes(std::move(pipes));
 
 }
@@ -524,7 +524,7 @@ QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
 QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
         ContextPtr /*local_context*/,
         QueryProcessingStage::Enum /*to_stage*/,
-        const StorageMetadataPtr & /*metadata_snapshot*/,
+        const StorageSnapshotPtr & /*metadata_snapshot*/,
         SelectQueryInfo & /*query_info*/) const
 {
     return QueryProcessingStage::FetchColumns;
@@ -587,7 +587,7 @@ StorageShuffleJoinPart::StorageShuffleJoinPart(
 
 Pipe StorageShuffleJoinPart::read(
     const Names & /*column_names_*/,
-    const StorageMetadataPtr & /*metadata_snapshot_*/,
+    const StorageSnapshotPtr & /*metadata_snapshot_*/,
     SelectQueryInfo & /*query_info_*/,
     ContextPtr /*context_*/,
     QueryProcessingStage::Enum /*processed_stage_*/,

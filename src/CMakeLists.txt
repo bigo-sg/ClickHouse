@@ -495,6 +495,11 @@ endif()
 
 target_link_libraries (clickhouse_common_io PUBLIC ch_contrib::fast_float)
 
+if (USE_ORC)
+    dbms_target_link_libraries(PUBLIC ${ORC_LIBRARIES})
+    dbms_target_include_directories(SYSTEM BEFORE PUBLIC ${ORC_INCLUDE_DIR} "${CMAKE_BINARY_DIR}/contrib/orc/c++/include")
+endif ()
+
 if (TARGET ch_contrib::rocksdb)
     dbms_target_link_libraries(PUBLIC ch_contrib::rocksdb)
 endif()
@@ -569,6 +574,14 @@ if (ENABLE_TESTS)
         clickhouse_common_config
         clickhouse_common_zookeeper
         string_utils)
+
+    if (TARGET ch_contrib::simdjson)
+        target_link_libraries(unit_tests_dbms PRIVATE ch_contrib::simdjson)
+    endif()
+
+    if (TARGET ch_contrib::yaml_cpp)
+        target_link_libraries(unit_tests_dbms PRIVATE ch_contrib::yaml_cpp)
+    endif()
 
     add_check(unit_tests_dbms)
 endif ()

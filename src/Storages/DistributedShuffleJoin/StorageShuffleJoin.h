@@ -15,7 +15,7 @@ public:
     String getName() const override { return "StorageShuffleJoin"; }
     Pipe read(
         const Names & column_names_,
-        const StorageMetadataPtr & metadata_snapshot_,
+        const StorageSnapshotPtr & metadata_snapshot_,
         SelectQueryInfo & query_info_,
         ContextPtr context_,
         QueryProcessingStage::Enum processed_stage_,
@@ -40,7 +40,7 @@ public:
     QueryProcessingStage::Enum getQueryProcessingStage(
         ContextPtr local_context,
         QueryProcessingStage::Enum to_stage,
-        const StorageMetadataPtr & metadata_snapshot,
+        const StorageSnapshotPtr & metadata_snapshot,
         SelectQueryInfo & query_info) const override;
 private :
     Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
@@ -58,7 +58,7 @@ public:
     String getName() const override { return "StorageShuffleJoinPart"; }
     Pipe read(
         const Names & column_names_,
-        const StorageMetadataPtr & metadata_snapshot_,
+        const StorageSnapshotPtr & metadata_snapshot_,
         SelectQueryInfo & query_info_,
         ContextPtr context_,
         QueryProcessingStage::Enum processed_stage_,
