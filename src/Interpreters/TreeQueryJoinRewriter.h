@@ -18,10 +18,10 @@
 
 namespace DB
 {
-class TreeQueryRewriterMatcher
+class TreeQueryJoinRewriterMatcher
 {
 public:
-    using Visitor = InDepthNodeVisitor<TreeQueryRewriterMatcher, true>;
+    using Visitor = InDepthNodeVisitor<TreeQueryJoinRewriterMatcher, true>;
     
     struct Data
     {
@@ -45,5 +45,5 @@ private:
 
     static std::shared_ptr<ASTTreeQuery> makeTreeQuery(ASTPtr output_query, const ASTs & input_queries);
 };
-using TreeQueryRewriterVisitor = TreeQueryRewriterMatcher::Visitor;
+using TreeQueryJoinRewriterVisitor = TreeQueryJoinRewriterMatcher::Visitor;
 }

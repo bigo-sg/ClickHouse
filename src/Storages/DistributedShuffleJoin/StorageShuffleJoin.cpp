@@ -29,6 +29,7 @@
 
 #include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
+#include <Poco/Logger.h>
 
 namespace DB
 {
@@ -393,7 +394,7 @@ private:
 /**
  * FIXEDME: Maybe need the initiator pass the cluster nodes, not query by the worker nodes. Since the cluster nodes set may change
  */
-StorageShuffleJoin::StorageShuffleJoin(
+StorageShuffleBase::StorageShuffleBase(
     ContextPtr context_,
     ASTPtr query_,
     const String & cluster_name_,
@@ -416,7 +417,7 @@ StorageShuffleJoin::StorageShuffleJoin(
     setInMemoryMetadata(storage_metadata);
 }
 
-Pipe StorageShuffleJoin::read(
+Pipe StorageShuffleBase::read(
     const Names & column_names_,
     const StorageSnapshotPtr & metadata_snapshot_,
     SelectQueryInfo & query_info_,
@@ -468,7 +469,7 @@ Pipe StorageShuffleJoin::read(
                 node.password,
                 node.cluster,
                 node.cluster_secret,
-                "StorageShuffleJoin",
+                "StorageShuffleBase",
                 node.compression,
                 node.secure);
 
@@ -491,7 +492,7 @@ Pipe StorageShuffleJoin::read(
 
 }
 
-SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMetadataPtr & /*storage_metadata*/, ContextPtr context_)
+SinkToStoragePtr StorageShuffleBase::write(const ASTPtr & ast, const StorageMetadataPtr & /*storage_metadata*/, ContextPtr context_)
 {
     LOG_TRACE(logger, "write query: {}", queryToString(ast));
     auto sinker = std::make_shared<StorageShuffleJoinSink>(
@@ -499,23 +500,27 @@ SinkToStoragePtr StorageShuffleJoin::write(const ASTPtr & ast, const StorageMeta
     return sinker;
 }
 
-#if 0
-QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
+#if 1
+QueryProcessingStage::Enum StorageShuffleBase::getQueryProcessingStage(
         ContextPtr local_context,
         QueryProcessingStage::Enum to_stage,
-        const StorageMetadataPtr & /*metadata_snapshot*/,
+        const StorageSnapshotPtr & /*metadata_snapshot*/,
         SelectQueryInfo & query_info) const
 {
-
+    LOG_TRACE(logger, "query:{}, to_stage:{}, query_kind:{}", queryToString(query_info.query), to_stage, local_context->getClientInfo().query_kind);
     if (local_context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
     {
-        LOG_TRACE(logger, "to_stage={}", to_stage);
-        const auto & select = query_info.query->as<ASTSelectQuery &>();
-        if (select.groupBy())
-            return std::min(to_stage, QueryProcessingStage::Complete);
+        #if 1
+        // When there is join in the query, cannot enable the two phases processing. It will cause 
+        // a column missing exception, if the result column is in the right table but not in the left table
+        auto select_query = query_info.query->as<ASTSelectQuery &>();
+        if (select_query.join())
+            return QueryProcessingStage::FetchColumns;
+        #endif
         if (to_stage >= QueryProcessingStage::WithMergeableState)
             return QueryProcessingStage::WithMergeableState;
     }
+
     
     return QueryProcessingStage::FetchColumns;
 }
@@ -530,6 +535,37 @@ QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
 }
 
 #endif
+
+const String StorageShuffleJoin::NAME = "StorageShuffleJoin";
+StorageShuffleJoin::StorageShuffleJoin(
+        ContextPtr context_,
+        ASTPtr query_,
+        const String & cluster_name_,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_,
+        ASTPtr hash_expr_list_,
+        UInt64 active_sinks_)
+    : StorageShuffleBase(context_, query_, cluster_name_, session_id_, table_id_, columns_, hash_expr_list_, active_sinks_)
+{
+    logger = &Poco::Logger::get("StorageShuffleJoin");
+}
+ 
+
+const String StorageShuffleAggregation::NAME = "StorageShuffleAggregation";
+StorageShuffleAggregation::StorageShuffleAggregation(
+        ContextPtr context_,
+        ASTPtr query_,
+        const String & cluster_name_,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_,
+        ASTPtr hash_expr_list_,
+        UInt64 active_sinks_)
+    : StorageShuffleBase(context_, query_, cluster_name_, session_id_, table_id_, columns_, hash_expr_list_, active_sinks_)
+{
+    logger = &Poco::Logger::get("StorageShuffleAggregation");
+}
 class StorageShuffleJoinPartSink : public SinkToStorage
 {
 public:

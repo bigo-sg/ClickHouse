@@ -1,5 +1,5 @@
 #include <memory>
-#include <Interpreters/TreeQueryRewriter.h>
+#include <Interpreters/TreeQueryJoinRewriter.h>
 #include <Parsers/IAST_fwd.h>
 #include <algorithm>
 #include <memory>
@@ -32,7 +32,7 @@
 
 namespace DB
 {
-void TreeQueryRewriterMatcher::visit(ASTPtr & ast_, Data & data_)
+void TreeQueryJoinRewriterMatcher::visit(ASTPtr & ast_, Data & data_)
 {
     ASTPtr from_ast = ast_->clone();
     ASTPtr result;
@@ -48,7 +48,7 @@ void TreeQueryRewriterMatcher::visit(ASTPtr & ast_, Data & data_)
     }
     else
     {
-        LOG_INFO(&Poco::Logger::get("TreeQueryRewriterMatcher"), "Not support query type: {}", ast_->getID());
+        LOG_INFO(&Poco::Logger::get("TreeQueryJoinRewriterMatcher"), "Not support query type: {}", ast_->getID());
     }
     if (!result)
     {
@@ -59,7 +59,7 @@ void TreeQueryRewriterMatcher::visit(ASTPtr & ast_, Data & data_)
     }
 }
 
-ASTPtr TreeQueryRewriterMatcher::visit(std::shared_ptr<ASTSelectQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
+ASTPtr TreeQueryJoinRewriterMatcher::visit(std::shared_ptr<ASTSelectQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
 {
     const auto * joined_element = query_->join();
     if (joined_element)
@@ -95,11 +95,11 @@ ASTPtr TreeQueryRewriterMatcher::visit(std::shared_ptr<ASTSelectQuery> & query_,
         // Only when we have join actions on subquery, we rebuild a ASTTreeQuery
         return makeTreeQuery(new_select_query, children);
     }
-    //LOG_INFO(&Poco::Logger::get("TreeQueryRewriterMatcher"), "Not support query type: {}", left_table_expression->getID());
+    //LOG_INFO(&Poco::Logger::get("TreeQueryJoinRewriterMatcher"), "Not support query type: {}", left_table_expression->getID());
     return query_;
 }
 
-ASTPtr TreeQueryRewriterMatcher::visit(std::shared_ptr<ASTSelectWithUnionQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
+ASTPtr TreeQueryJoinRewriterMatcher::visit(std::shared_ptr<ASTSelectWithUnionQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
 {
     ASTs prev_children;
     query_->list_of_selects->children.swap(prev_children);
@@ -117,7 +117,7 @@ ASTPtr TreeQueryRewriterMatcher::visit(std::shared_ptr<ASTSelectWithUnionQuery> 
     return makeTreeQuery(query_, children);
 }
 
-ASTPtr TreeQueryRewriterMatcher::visitChild(ASTPtr & query_, Data & data_, size_t visit_depth_, ASTs & children)
+ASTPtr TreeQueryJoinRewriterMatcher::visitChild(ASTPtr & query_, Data & data_, size_t visit_depth_, ASTs & children)
 {
     ASTPtr new_query;
     if (auto select_query = std::dynamic_pointer_cast<ASTSelectQuery>(query_))
@@ -135,12 +135,12 @@ ASTPtr TreeQueryRewriterMatcher::visitChild(ASTPtr & query_, Data & data_, size_
     return new_query;
 }
 
-ASTPtr TreeQueryRewriterMatcher::visitSelectWithJoin(std::shared_ptr<ASTSelectQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
+ASTPtr TreeQueryJoinRewriterMatcher::visitSelectWithJoin(std::shared_ptr<ASTSelectQuery> & query_, Data & data_, size_t visit_depth_, ASTs & children)
 {
     TreeDistributedShuffleJoinRewriter rewriter(query_, data_.context, data_.id_count);
     if (!rewriter.prepare())
     {
-        LOG_TRACE(&Poco::Logger::get("TreeQueryRewriterMatcher"), "TreeDistributedShuffleJoinRewriter::prepare failed");
+        LOG_TRACE(&Poco::Logger::get("TreeQueryJoinRewriterMatcher"), "TreeDistributedShuffleJoinRewriter::prepare failed");
         return query_;
     }
 
@@ -192,7 +192,7 @@ static String tryGetTableExpressionAlias(const ASTTableExpression * table_expr)
     return res;
 }
 
-std::shared_ptr<ASTTableExpression> TreeQueryRewriterMatcher::visitJoinSelectTableExpression(const ASTTableExpression * table_expression, Data & data, ASTs & children)
+std::shared_ptr<ASTTableExpression> TreeQueryJoinRewriterMatcher::visitJoinSelectTableExpression(const ASTTableExpression * table_expression, Data & data, ASTs & children)
 {
     std::shared_ptr<ASTTableExpression> new_table_expression;
     if (table_expression->database_and_table_name || table_expression->table_function)
@@ -214,14 +214,14 @@ std::shared_ptr<ASTTableExpression> TreeQueryRewriterMatcher::visitJoinSelectTab
     return new_table_expression;
 }
 
-std::shared_ptr<ASTTreeQuery> TreeQueryRewriterMatcher::makeTreeQuery(ASTPtr output_query, const ASTs & input_queries)
+std::shared_ptr<ASTTreeQuery> TreeQueryJoinRewriterMatcher::makeTreeQuery(ASTPtr output_query, const ASTs & input_queries)
 {
     auto tree_query = std::make_shared<ASTTreeQuery>();
     tree_query->output_ast = output_query;
     tree_query->input_asts = input_queries;
     tree_query->children.insert(tree_query->children.end(), input_queries.begin(), input_queries.end());
     tree_query->children.push_back(output_query);
-    LOG_TRACE(&Poco::Logger::get("TreeQueryRewriterMatcher"), "Build a tree query: {}", queryToString(tree_query));
+    LOG_TRACE(&Poco::Logger::get("TreeQueryJoinRewriterMatcher"), "Build a tree query: {}", queryToString(tree_query));
     return tree_query;
 }
 

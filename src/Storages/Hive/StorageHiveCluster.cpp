@@ -16,6 +16,9 @@
 #include <Storages/Hive/HiveQueryTaskBuilderFactory.h>
 #include <Storages/Hive/StorageHive.h>
 #include <Storages/StorageFactory.h>
+
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 namespace DB
 {
 
@@ -169,8 +172,9 @@ Pipe StorageHiveCluster::read(
 }
 
 QueryProcessingStage::Enum StorageHiveCluster::getQueryProcessingStage(
-    ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageSnapshotPtr &, SelectQueryInfo &) const
+    ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageSnapshotPtr &, SelectQueryInfo & query_info_) const
 {
+    LOG_TRACE(&Poco::Logger::get("StorageHiveCluster"),  "query:{}, to_stage:{}, query_kind:{}", queryToString(query_info_.query), to_stage_, context_->getClientInfo().query_kind);
     if (context_->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
         if (to_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
             return QueryProcessingStage::Enum::WithMergeableState;

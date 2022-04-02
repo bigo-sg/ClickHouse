@@ -9,10 +9,11 @@
 namespace DB
 {
 
-class StorageShuffleJoin : public shared_ptr_helper<StorageShuffleJoin>, public IStorage, WithContext
+
+class StorageShuffleBase : public IStorage, WithContext
 {
 public:
-    String getName() const override { return "StorageShuffleJoin"; }
+    virtual String getName() const override = 0;
     Pipe read(
         const Names & column_names_,
         const StorageSnapshotPtr & metadata_snapshot_,
@@ -28,7 +29,7 @@ public:
         ContextPtr context
     ) override;
 
-    StorageShuffleJoin(
+    StorageShuffleBase(
         ContextPtr context_,
         ASTPtr query_,
         const String & cluster_name_,
@@ -42,14 +43,47 @@ public:
         QueryProcessingStage::Enum to_stage,
         const StorageSnapshotPtr & metadata_snapshot,
         SelectQueryInfo & query_info) const override;
-private :
-    Poco::Logger * logger = &Poco::Logger::get("StorageShuffleJoin");
+protected:
+    Poco::Logger * logger;
     ASTPtr query;
     String cluster_name;
     String session_id;
     String table_id;
     ASTPtr hash_expr_list;
     UInt64 active_sinks;
+
+};
+class StorageShuffleJoin : public shared_ptr_helper<StorageShuffleJoin>, public StorageShuffleBase
+{
+public:
+    static const String NAME;
+    String getName() const override { return "StorageShuffleJoin"; }
+
+    StorageShuffleJoin(
+        ContextPtr context_,
+        ASTPtr query_,
+        const String & cluster_name_,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_,
+        ASTPtr hash_expr_list_,
+        UInt64 active_sinks_);
+};
+
+class StorageShuffleAggregation : public shared_ptr_helper<StorageShuffleJoin>, public StorageShuffleBase
+{
+public:
+    static const String NAME; 
+    String getName() const override { return "StorageShuffleAggregation"; }
+    StorageShuffleAggregation(
+        ContextPtr context_,
+        ASTPtr query_,
+        const String & cluster_name_,
+        const String & session_id_,
+        const String & table_id_,
+        const ColumnsDescription & columns_,
+        ASTPtr hash_expr_list_,
+        UInt64 active_sinks_);
 };
 
 class StorageShuffleJoinPart : public shared_ptr_helper<StorageShuffleJoinPart>, public IStorage, WithContext

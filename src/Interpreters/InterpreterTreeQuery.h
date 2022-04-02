@@ -39,10 +39,15 @@ private:
     BlockIO execute(BlockIOPtr output_io, BlockIOs & input_block_ios);
 
     std::optional<std::list<std::pair<DistributedTask, String>>> tryToMakeDistributedInsertQueries(ASTPtr from_query);
-    std::optional<std::list<std::pair<Cluster::Address, String>>> tryToMakeDistributedSelectQueries(ASTPtr from_query);
+    std::optional<std::list<std::pair<DistributedTask, String>>> tryToMakeDistributedSelectQueries(ASTPtr from_query);
 
     ASTPtr fillHashedChunksStorageSinks(ASTPtr from_query, UInt64 sinks);
 
     std::vector<StoragePtr> getSelectStorages(ASTPtr ast);
+
+    static bool hasGroupby(const IAST & ast);
+    bool hasAggregation(const IAST & ast);
+
+    std::list<std::pair<DistributedTask, String>> buildSelectTasks(ASTPtr from_query);
 };
 }

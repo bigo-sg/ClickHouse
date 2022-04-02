@@ -23,9 +23,14 @@
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Parsers/queryToString.h>
 #include <Parsers/ASTFunction.h>
+#include <Parsers/ASTExpressionList.h>
+#include <Parsers/ASTSelectWithUnionQuery.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <TableFunctions/TableFunctionShuffleJoin.h>
 #include <Interpreters/CollectStoragesVisitor.h>
 #include <Interpreters/StorageDistributedTasksBuilder.h>
+#include <Storages/DistributedShuffleJoin/StorageShuffleJoin.h>
+
 
 namespace DB
 {
@@ -185,22 +190,96 @@ std::vector<StoragePtr> InterpreterTreeQuery::getSelectStorages(ASTPtr ast)
     return data.storages;
 }
 
+bool InterpreterTreeQuery::hasGroupby(const IAST & ast)
+{
+    if (const auto * insert_query = ast.as<ASTInsertQuery>())
+    {
+        return hasGroupby(*(insert_query->select));
+    }
+    else if (const auto * select_with_union_query = ast.as<ASTSelectWithUnionQuery>())
+    {
+        for (auto & child : select_with_union_query->list_of_selects->children)
+        {
+            if (hasGroupby(*child))
+                return true;
+        }
+    }
+    else if (const auto * select_query = ast.as<ASTSelectQuery>())
+    {
+        #if 0
+        if (select_query->groupBy() || select_query->having())
+            return true;
+        const auto * select_list = select_query->select()->as<ASTExpressionList>();
+        for (const auto & child : select_list->children)
+        {
+            if (const auto * function = child->as<ASTFunction>())
+            {
+                if (function->name == "count" || function->name == "avg" || function->name == "sum")
+                {
+                    return true;
+                }
+            }
+        }
+        #endif
+        return select_query->groupBy() != nullptr;
+
+    }
+    return false;
+}
+
+bool InterpreterTreeQuery::hasAggregation(const IAST & ast)
+{
+    if (const auto * insert_query = ast.as<ASTInsertQuery>())
+    {
+        return hasAggregation(*(insert_query->select));
+    }
+    else if (const auto * select_with_union_query = ast.as<ASTSelectWithUnionQuery>())
+    {
+        for (auto & child : select_with_union_query->list_of_selects->children)
+        {
+            if (hasAggregation(*child))
+                return true;
+        }
+    }
+    else if (const auto * select_query = ast.as<ASTSelectQuery>())
+    {
+        const auto * select_list = select_query->select()->as<ASTExpressionList>();
+        for (const auto & child : select_list->children)
+        {
+            LOG_TRACE(logger, "visit select column:{}", queryToString(child));
+            if (const auto * function = child->as<ASTFunction>())
+            {
+                if (function->name == "count" || function->name == "avg" || function->name == "sum")
+                {
+                    return true;
+                }
+            }
+        }
+
+    }
+    return false;
+}
+
 std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedInsertQueries(ASTPtr from_query)
 {
     LOG_TRACE(logger, "tryToMakeDistributedInsertQueries. query:{}", queryToString(from_query));
-    String cluster_name = context->getSettings().distributed_shuffle_join_cluster.value;
+    String cluster_name = context->getSettings().distributed_shuffle_cluster.value;
     auto insert_query = std::dynamic_pointer_cast<ASTInsertQuery>(from_query);
     auto storages = getSelectStorages(insert_query->select);
+    bool has_groupby = hasGroupby(*from_query);
+    bool has_agg = hasAggregation(*from_query);
     DistributedTasks tasks;
     if (storages.size() == 2)
     {
         for (const auto & storage : storages)
         {
-            if (storage->getName() != "StorageShuffleJoin")
+            if (storage->getName() != StorageShuffleJoin::NAME)
             {
                 return {};
             }
         }
+        if (has_groupby || has_agg)
+            return {};
         auto cluster = context->getCluster(cluster_name)->getClusterWithReplicasAsShards(context->getSettings());
         for (const auto & replicas : cluster->getShardsAddresses())
         {
@@ -213,6 +292,8 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
     }
     else if (storages.size() == 1)
     {
+        if (storages[0]->getName() != StorageShuffleAggregation::NAME)
+            return {};
         auto distributed_tasks_builder = StorageDistributedTaskBuilderFactory::getInstance().getBuilder(storages[0]->getName());
         if (!distributed_tasks_builder)
         {
@@ -259,7 +340,8 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::s
     Pipes pipes;
     for (auto & shard_query : *distributed_queries)
     {
-        auto & node = shard_query.first;
+        auto & node = shard_query.first.first;
+        auto task_extension = shard_query.first.second;
         auto & remote_query = shard_query.second;
         auto connection = std::make_shared<Connection>(
                 node.host_name,
@@ -294,25 +376,54 @@ InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildSelectBlockIO(std::s
     return res;
 }
 
-std::optional<std::list<std::pair<Cluster::Address, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
+std::list<std::pair<DistributedTask, String>> InterpreterTreeQuery::buildSelectTasks(ASTPtr from_query)
 {
-    LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
-    #if 0
-    // just for test
-    std::list<std::pair<Cluster::Address, String>> res;
+    std::list<std::pair<DistributedTask, String>> res;
     String query_str = queryToString(from_query);
-    auto cluster = context->getCluster(context->getSettings().distributed_shuffle_join_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
-    for (const auto & shard : cluster->getShardsAddresses())
+    String cluster_name = context->getSettings().distributed_shuffle_cluster.value;
+    auto cluster = context->getCluster(cluster_name)->getClusterWithReplicasAsShards(context->getSettings());
+    for (const auto & replicas : cluster->getShardsAddresses())
     {
-        for (const auto & node : shard)
+        for (const auto & node : replicas)
         {
-            res.push_back(std::make_pair(node, query_str));
+            DistributedTask task(node, RemoteQueryExecutor::Extension{});
+            res.emplace_back(std::make_pair(task, query_str));
+            LOG_TRACE(logger, "run select on node: {}, query:{}", node.host_name, query_str);
         }
     }
     return res;
-    #else
+
+}
+std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
+{
+    LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
+    auto storages = getSelectStorages(from_query);
+    bool has_groupby = hasGroupby(*from_query);
+    bool has_agg = hasAggregation(*from_query);
+    LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}. has_groupby:{}, has_agg:{}", queryToString(from_query), has_groupby, has_agg);
+    if (storages.size() == 2)
+    {
+        for (const auto & storage : storages)
+        {
+            if (storage->getName() != StorageShuffleJoin::NAME)
+            {
+                LOG_TRACE(logger, "Not hash storage:{} {}", storage->getName(), StorageShuffleJoin::NAME);
+                return {};
+            }
+        }
+        if (has_groupby || has_agg)
+            return {};
+
+        return buildSelectTasks(from_query);
+        
+    }
+    else if (storages.size() == 1 && storages[0]->getName() == StorageShuffleAggregation::NAME && has_groupby)
+    {
+        return buildSelectTasks(from_query);
+    }
+
     return {};
-    #endif
+
 }
 
 InterpreterTreeQuery::BlockIOPtr InterpreterTreeQuery::buildTreeBlockIO(std::shared_ptr<ASTTreeQuery> tree_query)

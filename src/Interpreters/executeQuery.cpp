@@ -85,7 +85,9 @@
 #include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
-#include <Interpreters/TreeQueryRewriter.h>
+#include <Interpreters/TreeQueryJoinRewriter.h>
+
+#include <Interpreters/ASTRewriters/EliminateCompositeColumnNameRewriter.h>
 
 namespace ProfileEvents
 {
@@ -664,8 +666,12 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                         select_with_union->set_of_modes.size(),
                         select_with_union->list_of_selects->getID());
                 }
-                if (!context->getSettings().distributed_shuffle_join_cluster.value.empty())
+                if (!context->getSettings().distributed_shuffle_cluster.value.empty())
                 {
+                    EliminateCompositeColumnNameRewriter rewriter(context, ast->clone());
+                    auto rename_ast = rewriter.run();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "rename_ast:{}", queryToString(rename_ast));
+
                     #if 0
                     TreeShufflePhasesSelectQueryRewriterMatcher::Data data;
                     data.context = context;
@@ -674,10 +680,10 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "rewrite ast:\n{}", queryToString(data.rewritten_query));
                     ast = data.rewritten_query;
                     #else
-                    TreeQueryRewriterMatcher::Data data;
+                    TreeQueryJoinRewriterMatcher::Data data;
                     data.context = context;
-                    auto new_ast = ast->clone();
-                    TreeQueryRewriterVisitor(data).visit(new_ast);
+                    auto new_ast = rename_ast;
+                    TreeQueryJoinRewriterVisitor(data).visit(new_ast);
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "result query:{};{}", data.rewritten_query->getID(), queryToString(data.rewritten_query));
                     ast = data.rewritten_query;
                     #endif

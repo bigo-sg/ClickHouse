@@ -107,7 +107,7 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildShufflePhaseBlockIO(ASTPtr 
 
     return block_io;
 #else
-    auto cluster = context->getCluster(context->getSettings().distributed_shuffle_join_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
+    auto cluster = context->getCluster(context->getSettings().distributed_shuffle_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
     Pipes pipes;
     const Scalars & scalars = context->hasQueryContext() ? context->getQueryContext()->getScalars() : Scalars{};
     for (const auto & shard : cluster->getShardsAddresses())
@@ -162,7 +162,7 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr q
     auto block_io = select_interpreter->execute();
     return std::make_shared<BlockIO>(std::move(block_io));
 #else
-    auto cluster = context->getCluster(context->getSettings().distributed_shuffle_join_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
+    auto cluster = context->getCluster(context->getSettings().distributed_shuffle_cluster.value)->getClusterWithReplicasAsShards(context->getSettingsRef());
     Pipes pipes;
     const Scalars & scalars = context->hasQueryContext() ? context->getQueryContext()->getScalars() : Scalars{};
     for (const auto & shard : cluster->getShardsAddresses())

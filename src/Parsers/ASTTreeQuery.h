@@ -20,5 +20,7 @@ public:
     String getID(char) const override { return "ASTTreeQeury"; }
     ASTPtr clone() const override;
     void formatImpl(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
+
+    static ASTPtr make(ASTPtr output_ast, ASTs input_asts);
 };
 }

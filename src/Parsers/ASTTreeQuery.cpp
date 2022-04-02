@@ -6,6 +6,15 @@
 #include "Parsers/IAST_fwd.h"
 namespace DB
 {
+ASTPtr ASTTreeQuery::make(ASTPtr output_ast, ASTs input_asts)
+{
+    auto tree_query = std::make_shared<ASTTreeQuery>();
+    tree_query->output_ast = output_ast;
+    tree_query->input_asts = input_asts;
+    tree_query->children.insert(tree_query->children.end(), input_asts.begin(), input_asts.end());
+    tree_query->children.push_back(output_ast);
+    return tree_query;
+}
 ASTPtr ASTTreeQuery::clone() const
 {
     auto res = std::make_shared<ASTTreeQuery>();

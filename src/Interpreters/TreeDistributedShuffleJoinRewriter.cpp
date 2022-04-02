@@ -484,7 +484,7 @@ ASTPtr TreeDistributedShuffleJoinRewriter::createHashTableExpression(const Strin
     table_func->arguments = std::make_shared<ASTExpressionList>();
     table_func->children.push_back(table_func->arguments );
 
-    String cluster_name = getContext()->getSettings().distributed_shuffle_join_cluster.value;
+    String cluster_name = getContext()->getSettings().distributed_shuffle_cluster.value;
     Field cluster_name_field(cluster_name);
     table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(cluster_name_field));
   
