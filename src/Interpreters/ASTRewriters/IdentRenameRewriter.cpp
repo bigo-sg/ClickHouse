@@ -7,6 +7,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTLiteral.h>
+#include <Parsers/ASTAsterisk.h>
 
 namespace DB
 {
@@ -47,6 +48,10 @@ ASTPtr IdentRenameRewriter::visitChild(IAST * ast)
         res = visit(expression_list);
     }
     else if (auto * literal = ast->as<ASTLiteral>())
+    {
+        res = ast->clone();
+    }
+    else if (auto * asterisk = ast->as<ASTAsterisk>())
     {
         res = ast->clone();
     }

@@ -66,7 +66,7 @@ void TableHashedBlocksStorage::increaseFinishedSinkCount()
         // If this was broken, we cannot use this too judge whether the sinking phase finish.
         // Need to be careful with what happen in InterpreterInsertQuery
         // Otherwise we need to use the block mode in TreeQueryTransform
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Only {} sinks are expected. but we get {} now.", active_sinks, finshed_sink_count);
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Table({}.{}), only {} sinks are expected. but we get {} now.", session_id, table_id, active_sinks, finshed_sink_count);
     }
     wait_more_data.notify_all();
 }

@@ -19,6 +19,7 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <Columns/FilterDescription.h>
 #include <Common/Exception.h>
+#include "Interpreters/InterpreterSelectQuery.h"
 #include "base/types.h"
 #include <Core/QueryProcessingStage.h>
 #include <base/defines.h>
@@ -456,6 +457,7 @@ Pipe StorageShuffleBase::read(
     auto remote_query = queryToString(query_info_.original_query);
     auto cluster = context_->getCluster(cluster_name)->getClusterWithReplicasAsShards(context_->getSettings());
     const Scalars & scalars = context_->hasQueryContext() ? context_->getQueryContext()->getScalars() : Scalars{};
+    header = InterpreterSelectQuery(query_info_.query, context_, SelectQueryOptions(processed_stage_).analyze()).getSampleBlock();
     Pipes pipes;
     for (const auto & replicas : cluster->getShardsAddresses())
     {
@@ -521,11 +523,10 @@ QueryProcessingStage::Enum StorageShuffleBase::getQueryProcessingStage(
             return QueryProcessingStage::WithMergeableState;
     }
 
-    
     return QueryProcessingStage::FetchColumns;
 }
 #else
-QueryProcessingStage::Enum StorageShuffleJoin::getQueryProcessingStage(
+QueryProcessingStage::Enum StorageShuffleBase::getQueryProcessingStage(
         ContextPtr /*local_context*/,
         QueryProcessingStage::Enum /*to_stage*/,
         const StorageSnapshotPtr & /*metadata_snapshot*/,

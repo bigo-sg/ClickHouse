@@ -49,7 +49,7 @@
 #include <Interpreters/SelectQueryOptions.h>
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
-#include <Interpreters/TreeDistributedShuffleJoinRewriter.h>
+#include <Interpreters/ASTRewriters/TreeDistributedShuffleJoinRewriter.h>
 #include <Common/ProfileEvents.h>
 
 #include <Common/SensitiveDataMasker.h>
@@ -81,13 +81,13 @@
 #include <Parsers/DumpASTNode.h>
 
 #include <Storages/DistributedShuffleJoin/StorageShuffleJoin.h>
-#include <Interpreters/TreeShufflePhasesSelectQueryRewriter.h>
+#include <Interpreters/ASTRewriters/TreeShufflePhasesSelectQueryRewriter.h>
 #include <Interpreters/InterpreterShufflePhasesSelectQuery.h>
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
-#include <Interpreters/TreeQueryJoinRewriter.h>
-
+#include <Interpreters/ASTRewriters/TreeQueryJoinRewriter.h>
 #include <Interpreters/ASTRewriters/EliminateCompositeColumnNameRewriter.h>
+#include <Interpreters/ASTRewriters/TreeQueryAggregationRewriter.h>
 
 namespace ProfileEvents
 {
@@ -672,13 +672,15 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     auto rename_ast = rewriter.run();
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "rename_ast:{}", queryToString(rename_ast));
 
-                    #if 0
-                    TreeShufflePhasesSelectQueryRewriterMatcher::Data data;
-                    data.context = context;
-                    auto new_ast = ast->clone();
-                    TreeShufflePhasesSelectQueryRewriterVistor(data).visit(new_ast);
-                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "rewrite ast:\n{}", queryToString(data.rewritten_query));
-                    ast = data.rewritten_query;
+                    TreeQueryAggregationRewriter agg_rewriter(context, rename_ast);
+                    auto agg_ast = agg_rewriter.run();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "agg writer ast: {}", queryToString(agg_ast));
+
+                    #if 1
+                    TreeQueryJoinRewriter join_rewriter(context, rename_ast);
+                    auto join_ast = join_rewriter.run();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "join rewerite ast: {}", queryToString(join_ast));
+                    ast = join_ast;
                     #else
                     TreeQueryJoinRewriterMatcher::Data data;
                     data.context = context;

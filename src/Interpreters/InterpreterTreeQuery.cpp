@@ -159,9 +159,9 @@ ASTPtr InterpreterTreeQuery::fillHashedChunksStorageSinks(ASTPtr from_query, UIn
         return from_query;
     }
     auto table_function = std::dynamic_pointer_cast<ASTFunction>(insert_query->table_function);
-    if (table_function->name != TableFunctionShuffleJoin::name)
+    if (table_function->name != TableFunctionShuffleJoin::name && table_function->name != TableFunctionShuffleAggregation::name)
     {
-        LOG_TRACE(logger, "Not {}, query: {}", TableFunctionShuffleJoin::name, queryToString(from_query));
+        LOG_TRACE(logger, "Not {} or , query: {}", TableFunctionShuffleJoin::name, TableFunctionShuffleAggregation::name, queryToString(from_query));
         return from_query;
     }
     auto arg_list = std::dynamic_pointer_cast<ASTExpressionList>(table_function->arguments);
@@ -394,8 +394,9 @@ std::list<std::pair<DistributedTask, String>> InterpreterTreeQuery::buildSelectT
     return res;
 
 }
-std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
+std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr /*from_query*/)
 {
+    #if 0
     LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
     auto storages = getSelectStorages(from_query);
     bool has_groupby = hasGroupby(*from_query);
@@ -421,7 +422,7 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
     {
         return buildSelectTasks(from_query);
     }
-
+#endif
     return {};
 
 }

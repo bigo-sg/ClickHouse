@@ -1,5 +1,6 @@
 #include <Interpreters/ASTRewriters/ASTAnalyzeUtil.h>
 #include <IO/WriteBufferFromString.h>
+#include <IO/Operators.h>
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/IAST_fwd.h>
@@ -12,6 +13,8 @@
 #include <memory>
 #include <sstream>
 #include <Poco/StringTokenizer.h>
+#include <Core/NamesAndTypes.h>
+#include <Parsers/ASTIdentifier.h>
 namespace DB
 {
 
@@ -22,6 +25,17 @@ String ColumnWithDetailNameAndType::toString() const
         << ", alias_name: " << alias_name;
     buf << ", data_type: " << type->getName();
     return buf.str();
+}
+
+NamesAndTypesList ColumnWithDetailNameAndType::toNamesAndTypesList(const std::vector<ColumnWithDetailNameAndType> & columns)
+{
+    std::list<NameAndTypePair> names_and_types;
+    for (const auto & col : columns)
+    {
+        names_and_types.emplace_back(NameAndTypePair(col.short_name, col.type));
+    }
+    NamesAndTypesList res(names_and_types.begin(), names_and_types.end());
+    return res;
 }
 
 void ColumnWithDetailNameAndType::makeAliasByFullName(std::vector<ColumnWithDetailNameAndType> &columns)
@@ -49,6 +63,10 @@ std::vector<String> ColumnWithDetailNameAndType::splitedFullName() const
 
 bool ASTAnalyzeUtil::hasGroupByRecursively(ASTPtr ast)
 {
+    return hasGroupByRecursively(ast.get());
+}
+bool ASTAnalyzeUtil::hasGroupByRecursively(IAST * ast)
+{
     if (auto * insert_ast = ast->as<ASTInsertQuery>())
     {
         return hasGroupByRecursively(insert_ast->select);
@@ -68,7 +86,13 @@ bool ASTAnalyzeUtil::hasGroupByRecursively(ASTPtr ast)
     return false;
 }
 
+
 bool ASTAnalyzeUtil::hasGroupBy(ASTPtr ast)
+{
+    return hasGroupBy(ast.get());
+}
+
+bool ASTAnalyzeUtil::hasGroupBy(IAST * ast)
 {
     if (auto * select_with_union_ast = ast->as<ASTSelectWithUnionQuery>())
     {
@@ -84,6 +108,10 @@ bool ASTAnalyzeUtil::hasGroupBy(ASTPtr ast)
 }
 
 bool ASTAnalyzeUtil::hasAggregationColumn(ASTPtr ast)
+{
+    return hasAggregationColumn(ast.get());
+}
+bool ASTAnalyzeUtil::hasAggregationColumn(IAST * ast)
 {
     if (auto * select_ast = ast->as<ASTSelectQuery>())
     {
@@ -121,6 +149,21 @@ void ASTBuildUtil::updateSelectLeftTableBySubquery(ASTSelectQuery * select, ASTS
     tables->children.push_back(table_element);
 }
 
+void ASTBuildUtil::updateSelectLeftTableByTableFunction(ASTSelectQuery * select, ASTFunction * table_function, const String & alias)
+{
+    auto table_expression = std::make_shared<ASTTableExpression>();
+    table_expression->table_function = table_function->clone();
+    if (!alias.empty())
+        table_expression->table_function->as<ASTFunction>()->setAlias(alias);
+    auto table_element = std::make_shared<ASTTablesInSelectQueryElement>();
+    table_element->children.push_back(table_expression);
+    table_element->table_expression = table_expression;
+    
+    select->setExpression(ASTSelectQuery::Expression::TABLES, std::make_shared<ASTTablesInSelectQuery>());
+    auto tables = select->tables();
+    tables->children.push_back(table_element);
+}
+
 void ASTBuildUtil::updateJoinedSelectTables(ASTSelectQuery * select, ASTTableExpression * left_table, ASTTableExpression * right_table, ASTTableJoin * join)
 {
     select->setExpression(ASTSelectQuery::Expression::TABLES, std::make_shared<ASTTablesInSelectQuery>());
@@ -135,5 +178,50 @@ void ASTBuildUtil::updateJoinedSelectTables(ASTSelectQuery * select, ASTTableExp
     right_table_element->table_expression = right_table->clone();
     right_table_element->children.push_back(right_table_element->table_expression);
     tables->children.push_back(right_table_element);
+}
+
+String ASTBuildUtil::getTableExpressionAlias(const ASTTableExpression * ast)
+{
+    String res;
+    if (ast->table_function)
+    {
+        res = ast->table_function->as<ASTFunction>()->tryGetAlias();
+    }
+    else if (ast->subquery)
+    {
+        res = ast->subquery->as<ASTSubquery>()->tryGetAlias();
+    }
+    else if (ast->database_and_table_name)
+    {
+        if (const auto * with_alias_ast = ast->database_and_table_name->as<ASTTableIdentifier>())
+            res = with_alias_ast->tryGetAlias();
+    }
+    return res;
+}
+
+std::shared_ptr<ASTExpressionList> ASTBuildUtil::toShortNameExpressionList(const ColumnWithDetailNameAndTypes & columns)
+{
+    auto expression_list = std::make_shared<ASTExpressionList>();
+    for (const auto & col : columns)
+    {
+        auto ident = std::make_shared<ASTIdentifier>(col.short_name);
+        expression_list->children.push_back(ident);
+    }
+    return expression_list;
+}
+String ASTBuildUtil::toTableStructureDescription(const ColumnWithDetailNameAndTypes & columns)
+{
+    WriteBufferFromOwnString buf;
+    int i = 0;
+    for (const auto & col : columns)
+    {
+        if (i)
+        {
+            buf << ",";
+        }
+        buf << col.short_name << " " << col.type->getName();
+        i++;
+    }
+    return buf.str();
 }
 }

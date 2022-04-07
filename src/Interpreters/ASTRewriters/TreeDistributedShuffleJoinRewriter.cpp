@@ -6,7 +6,7 @@
 #include <Interpreters/QueryAliasesVisitor.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TranslateQualifiedNamesVisitor.h>
-#include <Interpreters/TreeDistributedShuffleJoinRewriter.h>
+#include <Interpreters/ASTRewriters/TreeDistributedShuffleJoinRewriter.h>
 #include <Interpreters/getTableExpressions.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTSelectQuery.h>
@@ -19,11 +19,13 @@
 #include <base/logger_useful.h>
 #include <Poco/Logger.h>
 #include <Common/ErrorCodes.h>
+#include "Core/NamesAndTypes.h"
 #include "Parsers/IAST_fwd.h"
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Parsers/ASTSubquery.h>
+#include <Interpreters/ASTRewriters/CollectRequiredColumnsVisitor.h>
 namespace DB
 {
 namespace ErrorCodes
@@ -42,8 +44,8 @@ TreeDistributedShuffleJoinRewriter::TreeDistributedShuffleJoinRewriter(std::shar
     , joined_elements(query->join())
 {
     tables_with_columns = getDatabaseAndTablesWithColumns(getTableExpressions(*query_), context_, true, true);
-    tables_columns_from_on_join = {NamesAndTypesList{}, NamesAndTypesList{}};
-    tables_columns_from_select = {NamesAndTypesList{}, NamesAndTypesList{}};
+    tables_columns_from_on_join = {{}, {}};
+    tables_columns_from_select = {{}, {}};
     tables_columns = {NamesAndTypesList{}, NamesAndTypesList{}};
     tables_hash_keys_list = {ASTExpressionList{}.clone(), ASTExpressionList{}.clone()};
 }
@@ -105,17 +107,21 @@ bool TreeDistributedShuffleJoinRewriter::collectTablesColumns()
         std::set<String> added_columns;
         for (const auto & col : select_columns)
         {
-            if (added_columns.count(col.name))
+            //auto col_name = col.alias_name.empty() ? col.short_name : col.alias_name;
+            auto col_name = col.short_name;
+            if (added_columns.count(col_name))
                 continue;
-            columns.emplace_back(col);
-            added_columns.insert(col.name);
+            columns.emplace_back(NameAndTypePair(col_name, col.type));
+            added_columns.insert(col_name);
         }
         for (const auto & col : join_columns)
         {
-            if (added_columns.count(col.name))
+            //auto col_name = col.alias_name.empty() ? col.short_name : col.alias_name;
+            auto col_name = col.short_name;
+            if (added_columns.count(col_name))
                 continue;
-            columns.emplace_back(col);
-            added_columns.insert(col.name);
+            columns.emplace_back(NameAndTypePair(col_name, col.type));
+            added_columns.insert(col_name);
         }
     }
     LOG_TRACE(
@@ -128,10 +134,8 @@ bool TreeDistributedShuffleJoinRewriter::collectTablesColumns()
 
 bool TreeDistributedShuffleJoinRewriter::collectTablesColumnsFromSelect()
 {
-    
-    CollectJoinColumnsMatcher::Data select_collect_data{tables_with_columns, tables_columns_from_select};
-    CollectJoinColumnsVisitor(select_collect_data).visit(query->select());
-    LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriter"), "left select cols: {}, right select cols:{}", tables_columns_from_select[0].toString(), tables_columns_from_select[1].toString());
+    CollectRequiredColumnsMatcher::Data data{.tables = tables_with_columns, .required_columns = tables_columns_from_select};
+    CollectRequiredColumnsVisitor(data).visit(query->select());
     return true;
 }
 
@@ -141,13 +145,8 @@ bool TreeDistributedShuffleJoinRewriter::collectTablesColumnsFromOnJoin()
     LOG_TRACE(&Poco::Logger::get("TreeDistributedShuffleJoinRewriter"), "table join ast : {}", queryToString(*table_join_ast));
     if (table_join_ast->on_expression)
     {
-        CollectJoinColumnsMatcher::Data collect_data{tables_with_columns, tables_columns_from_on_join};
-        CollectJoinColumnsVisitor(collect_data).visit(table_join_ast->clone());
-        LOG_TRACE(
-            &Poco::Logger::get("TreeDistributedShuffleJoinRewriter"),
-            "left on cols: {}, right on cols:{}",
-            tables_columns_from_on_join[0].toString(),
-            tables_columns_from_on_join[1].toString());
+        CollectRequiredColumnsMatcher::Data data{.tables = tables_with_columns, .required_columns = tables_columns_from_select};
+        CollectRequiredColumnsVisitor(data).visit(table_join_ast->clone());
     }
     else
     {
@@ -315,9 +314,16 @@ static String tryGetTableExpressionAlias(const ASTTableExpression * table_expr)
     {
         res = table_expr->subquery->as<ASTSubquery>()->tryGetAlias();
     }
-    else if (table_expr->database_and_table_name){
+    else if (table_expr->database_and_table_name)
+    {
         if (const auto * with_alias_ast = table_expr->database_and_table_name->as<ASTTableIdentifier>())
+        {
             res = with_alias_ast->tryGetAlias();
+            if (res.empty())
+            {
+                res = with_alias_ast->shortName();
+            }
+        }
     }
     return res;
 }

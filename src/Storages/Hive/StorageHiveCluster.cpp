@@ -65,6 +65,16 @@ Pipe StorageHiveCluster::read(
     size_t max_block_size_,
     unsigned num_streams_)
 {
+    WriteBufferFromOwnString write_buf;
+    for (const auto & name : column_names_)
+    {
+        write_buf << name << ",";
+    }
+    LOG_TRACE(&Poco::Logger::get("StorageHiveCluster"), "header:{}. to read columns:{}. query_kind:{}, stage:{}",
+        getInMemoryMetadata().getSampleBlock().dumpNames(),
+        write_buf.str(),
+        context_->getClientInfo().query_kind,
+        processed_stage_);
     auto query_kind = context_->getClientInfo().query_kind;
 
     auto policy_name = context_->getSettings().getString("hive_cluster_task_iterate_policy");

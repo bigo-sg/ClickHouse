@@ -43,6 +43,10 @@ void CollectRequiredColumnsMatcher::visit(const ASTPtr & ast, Data & data)
     {
         return;
     }
+    else if (auto * join_ast = ast->as<ASTTableJoin>())
+    {
+        visit(*join_ast, data);
+    }
     else
     {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknow ast type: {}", ast->getID());
@@ -75,7 +79,7 @@ void CollectRequiredColumnsMatcher::visit(const ASTExpressionList & expression_l
 
 void CollectRequiredColumnsMatcher::visit(const ASTIdentifier & ident_ast, Data & data)
 {
-    if (auto best_pos = IdentifierSemantic::chooseTable(ident_ast, data.tables, false))
+    if (auto best_pos = IdentifierSemantic::chooseTableColumnMatch(ident_ast, data.tables, false))
     {
         LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsMatcher"), "table pos: {}, cols: {}", *best_pos, data.tables[*best_pos].columns.toString());
         bool found = false;
@@ -124,6 +128,19 @@ void CollectRequiredColumnsMatcher::visit(const ASTIdentifier & ident_ast, Data 
                 ident_ast.shortName(),
                 ident_ast.alias);
         }
+    }
+}
+
+void CollectRequiredColumnsMatcher::visit(const ASTTableJoin & join, Data & data)
+{
+    if (join.using_expression_list)
+    {
+        visit(join.using_expression_list, data);
+    }
+
+    if (join.on_expression)
+    {
+        visit(join.on_expression, data);
     }
 }
 }

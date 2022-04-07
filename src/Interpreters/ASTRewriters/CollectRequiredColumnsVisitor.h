@@ -40,6 +40,7 @@ private:
     static void visit(const ASTExpressionList & expression_list, Data & data);
     static void visit(const ASTFunction & func_ast, Data & data);
     static void visit(const ASTIdentifier & ident, Data & data);
+    static void visit(const ASTTableJoin & join, Data & data);
 
 };
 using CollectRequiredColumnsVisitor = CollectRequiredColumnsMatcher::Visitor;

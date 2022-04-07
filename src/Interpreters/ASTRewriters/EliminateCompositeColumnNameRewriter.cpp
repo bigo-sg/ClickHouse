@@ -167,8 +167,13 @@ ASTPtr EliminateCompositeColumnNameRewriter::visit(ASTSelectQuery * ast)
         auto new_subquery = visit(select_with_union_ast);
         LOG_TRACE(logger, "to rename ASTSelectQuery:{}", queryToString(res));
         printColumnAlias();
+        String table_alias = tables_with_columns[0].table.alias;
+        if (table_alias.empty() && !tables_with_columns[0].table.table.empty())
+        {
+            table_alias = tables_with_columns[0].table.table;
+        }
         ASTBuildUtil::updateSelectLeftTableBySubquery(
-            res->as<ASTSelectQuery>(), new_subquery->as<ASTSelectWithUnionQuery>(), tables_with_columns[0].table.alias);
+            res->as<ASTSelectQuery>(), new_subquery->as<ASTSelectWithUnionQuery>(), table_alias);
         renameSelectQueryIdentifiers(select_ast);
     }
     clearRenameAlias(ast);
@@ -259,7 +264,12 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
     inner_select_with_union_ast->list_of_selects = std::make_shared<ASTExpressionList>();
     inner_select_with_union_ast->list_of_selects->children.push_back(inner_select_ast);
     LOG_TRACE(logger, "3) children_visited_ast:{}", queryToString(children_visited_ast_ref));
-    ASTBuildUtil::updateSelectLeftTableBySubquery(children_visited_ast, inner_select_with_union_ast.get(), tables_with_columns[0].table.alias);
+    String table_alias = tables_with_columns[0].table.alias;
+    if (table_alias.empty() && !tables_with_columns[0].table.table.empty())
+    {
+        table_alias = tables_with_columns[0].table.table;
+    }
+    ASTBuildUtil::updateSelectLeftTableBySubquery(children_visited_ast, inner_select_with_union_ast.get(), table_alias);
     LOG_TRACE(logger, "4) children_visited_ast:{}", queryToString(children_visited_ast_ref));
     children_visited_ast->setExpression(ASTSelectQuery::Expression::WHERE, nullptr);
     LOG_TRACE(logger, "inner_select_ast:{}", queryToString(inner_select_ast));

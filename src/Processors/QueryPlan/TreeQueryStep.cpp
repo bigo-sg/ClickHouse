@@ -37,9 +37,19 @@ QueryPipelineBuilderPtr TreeQueryStep::updatePipeline(QueryPipelineBuilders pipe
         }
         return Pipe(processors);
     };
-    auto pipe = input_block_io_transform(input_block_ios);
-    pipeline_builder.init(std::move(pipe));
-    LOG_TRACE(logger, "pipeline input header: {}.", pipeline_builder.getHeader().dumpNames());
+    if (!input_block_ios.empty())
+    {
+        auto pipe = input_block_io_transform(input_block_ios);
+        pipeline_builder.init(std::move(pipe));
+        LOG_TRACE(logger, "pipeline input header: {}.", pipeline_builder.getHeader().dumpNames());
+    }
+    else
+    {
+        BlockIOs source_block_ios = {output_block_io};
+        auto pipe = input_block_io_transform(source_block_ios);
+        pipeline_builder.init(std::move(pipe));
+        return pipeline_builder_ptr;
+    }
 
     auto output_block_io_transform =
         [&](OutputPortRawPtrs outports)
@@ -62,7 +72,6 @@ QueryPipelineBuilderPtr TreeQueryStep::updatePipeline(QueryPipelineBuilders pipe
         LOG_TRACE(logger, "current node output header:{}", processor->getOutputs().front().getHeader().dumpNames());
         return Processors{processor};
     };
-
     pipeline_builder.transform(output_block_io_transform);
     return pipeline_builder_ptr;
 }

@@ -11,6 +11,7 @@
 #include <Parsers/IAST.h>
 #include <base/logger_useful.h>
 #include <Poco/Logger.h>
+#include <Interpreters/ASTRewriters/ASTAnalyzeUtil.h>
 namespace DB
 {
 class ASTSelectQuery;
@@ -45,8 +46,8 @@ private:
     size_t assigned_id;
     const ASTTablesInSelectQueryElement * joined_elements;
     TablesWithColumns tables_with_columns;
-    std::vector<NamesAndTypesList> tables_columns_from_select;
-    std::vector<NamesAndTypesList> tables_columns_from_on_join;
+    std::vector<ColumnWithDetailNameAndTypes> tables_columns_from_select;
+    std::vector<ColumnWithDetailNameAndTypes> tables_columns_from_on_join;
     std::vector<NamesAndTypesList> tables_columns;
     ASTs tables_hash_keys_list;
 
