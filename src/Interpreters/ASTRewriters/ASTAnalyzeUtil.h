@@ -26,14 +26,16 @@ using ColumnWithDetailNameAndTypes = std::vector<ColumnWithDetailNameAndType>;
 class ASTAnalyzeUtil
 {
 public:
-    static bool hasGroupByRecursively(ASTPtr ast);
-    static bool hasGroupBy(ASTPtr ast);
-    static bool hasGroupByRecursively(IAST * ast);
-    static bool hasGroupBy(IAST * ast);
+    static bool hasGroupByRecursively(const ASTPtr & ast);
+    static bool hasGroupBy(const ASTPtr & ast);
+    static bool hasGroupByRecursively(const IAST * ast);
+    static bool hasGroupBy(const IAST * ast);
 
     //static bool hasAggregationColumnRecursively(ASTPtr ast);
-    static bool hasAggregationColumn(ASTPtr ast);
-    static bool hasAggregationColumn(IAST * ast);
+    static bool hasAggregationColumn(const ASTPtr & ast);
+    static bool hasAggregationColumn(const IAST * ast);
+    static bool hasAggregationColumnRecursively(const ASTPtr & ast);
+    static bool hasAggregationColumnRecursively(const IAST * ast);
 
 };
 

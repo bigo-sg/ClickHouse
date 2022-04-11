@@ -1,8 +1,12 @@
+#include <memory>
 #include <Processors/Transforms/JoiningTransform.h>
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/join_common.h>
 
+#include <Poco/Logger.h>
 #include <base/logger_useful.h>
+#include "Common/Stopwatch.h"
+#include "base/defines.h"
 
 namespace DB
 {
@@ -40,8 +44,24 @@ JoiningTransform::JoiningTransform(
         inputs.emplace_back(Block(), this);
 }
 
+JoiningTransform::~JoiningTransform()
+{
+    LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "work stat. count:{}, total elapsed:{}. wait elapse:{}, rows:{}", work_count, work_elapsed, wait_work_elapsed, input_rows);
+    LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "prepare stat. count:{}, total elapsed:{}. wait elapsed:{}", prepare_count, prepare_elapsed, wait_prepare_elapsed);
+}
+
 IProcessor::Status JoiningTransform::prepare()
 {
+    if (!wait_prepare_elapsed)
+    {
+        wait_prepare_elapsed = 1;
+        wait_prepare_watch.start(); 
+    }
+    wait_prepare_elapsed += wait_prepare_watch.elapsedMilliseconds();
+    ScopedRestartWatch scoped_wait_prepare_watch(wait_prepare_watch);
+    if (unlikely(!watch))
+        watch = std::make_unique<Stopwatch>();
+    ScopedWatch scoped_watch(prepare_watch, prepare_count, prepare_elapsed);
     auto & output = outputs.front();
 
     /// Check can output.
@@ -81,6 +101,14 @@ IProcessor::Status JoiningTransform::prepare()
             return Status::NeedData;
         }
     }
+    if (unlikely(!wait_right_table_elapsed))
+    {
+        watch->stop();
+        wait_right_table_elapsed = watch->elapsedMilliseconds();
+        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "right table finish loading. elapse:{}", wait_right_table_elapsed);
+        watch->start();
+    }
+
 
     if (has_input)
         return Status::Ready;
@@ -92,6 +120,7 @@ IProcessor::Status JoiningTransform::prepare()
             return Status::Ready;
 
         output.finish();
+        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "left table finish loading. elapse:{}", watch->elapsedMilliseconds());
         return Status::Finished;
     }
 
@@ -101,12 +130,22 @@ IProcessor::Status JoiningTransform::prepare()
         return Status::NeedData;
 
     input_chunk = input.pull(true);
+    input_rows += input_chunk.getNumRows();
     has_input = true;
     return Status::Ready;
 }
 
 void JoiningTransform::work()
 {
+    ScopedWatch scoped_watch(work_watch, work_count, work_elapsed);
+    if (!wait_work_elapsed)
+    {
+        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "handle first chunk");
+        wait_work_elapsed = 1;
+        wait_work_watch.start();
+    }
+    wait_work_elapsed += wait_work_watch.elapsedMilliseconds();
+    ScopedRestartWatch scoped_wait_watch(wait_work_watch);
     if (has_input)
     {
         transform(input_chunk);
@@ -215,6 +254,12 @@ FillingRightJoinSideTransform::FillingRightJoinSideTransform(Block input_header,
     , join(std::move(join_))
 {}
 
+FillingRightJoinSideTransform::~FillingRightJoinSideTransform()
+{
+    LOG_TRACE(&Poco::Logger::get("FillingRightJoinSideTransform"), "work stat. count:{}, total elapsed:{}. wait elpase:{}, input_rows:{}", work_count, work_elapsed, wait_work_elapsed, input_rows);
+    LOG_TRACE(&Poco::Logger::get("FillingRightJoinSideTransform"), "prepare stat. count:{}, total elapsed:{}, wait elapsed:{}", prepare_count, prepare_elapsed, wait_prepare_elapsed);
+}
+
 InputPort * FillingRightJoinSideTransform::addTotalsPort()
 {
     if (inputs.size() > 1)
@@ -225,6 +270,16 @@ InputPort * FillingRightJoinSideTransform::addTotalsPort()
 
 IProcessor::Status FillingRightJoinSideTransform::prepare()
 {
+
+    if (!wait_prepare_elapsed)
+    {
+        wait_prepare_elapsed = 1;
+        wait_prepare_watch.start(); 
+    }
+    wait_prepare_elapsed += wait_prepare_watch.elapsedMilliseconds();
+    ScopedRestartWatch scoped_wait_prepare_watch(wait_prepare_watch);
+
+    ScopedWatch scoped_watch(prepare_watch, prepare_count, prepare_elapsed);
     auto & output = outputs.front();
 
     /// Check can output.
@@ -287,7 +342,17 @@ IProcessor::Status FillingRightJoinSideTransform::prepare()
 
 void FillingRightJoinSideTransform::work()
 {
+    if (!wait_work_elapsed)
+    {
+        LOG_TRACE(&Poco::Logger::get("FillingRightJoinSideTransform"), "handle first chunk");
+        wait_work_elapsed = 1;
+        wait_work_watch.start();
+    }
+    wait_work_elapsed += wait_work_watch.elapsedMilliseconds();
+    ScopedRestartWatch scoped_wait_watch(wait_work_watch);
+    ScopedWatch scoped_watch(work_watch, work_count, work_elapsed);
     auto block = inputs.front().getHeader().cloneWithColumns(chunk.detachColumns());
+    input_rows += block.rows();
 
     if (for_totals)
         join->setTotals(block);

@@ -672,9 +672,9 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     auto rename_ast = rewriter.run();
                     LOG_TRACE(&Poco::Logger::get("executeQuery"), "rename_ast:{}", queryToString(rename_ast));
 
-                    TreeQueryAggregationRewriter agg_rewriter(context, rename_ast);
-                    auto agg_ast = agg_rewriter.run();
-                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "agg writer ast: {}", queryToString(agg_ast));
+                    //TreeQueryAggregationRewriter agg_rewriter(context, rename_ast);
+                    //auto agg_ast = agg_rewriter.run();
+                    //LOG_TRACE(&Poco::Logger::get("executeQuery"), "agg writer ast: {}", queryToString(agg_ast));
 
                     #if 1
                     TreeQueryJoinRewriter join_rewriter(context, rename_ast);
@@ -744,6 +744,8 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                 throw Exception("Query '" + (*process_list_entry)->getInfo().client_info.current_query_id + "' is killed in pending state",
                     ErrorCodes::QUERY_WAS_CANCELLED);
         }
+
+        LOG_TRACE(&Poco::Logger::get("executeQuery"), "res.pipe thread size:{}, query:{}", res.pipeline.getNumThreads(), queryToString(ast));
 
         /// Hold element of process list till end of query execution.
         res.process_list_entry = process_list_entry;

@@ -3,12 +3,13 @@
 #include <Processors/QueryPlan/ITransformingStep.h>
 #include <QueryPipeline/BlockIO.h>
 #include <Poco/Logger.h>
+#include <Processors/Transforms/TreeQueryTransform.h>
 namespace DB
 {
 class BlockIOPhaseStep : public IQueryPlanStep
 {
 public:
-    explicit BlockIOPhaseStep(std::shared_ptr<BlockIO> block_io_, std::vector<std::vector<std::shared_ptr<BlockIO>>> & shuffle_block_ios_);
+    explicit BlockIOPhaseStep(const QueryBlockIO & block_io_, const std::vector<QueryBlockIOs> & shuffle_block_ios_);
     String getName() const override { return "BlockIOPhaseStep"; }
 
     //void transformPipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings & settings) override;
@@ -18,8 +19,8 @@ public:
 
 private:
     Poco::Logger * logger = &Poco::Logger::get("BlockIOPhaseStep");
-    std::shared_ptr<BlockIO> select_block_io;
-    std::vector<std::vector<std::shared_ptr<BlockIO>>> shuffle_block_ios;
+    QueryBlockIO select_block_io;
+    std::vector<QueryBlockIOs> shuffle_block_ios;
 
     size_t getNextBlockIOInputsSize(size_t shuffle_block_io_index);
 };  

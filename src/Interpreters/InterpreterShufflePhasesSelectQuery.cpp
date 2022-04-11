@@ -78,23 +78,23 @@ std::shared_ptr<ASTShufflePhasesSelectQuery> InterpreterShufflePhasesSelectQuery
 void InterpreterShufflePhasesSelectQuery::buildQueryPlan(QueryPlan & query_plan)
 {
     auto shuffle_phases_select_query = getSelectQuery();
-    std::vector<BlockIOPtrs> shuffle_block_ios;
+    std::vector<QueryBlockIOs> shuffle_block_ios;
     for (auto & phase : shuffle_phases_select_query->shuffle_phases)
     {
-        shuffle_block_ios.emplace_back(BlockIOPtrs{});
-        BlockIOPtrs & block_ios = shuffle_block_ios.back();
+        shuffle_block_ios.emplace_back(QueryBlockIOs{});
+        QueryBlockIOs & block_ios = shuffle_block_ios.back();
         for (auto & query : phase)
         {
             auto block_io = buildShufflePhaseBlockIO(query);
             block_ios.emplace_back(block_io);
         }
     }
-    BlockIOPtr select_block_io = buildSelectPhaseBlockIO(shuffle_phases_select_query->final_query);
-    DataStream input_stream = {.header = select_block_io->pipeline.getHeader()};
+    QueryBlockIO select_block_io = buildSelectPhaseBlockIO(shuffle_phases_select_query->final_query);
+    DataStream input_stream = {.header = select_block_io.block_io->pipeline.getHeader()};
     query_plan.addStep(std::make_unique<BlockIOPhaseStep>(select_block_io, shuffle_block_ios));
 }
 
-BlockIOPtr InterpreterShufflePhasesSelectQuery::buildShufflePhaseBlockIO(ASTPtr query)
+QueryBlockIO InterpreterShufflePhasesSelectQuery::buildShufflePhaseBlockIO(ASTPtr query)
 {
     // TODO: if the query can be in cluster mode, construct remote query exectuors
     // otherwise run it on local
@@ -146,11 +146,11 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildShufflePhaseBlockIO(ASTPtr 
     pipeline_builder.init(std::move(pipe));
     auto res = std::make_shared<BlockIO>();
     res->pipeline = QueryPipelineBuilder::getPipeline(std::move(pipeline_builder));
-    return res;
+    return {.block_io = res, .query = query};
 #endif
 }
 
-BlockIOPtr InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr query)
+QueryBlockIO InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr query)
 {
     // TODO : try to use remote query executor and run it in cluster mode
     if (!std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(query))
@@ -201,7 +201,7 @@ BlockIOPtr InterpreterShufflePhasesSelectQuery::buildSelectPhaseBlockIO(ASTPtr q
     pipeline_builder.init(std::move(pipe));
     auto res = std::make_shared<BlockIO>();
     res->pipeline = QueryPipelineBuilder::getPipeline(std::move(pipeline_builder));
-    return res;
+    return {.block_io = res, .query = query};
 
 #endif
 }

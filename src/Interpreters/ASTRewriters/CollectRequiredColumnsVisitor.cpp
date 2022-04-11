@@ -3,6 +3,7 @@
 #include <base/logger_useful.h>
 #include <Parsers/queryToString.h>
 #include <Common/ErrorCodes.h>
+#include "Parsers/ASTAsterisk.h"
 #include "Parsers/ASTExpressionList.h"
 #include "Parsers/ASTLiteral.h"
 #include "Parsers/ASTSelectQuery.h"
@@ -40,6 +41,10 @@ void CollectRequiredColumnsMatcher::visit(const ASTPtr & ast, Data & data)
         visit(*expression_list, data);   
     }
     else if (ast->as<ASTLiteral>())
+    {
+        return;
+    }
+    else if (auto * asterisk = ast->as<ASTAsterisk>())
     {
         return;
     }

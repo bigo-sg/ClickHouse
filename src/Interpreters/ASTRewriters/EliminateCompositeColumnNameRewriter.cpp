@@ -48,7 +48,7 @@ String EliminateCompositeColumnNameRewriter::getFunctionAlias(const String & fun
 ASTPtr EliminateCompositeColumnNameRewriter::run()
 {
     auto res =  visitChild(from_ast.get());
-    LOG_TRACE(logger, "result query: {}", queryToString(res));
+    //LOG_TRACE9(logger, "result query: {}", queryToString(res));
     return res;
 }
 
@@ -98,7 +98,7 @@ std::map<String, String> EliminateCompositeColumnNameRewriter::collectAliasColum
             if (!alias.empty())
             {
                 res[ident->name()] = alias;
-                LOG_TRACE(logger, "Meet column alias: {} -> {}", ident->name(), alias);
+                //LOG_TRACE9(logger, "Meet column alias: {} -> {}", ident->name(), alias);
             }
         }
     }
@@ -111,10 +111,10 @@ void EliminateCompositeColumnNameRewriter::updateIdentNames(ASTSelectQuery * ast
     if (!expression)
         return;
     printColumnAlias();
-    LOG_TRACE(logger, "rename expression {} idents. before:{}", index, queryToString(expression));
+    //LOG_TRACE9(logger, "rename expression {} idents. before:{}", index, queryToString(expression));
     IdentRenameRewriter select_rewriter(context, expression, columns_alias, function_alias_id, rename_function);
     auto select_expression = select_rewriter.run();
-    LOG_TRACE(logger, "rename expression {} idents. after:{}", index, queryToString(select_expression));
+    //LOG_TRACE9(logger, "rename expression {} idents. after:{}", index, queryToString(select_expression));
     ast->setExpression(index, std::move(select_expression));
 }
 void EliminateCompositeColumnNameRewriter::renameSelectQueryIdentifiers(ASTSelectQuery * select_ast)
@@ -165,7 +165,7 @@ ASTPtr EliminateCompositeColumnNameRewriter::visit(ASTSelectQuery * ast)
     if (auto * select_with_union_ast = left_table_expression->as<ASTSelectWithUnionQuery>())
     {
         auto new_subquery = visit(select_with_union_ast);
-        LOG_TRACE(logger, "to rename ASTSelectQuery:{}", queryToString(res));
+        //LOG_TRACE9(logger, "to rename ASTSelectQuery:{}", queryToString(res));
         printColumnAlias();
         String table_alias = tables_with_columns[0].table.alias;
         if (table_alias.empty() && !tables_with_columns[0].table.table.empty())
@@ -187,8 +187,8 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
     auto children_visited_ast_ref = ast->clone();
     auto * children_visited_ast = children_visited_ast_ref->as<ASTSelectQuery>();
     auto join_ref = children_visited_ast->join()->table_join->clone();
-    LOG_TRACE(logger, "visitJoinedSelect. ast={}", queryToString(*ast));
-    LOG_TRACE(logger, "join ast id: {}", join_ref->getID());
+    //LOG_TRACE9(logger, "visitJoinedSelect. ast={}", queryToString(*ast));
+    //LOG_TRACE9(logger, "join ast id: {}", join_ref->getID());
     ASTBuildUtil::updateJoinedSelectTables(
         children_visited_ast,
         left_table_expression->as<ASTTableExpression>(),
@@ -196,7 +196,7 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
         join_ref->as<ASTTableJoin>());
     renameSelectQueryIdentifiers(children_visited_ast);
     clearRenameAlias(ast);
-    LOG_TRACE(logger, "1) children_visited_ast:{}", queryToString(children_visited_ast_ref));
+    //LOG_TRACE9(logger, "1) children_visited_ast:{}", queryToString(children_visited_ast_ref));
 
     
     auto tables_with_columns = getDatabaseAndTablesWithColumns(getTableExpressions(*children_visited_ast), context, true, true);
@@ -205,13 +205,13 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
     CollectRequiredColumnsVisitor(data).visit(ast->clone());
     auto & right_required_columns = data.required_columns[1];
     ColumnWithDetailNameAndType::makeAliasByFullName(right_required_columns);
-    for (const auto & col : data.required_columns[0])
-    {
-        LOG_TRACE(logger, "left_required_columns: {}", col.toString());
-    }
+    //for (const auto & col : data.required_columns[0])
+    //{
+        //LOG_TRACE9(logger, "left_required_columns: {}", col.toString());
+    //}
     for (const auto & col : right_required_columns)
     {
-        LOG_TRACE(logger, "right_required_columns. {}", col.toString());
+        //LOG_TRACE9(logger, "right_required_columns. {}", col.toString());
         if (col.full_name != col.short_name)
         {
             if (columns_alias.count(col.full_name))
@@ -222,7 +222,7 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
         }
     }
     renameSelectQueryIdentifiers(children_visited_ast);
-    LOG_TRACE(logger, "2) children_visited_ast:{}", queryToString(children_visited_ast_ref));
+    //LOG_TRACE9(logger, "2) children_visited_ast:{}", queryToString(children_visited_ast_ref));
 
     auto inner_select_ast = std::make_shared<ASTSelectQuery>();
     auto select_expression = std::make_shared<ASTExpressionList>();
@@ -246,7 +246,7 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Alias name is expected for {}", col.full_name);
         select_expression->children.push_back(ident);
     }
-    LOG_TRACE(logger, "build select expression list:{}", queryToString(select_expression));
+    //LOG_TRACE9(logger, "build select expression list:{}", queryToString(select_expression));
     inner_select_ast->setExpression(ASTSelectQuery::Expression::SELECT, select_expression);
     auto inner_left_table_expr = getTableExpression(*children_visited_ast, 0)->clone();
     auto inner_right_table_expr = getTableExpression(*children_visited_ast, 1)->clone();
@@ -263,17 +263,17 @@ ASTPtr EliminateCompositeColumnNameRewriter::visitJoinedSelect(ASTSelectQuery *a
     auto inner_select_with_union_ast = std::make_shared<ASTSelectWithUnionQuery>();
     inner_select_with_union_ast->list_of_selects = std::make_shared<ASTExpressionList>();
     inner_select_with_union_ast->list_of_selects->children.push_back(inner_select_ast);
-    LOG_TRACE(logger, "3) children_visited_ast:{}", queryToString(children_visited_ast_ref));
+    //LOG_TRACE9(logger, "3) children_visited_ast:{}", queryToString(children_visited_ast_ref));
     String table_alias = tables_with_columns[0].table.alias;
     if (table_alias.empty() && !tables_with_columns[0].table.table.empty())
     {
         table_alias = tables_with_columns[0].table.table;
     }
     ASTBuildUtil::updateSelectLeftTableBySubquery(children_visited_ast, inner_select_with_union_ast.get(), table_alias);
-    LOG_TRACE(logger, "4) children_visited_ast:{}", queryToString(children_visited_ast_ref));
+    //LOG_TRACE9(logger, "4) children_visited_ast:{}", queryToString(children_visited_ast_ref));
     children_visited_ast->setExpression(ASTSelectQuery::Expression::WHERE, nullptr);
-    LOG_TRACE(logger, "inner_select_ast:{}", queryToString(inner_select_ast));
-    LOG_TRACE(logger, "children_visited_ast:{}", queryToString(*children_visited_ast));
+    //LOG_TRACE9(logger, "inner_select_ast:{}", queryToString(inner_select_ast));
+    //LOG_TRACE9(logger, "children_visited_ast:{}", queryToString(*children_visited_ast));
     return children_visited_ast_ref;
 }
 
@@ -297,6 +297,6 @@ void EliminateCompositeColumnNameRewriter::printColumnAlias()
     {
         buf << "{" << alias.first << ":" << alias.second << "} ";
     }
-    LOG_TRACE(logger, "columns_alias={}", buf.str());
+    //LOG_TRACE9(logger, "columns_alias={}", buf.str());
 }
 }

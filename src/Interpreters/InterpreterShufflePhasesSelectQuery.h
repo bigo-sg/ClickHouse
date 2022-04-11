@@ -11,6 +11,7 @@
 #include <Interpreters/InterpreterSelectWithUnionQuery.h>
 #include <Parsers/queryToString.h>
 #include <Parsers/ASTShufflePhasesSelectQuery.h>
+#include <Processors/Transforms/TreeQueryTransform.h>
 namespace DB
 {
 class InterpreterShufflePhasesSelectQuery : public IInterpreterUnionOrSelectQuery
@@ -26,7 +27,7 @@ private:
 
     std::shared_ptr<ASTShufflePhasesSelectQuery> getSelectQuery();
 
-    std::shared_ptr<BlockIO> buildShufflePhaseBlockIO(ASTPtr query);
-    std::shared_ptr<BlockIO> buildSelectPhaseBlockIO(ASTPtr query);
+    QueryBlockIO buildShufflePhaseBlockIO(ASTPtr query);
+    QueryBlockIO buildSelectPhaseBlockIO(ASTPtr query);
 };
 }

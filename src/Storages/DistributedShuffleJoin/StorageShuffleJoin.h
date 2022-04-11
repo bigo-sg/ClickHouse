@@ -43,6 +43,8 @@ public:
         QueryProcessingStage::Enum to_stage,
         const StorageSnapshotPtr & metadata_snapshot,
         SelectQueryInfo & query_info) const override;
+
+    bool supportsParallelInsert() const override { return true; }
 protected:
     Poco::Logger * logger;
     ASTPtr query;
@@ -70,7 +72,7 @@ public:
         UInt64 active_sinks_);
 };
 
-class StorageShuffleAggregation : public shared_ptr_helper<StorageShuffleJoin>, public StorageShuffleBase
+class StorageShuffleAggregation : public shared_ptr_helper<StorageShuffleAggregation>, public StorageShuffleBase
 {
 public:
     static const String NAME; 

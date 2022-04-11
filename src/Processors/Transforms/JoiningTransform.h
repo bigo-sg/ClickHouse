@@ -1,5 +1,8 @@
 #pragma once
+#include <memory>
 #include <Processors/IProcessor.h>
+#include <Common/Stopwatch.h>
+#include "base/types.h"
 
 
 namespace DB
@@ -10,6 +13,35 @@ using JoinPtr = std::shared_ptr<IJoin>;
 
 class NotJoinedBlocks;
 
+class ScopedWatch
+{
+public:
+    explicit ScopedWatch(Stopwatch & watch_, UInt64 & counter_, UInt64 & elapsed_)
+        : watch(watch_)
+        , counter(counter_)
+        , elapsed(elapsed_)
+    {
+        watch.start();
+        counter++;
+    }
+    ~ScopedWatch()
+    {
+        elapsed += watch.elapsedMilliseconds();
+    }
+private:
+    Stopwatch & watch;
+    UInt64 & counter;
+    UInt64 & elapsed;
+};
+
+class ScopedRestartWatch
+{
+public:
+    explicit ScopedRestartWatch(Stopwatch & watch_):watch(watch_){}
+    ~ScopedRestartWatch(){ watch.start(); }
+private:
+    Stopwatch & watch;
+};
 /// Join rows to chunk form left table.
 /// This transform usually has two input ports and one output.
 /// First input is for data from left table.
@@ -46,6 +78,8 @@ public:
         bool default_totals_ = false,
         FinishCounterPtr finish_counter_ = nullptr);
 
+    ~JoiningTransform() override;
+
     String getName() const override { return "JoiningTransform"; }
 
     static Block transformHeader(Block header, const JoinPtr & join);
@@ -78,6 +112,25 @@ private:
     std::shared_ptr<NotJoinedBlocks> non_joined_blocks;
     size_t max_block_size;
 
+    std::unique_ptr<Stopwatch> watch;
+    UInt64 wait_right_table_elapsed = 0;
+
+    Stopwatch work_watch;
+    UInt64 work_elapsed = 0;
+    UInt64 work_count = 0;
+
+    Stopwatch prepare_watch;
+    UInt64 prepare_elapsed = 0;
+    UInt64 prepare_count = 0;
+
+    Stopwatch wait_prepare_watch;
+    UInt64 wait_prepare_elapsed = 0;
+
+    Stopwatch wait_work_watch;
+    UInt64 wait_work_elapsed = 0;
+
+    UInt64 input_rows = 0;
+
     Block readExecute(Chunk & chunk);
 };
 
@@ -88,6 +141,7 @@ class FillingRightJoinSideTransform : public IProcessor
 {
 public:
     FillingRightJoinSideTransform(Block input_header, JoinPtr join_);
+    ~FillingRightJoinSideTransform() override;
     String getName() const override { return "FillingRightJoinSide"; }
 
     InputPort * addTotalsPort();
@@ -101,6 +155,19 @@ private:
     bool stop_reading = false;
     bool for_totals = false;
     bool set_totals = false;
+    Stopwatch work_watch;
+    UInt64 work_elapsed = 0;
+    UInt64 work_count = 0;
+    Stopwatch prepare_watch;
+    UInt64 prepare_elapsed = 0;
+    UInt64 prepare_count = 0;
+    UInt64 input_rows = 0;
+
+    Stopwatch wait_prepare_watch;
+    UInt64 wait_prepare_elapsed = 0;
+
+    Stopwatch wait_work_watch;
+    UInt64 wait_work_elapsed = 0;
 };
 
 }

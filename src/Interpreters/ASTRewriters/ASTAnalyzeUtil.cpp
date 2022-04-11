@@ -61,17 +61,19 @@ std::vector<String> ColumnWithDetailNameAndType::splitedFullName() const
     return res;
 }
 
-bool ASTAnalyzeUtil::hasGroupByRecursively(ASTPtr ast)
+bool ASTAnalyzeUtil::hasGroupByRecursively(const ASTPtr & ast)
 {
     return hasGroupByRecursively(ast.get());
 }
-bool ASTAnalyzeUtil::hasGroupByRecursively(IAST * ast)
+bool ASTAnalyzeUtil::hasGroupByRecursively(const IAST * ast)
 {
-    if (auto * insert_ast = ast->as<ASTInsertQuery>())
+    if (!ast)
+        return false;
+    if (const auto * insert_ast = ast->as<ASTInsertQuery>())
     {
         return hasGroupByRecursively(insert_ast->select);
     }
-    else if (auto * select_with_union = ast->as<ASTSelectWithUnionQuery>())
+    else if (const auto * select_with_union = ast->as<ASTSelectWithUnionQuery>())
     {
         for (auto & child : select_with_union->list_of_selects->children)
         {
@@ -79,41 +81,64 @@ bool ASTAnalyzeUtil::hasGroupByRecursively(IAST * ast)
                 return true;
         }
     }
-    else if (auto * select_ast = ast->as<ASTSelectQuery>())
+    else if (const auto * select_ast = ast->as<ASTSelectQuery>())
     {
-        return select_ast->groupBy() != nullptr;
+        if (select_ast->groupBy() != nullptr)
+            return true;
+        return hasGroupByRecursively(select_ast->groupBy().get());
+    }
+    else if (const auto * tables_ast = ast->as<ASTTablesInSelectQuery>())
+    {
+        for (const auto & child : tables_ast->children)
+        {
+            if (hasGroupByRecursively(child.get()))
+                return true;
+        }
+    }
+    else if (const auto * table_element = ast->as<ASTTablesInSelectQueryElement>())
+    {
+        const auto * table_expr = table_element->table_expression->as<ASTTableExpression>();
+        return hasGroupByRecursively(table_expr->subquery.get());
+    }
+    else if (const auto * subquery = ast->as<ASTSubquery>())
+    {
+        for (const auto & child : subquery->children)
+        {
+            if(hasGroupByRecursively(child.get()))
+                return true;
+        }
     }
     return false;
 }
 
 
-bool ASTAnalyzeUtil::hasGroupBy(ASTPtr ast)
+bool ASTAnalyzeUtil::hasGroupBy(const ASTPtr & ast)
 {
     return hasGroupBy(ast.get());
 }
 
-bool ASTAnalyzeUtil::hasGroupBy(IAST * ast)
+bool ASTAnalyzeUtil::hasGroupBy(const IAST * ast)
 {
-    if (auto * select_with_union_ast = ast->as<ASTSelectWithUnionQuery>())
+    if (const auto * select_with_union_ast = ast->as<ASTSelectWithUnionQuery>())
     {
         if (select_with_union_ast->list_of_selects->children.size() > 1)
             return false;
         return hasGroupBy(select_with_union_ast->list_of_selects->children[0]);
     }
-    else if (auto * select_ast = ast->as<ASTSelectQuery>())
+    else if (const auto * select_ast = ast->as<ASTSelectQuery>())
     {
         return select_ast->groupBy() != nullptr;
     }
     return false;
 }
 
-bool ASTAnalyzeUtil::hasAggregationColumn(ASTPtr ast)
+bool ASTAnalyzeUtil::hasAggregationColumn(const ASTPtr & ast)
 {
     return hasAggregationColumn(ast.get());
 }
-bool ASTAnalyzeUtil::hasAggregationColumn(IAST * ast)
+bool ASTAnalyzeUtil::hasAggregationColumn(const IAST * ast)
 {
-    if (auto * select_ast = ast->as<ASTSelectQuery>())
+    if (const auto * select_ast = ast->as<ASTSelectQuery>())
     {
         const auto * select_list = select_ast->select()->as<ASTExpressionList>();
         for (const auto & child : select_list->children)
@@ -129,6 +154,58 @@ bool ASTAnalyzeUtil::hasAggregationColumn(IAST * ast)
     }
     return false;
 }
+
+bool ASTAnalyzeUtil::hasAggregationColumnRecursively(const ASTPtr & ast)
+{
+    return hasAggregationColumnRecursively(ast.get());
+}
+
+bool ASTAnalyzeUtil::hasAggregationColumnRecursively(const IAST * ast)
+{
+    if (!ast)
+        return false;
+    if (const auto * insert_ast = ast->as<ASTInsertQuery>())
+    {
+        return hasAggregationColumnRecursively(insert_ast->select.get());
+    }
+    else if (const auto * select_with_union_ast = ast->as<ASTSelectWithUnionQuery>())
+    {
+        for (const auto & child : select_with_union_ast->list_of_selects->children)
+        {
+            if (hasAggregationColumnRecursively(child.get()))
+                return true;
+        }
+    }
+    else if (const auto * select_ast = ast->as<ASTSelectQuery>())
+    {
+        if (hasAggregationColumn(select_ast))
+            return true;
+        return hasAggregationColumnRecursively(select_ast->tables().get());
+    }
+    else if (const auto * tables_ast = ast->as<ASTTablesInSelectQuery>())
+    {
+        for (const auto & child : tables_ast->children)
+        {
+            if (hasAggregationColumnRecursively(child.get()))
+                return true;
+        }
+    }
+    else if (const auto * table_element = ast->as<ASTTablesInSelectQueryElement>())
+    {
+        const auto * table_expr = table_element->table_expression->as<ASTTableExpression>();
+        return hasAggregationColumnRecursively(table_expr->subquery.get());
+    }
+    else if (const auto * subquery = ast->as<ASTSubquery>())
+    {
+        for (const auto & child : subquery->children)
+        {
+            if(hasAggregationColumnRecursively(child.get()))
+                return true;
+        }
+    }
+    return false;
+}
+
 
 void ASTBuildUtil::updateSelectLeftTableBySubquery(ASTSelectQuery * select, ASTSelectWithUnionQuery * subquery, const String & alias)
 {

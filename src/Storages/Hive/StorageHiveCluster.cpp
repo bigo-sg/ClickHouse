@@ -186,8 +186,13 @@ QueryProcessingStage::Enum StorageHiveCluster::getQueryProcessingStage(
 {
     LOG_TRACE(&Poco::Logger::get("StorageHiveCluster"),  "query:{}, to_stage:{}, query_kind:{}", queryToString(query_info_.query), to_stage_, context_->getClientInfo().query_kind);
     if (context_->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
+    {
+        auto select_query = query_info_.query->as<ASTSelectQuery &>();
+        if (select_query.join())
+            return QueryProcessingStage::FetchColumns;
         if (to_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
             return QueryProcessingStage::Enum::WithMergeableState;
+    }
     return QueryProcessingStage::Enum::FetchColumns;
 }
 

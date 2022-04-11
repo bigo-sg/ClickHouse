@@ -19,11 +19,11 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int BAD_ARGUMENTS;
 }
-BlockIOPhaseStep::BlockIOPhaseStep(std::shared_ptr<BlockIO> select_block_io_, std::vector<std::vector<std::shared_ptr<BlockIO>>> & shuffle_block_ios_)
-    : select_block_io(select_block_io_)
+BlockIOPhaseStep::BlockIOPhaseStep(const QueryBlockIO & block_io_, const std::vector<QueryBlockIOs> & shuffle_block_ios_)
+    : select_block_io(block_io_)
     , shuffle_block_ios(shuffle_block_ios_)
 {
-    LOG_TRACE(logger, "select block io header:{}", select_block_io->pipeline.getHeader().dumpNames());
+    LOG_TRACE(logger, "select block io header:{}", select_block_io.block_io->pipeline.getHeader().dumpNames());
 }
 
 QueryPipelineBuilderPtr BlockIOPhaseStep::updatePipeline(QueryPipelineBuilders pipelines, const BuildQueryPipelineSettings & /*settings*/)
@@ -35,7 +35,7 @@ QueryPipelineBuilderPtr BlockIOPhaseStep::updatePipeline(QueryPipelineBuilders p
     auto pipeline_ptr = std::make_unique<QueryPipelineBuilder>();
     QueryPipelineBuilder & pipeline = *pipeline_ptr;
 
-    auto source_shuffle_transform_builder = [&](const std::vector<std::shared_ptr<BlockIO>> & block_ios, size_t output_stream_num) -> Processors
+    auto source_shuffle_transform_builder = [&](const QueryBlockIOs & block_ios, size_t output_stream_num) -> Processors
     {
         if (!output_stream_num)
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "output_stream_num must not be zero");
@@ -52,7 +52,7 @@ QueryPipelineBuilderPtr BlockIOPhaseStep::updatePipeline(QueryPipelineBuilders p
 
     pipeline.init(Pipe(source_shuffle_transform_builder(shuffle_block_ios[0], getNextBlockIOInputsSize(0))));
 
-    auto normal_shuffle_transform_builder = [&](OutputPortRawPtrs outports, size_t output_stream_num, const std::vector<std::shared_ptr<BlockIO>> & block_ios)
+    auto normal_shuffle_transform_builder = [&](OutputPortRawPtrs outports, size_t output_stream_num, const QueryBlockIOs & block_ios)
     {
         if (outports.size() != block_ios.size())
         {
@@ -80,7 +80,7 @@ QueryPipelineBuilderPtr BlockIOPhaseStep::updatePipeline(QueryPipelineBuilders p
         pipeline.transform([&](OutputPortRawPtrs outports){ return normal_shuffle_transform_builder(outports, num_streams, shuffle_block_ios[i]); });
     }
 
-    auto select_transform_builder = [&](OutputPortRawPtrs outports, std::shared_ptr<BlockIO> block_io)
+    auto select_transform_builder = [&](OutputPortRawPtrs outports, const QueryBlockIO & block_io)
     {
         if (outports.size() != 1)
            throw Exception(ErrorCodes::LOGICAL_ERROR, "Output ports should be one");

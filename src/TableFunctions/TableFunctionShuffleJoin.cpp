@@ -172,6 +172,7 @@ StoragePtr TableFunctionShuffleAggregation::executeImpl(
     const ASTPtr & ast_function, ContextPtr context, const std::string & /*table_name*/, ColumnsDescription /*cached_columns*/) const
 {
     StoragePtr storage = StorageShuffleAggregation::create(context, ast_function, cluster_name, session_id, table_id, columns, hash_expr_list_ast, active_sinks);
+    LOG_TRACE(&Poco::Logger::get("TableFunctionShuffleAggregation"), "create agg storage. {}", storage->getName());
     return storage;
 }
 

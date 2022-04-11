@@ -14,7 +14,7 @@ namespace ErrorCodes
 }
 void CollectJoinColumnsMatcher::visit(const ASTPtr & ast_, Data & data_)
 {
-    LOG_TRACE(&Poco::Logger::get("CollectJoinCOlumnsVisitor"), "visit ast : {}", queryToString(ast_));
+    //LOG_TRACE9(&Poco::Logger::get("CollectJoinCOlumnsVisitor"), "visit ast : {}", queryToString(ast_));
     if (auto * func = ast_->as<ASTFunction>())
     {
         visit(*func, ast_, data_);
@@ -24,17 +24,17 @@ void CollectJoinColumnsMatcher::visit(const ASTPtr & ast_, Data & data_)
         visit(*ident, ast_, data_);
     }
 }
-void CollectJoinColumnsMatcher::visit(const ASTFunction & func_, const ASTPtr & /*ast_*/, Data & /*data_*/)
+void CollectJoinColumnsMatcher::visit(const ASTFunction & /*func_*/, const ASTPtr & /*ast_*/, Data & /*data_*/)
 {
-    LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsVisitor"), "visit function: {}", queryToString(func_));
+    //LOG_TRACE9(&Poco::Logger::get("CollectJoinColumnsVisitor"), "visit function: {}", queryToString(func_));
 }
 
-void CollectJoinColumnsMatcher::visit(const ASTIdentifier & ident_, const ASTPtr & ast_, Data & data_)
+void CollectJoinColumnsMatcher::visit(const ASTIdentifier & ident_, const ASTPtr & /*ast_*/, Data & data_)
 {
-    LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsVisitor"), "visit ident : {}", queryToString(ast_));
+    //LOG_TRACE9(&Poco::Logger::get("CollectJoinColumnsVisitor"), "visit ident : {}", queryToString(ast_));
     if (auto best_pos = IdentifierSemantic::chooseTable(ident_, data_.tables, false))
     {
-        LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsMatcher"), "table pos: {}, cols: {}", *best_pos, data_.tables[*best_pos].columns.toString());
+        //LOG_TRACE9(&Poco::Logger::get("CollectJoinColumnsMatcher"), "table pos: {}, cols: {}", *best_pos, data_.tables[*best_pos].columns.toString());
         bool found = false;
         if (*best_pos < data_.tables.size())
         {
@@ -53,13 +53,13 @@ void CollectJoinColumnsMatcher::visit(const ASTIdentifier & ident_, const ASTPtr
         }
         if (!found)
         {
-            LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsMatcher"), "Not found match column for {} - {} ", queryToString(ident_), ident_.name());
+            //LOG_TRACE9(&Poco::Logger::get("CollectJoinColumnsMatcher"), "Not found match column for {} - {} ", queryToString(ident_), ident_.name());
         }
     }
     else
     {
         throw Exception(ErrorCodes::AMBIGUOUS_COLUMN_NAME, "Position of identifier {} can't be deteminated.", queryToString(ident_));
-        //LOG_TRACE(&Poco::Logger::get("CollectJoinColumnsMatcher"), "cann't match ident {}. tables columns: {} \n {}",
+        ////LOG_TRACE9(&Poco::Logger::get("CollectJoinColumnsMatcher"), "cann't match ident {}. tables columns: {} \n {}",
         //    queryToString(ident_), data_.tables[0].columns.toString(), data_.tables[1].columns.toString());
     }
 }

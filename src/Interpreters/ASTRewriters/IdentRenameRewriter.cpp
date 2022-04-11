@@ -27,7 +27,7 @@ IdentRenameRewriter::IdentRenameRewriter(
 ASTPtr IdentRenameRewriter::run()
 {
     auto res = visitChild(from_ast.get());
-    LOG_TRACE(logger, "result query: {}", queryToString(res));
+    //LOG_TRACE9(logger, "result query: {}", queryToString(res));
     return res;
 
 }
@@ -70,7 +70,7 @@ ASTPtr IdentRenameRewriter::visit(ASTIdentifier * ast)
         return ast->clone();
     auto res = std::make_shared<ASTIdentifier>(iter->second);
     res->alias = ast->tryGetAlias();
-    LOG_TRACE(logger, "rename ident from {}({}) to {}({})", ast->name(), ast->tryGetAlias(), res->name(), res->tryGetAlias());
+    //LOG_TRACE9(logger, "rename ident from {}({}) to {}({})", ast->name(), ast->tryGetAlias(), res->name(), res->tryGetAlias());
     return res;
 }
 
@@ -80,7 +80,7 @@ ASTPtr IdentRenameRewriter::visit(ASTFunction * ast)
     auto * func = res->as<ASTFunction>();
     if (ast->tryGetAlias().empty() && rename_function)
         func->alias = getFunctionAlias(func->name);
-    LOG_TRACE(logger, "rename function before:{}", queryToString(res));
+    //LOG_TRACE9(logger, "rename function before:{}", queryToString(res));
     ASTs new_args_children;
     for (auto & child : func->arguments->as<ASTExpressionList>()->children)
     {
@@ -89,7 +89,7 @@ ASTPtr IdentRenameRewriter::visit(ASTFunction * ast)
     auto new_args = std::make_shared<ASTExpressionList>();
     new_args->children = new_args_children;
     func->arguments = new_args;
-    LOG_TRACE(logger, "rename function after:{}", queryToString(res));
+    //LOG_TRACE9(logger, "rename function after:{}", queryToString(res));
     return res;
 }
 
