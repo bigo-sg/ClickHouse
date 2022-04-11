@@ -44,7 +44,10 @@ public:
         const StorageSnapshotPtr & metadata_snapshot,
         SelectQueryInfo & query_info) const override;
 
-    bool supportsParallelInsert() const override { return true; }
+    /**
+     * Do not set it ture until we find other a way to signal the table has finished sinking 
+     */
+    bool supportsParallelInsert() const override { return false; }
 protected:
     Poco::Logger * logger;
     ASTPtr query;

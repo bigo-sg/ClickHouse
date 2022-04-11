@@ -37,7 +37,7 @@ Chunk TableHashedBlocksStorage::popChunk()
     {
         wait_more_data.wait(lock, [&] { return isSinkFinished() || !chunks.empty(); });
     }
-    LOG_TRACE(logger, "popChunk. isSinkFinished()={}, chunks.size()={}", isSinkFinished(), chunks.size());
+    LOG_TRACE(logger, "{}.{} popChunk. isSinkFinished()={}, chunks.size()={}", session_id, table_id, isSinkFinished(), chunks.size());
 
     Chunk res;
     if (likely(!chunks.empty()))
@@ -56,6 +56,7 @@ Chunk TableHashedBlocksStorage::popChunk()
 void TableHashedBlocksStorage::increaseFinishedSinkCount()
 {
     finshed_sink_count++;
+    LOG_TRACE(logger, "{}.{} on sinker finished. finshed_sink_count:{}, active_sinks:{}", session_id, table_id, finshed_sink_count, active_sinks);
     if (finshed_sink_count >= active_sinks)
     {
         LOG_INFO(logger, "sinking into table({}.{}) finished. sinks:{}", session_id, table_id, active_sinks);
