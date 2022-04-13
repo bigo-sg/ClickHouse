@@ -32,6 +32,7 @@
 #include <TableFunctions/TableFunctionShuffleJoin.h>
 #include <base/logger_useful.h>
 #include <base/types.h>
+#include "Common/Stopwatch.h"
 #include <Common/ErrorCodes.h>
 
 
@@ -50,19 +51,20 @@ InterpreterTreeQuery::InterpreterTreeQuery(ASTPtr query_, ContextPtr context_, S
 
 BlockIO InterpreterTreeQuery::execute()
 {
+    Stopwatch watch;
     auto tree_query = std::dynamic_pointer_cast<ASTTreeQuery>(query);
     if (!tree_query)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "ASTTreeQuery is expected, but we get {}", query->getID());
     QueryBlockIOs input_block_ios;
     std::mutex input_block_ios_mutex;
     auto build_block_io_task = [&](ASTPtr input_query){
+        auto res = buildBlockIO(input_query);
         std::lock_guard<std::mutex> lock{input_block_ios_mutex};
-        input_block_ios.emplace_back(buildBlockIO(input_query));
-        LOG_TRACE(logger, "build block io for {}", queryToString(input_query));
+        input_block_ios.emplace_back(res);
     };
     const size_t default_thread_nums = 6;
-    const size_t default_min_thread_nums = 1;
-    size_t thread_nums = std::max(default_min_thread_nums, std::min(default_thread_nums, tree_query->input_asts.size()));
+    size_t thread_nums = std::min(tree_query->input_asts.size() + 1, std::max(default_thread_nums, tree_query->input_asts.size() + 1));
+    // Since it may need to query informations from outside storages, and the cost is high, make it run currently
     ThreadPool thread_pool{thread_nums};
     for (auto & input_query : tree_query->input_asts)
     {
@@ -74,12 +76,12 @@ BlockIO InterpreterTreeQuery::execute()
         [&]()
         {
             output_block_io = buildBlockIO(tree_query->output_ast);
-            LOG_TRACE(logger, "build block io for {}", queryToString(tree_query->output_ast));
         });
     thread_pool.wait();
     //auto output_block_io = buildBlockIO(tree_query->output_ast);
 
-    return execute(output_block_io, input_block_ios);
+    auto res = execute(output_block_io, input_block_ios);
+    return res;
 }
 
 BlockIO InterpreterTreeQuery::execute(const QueryBlockIO & output_io, const QueryBlockIOs & input_block_ios)
@@ -119,15 +121,14 @@ QueryBlockIO InterpreterTreeQuery::buildBlockIO(ASTPtr query_)
 
 QueryBlockIO InterpreterTreeQuery::buildInsertBlockIO(std::shared_ptr<ASTInsertQuery> insert_query)
 {
+    Stopwatch watch;
     auto distributed_queries = tryToMakeDistributedInsertQueries(insert_query);
     if (!distributed_queries)
     {
-        LOG_TRACE(logger, "run query({}) in single node", queryToString(insert_query));
         auto interpreter = InterpreterInsertQuery(insert_query, context);
         auto res = std::make_shared<BlockIO>(interpreter.execute());
         return {.block_io = res, .query = insert_query};
     }
-    LOG_TRACE(logger, "run query({}) in distributed mode, nodes={}", queryToString(insert_query), distributed_queries->size());
     const Scalars & scalars = context->hasQueryContext() ? context->getQueryContext()->getScalars() : Scalars{};
     Pipes pipes;
     for (auto & shard_query : *distributed_queries)
@@ -173,18 +174,15 @@ ASTPtr InterpreterTreeQuery::fillHashedChunksStorageSinks(ASTPtr from_query, UIn
     auto insert_query = std::dynamic_pointer_cast<ASTInsertQuery>(from_query);
     if (!insert_query)
     {
-        LOG_TRACE(logger, "not insert query: {}", from_query->getID());
         return from_query;
     }
     if (!insert_query->table_function)
     {
-        LOG_TRACE(logger, "table_function is null. query:{}", queryToString(from_query));
         return from_query;
     }
     auto table_function = std::dynamic_pointer_cast<ASTFunction>(insert_query->table_function);
     if (table_function->name != TableFunctionShuffleJoin::name && table_function->name != TableFunctionShuffleAggregation::name)
     {
-        LOG_TRACE(logger, "Not {} or , query: {}", TableFunctionShuffleJoin::name, TableFunctionShuffleAggregation::name, queryToString(from_query));
         return from_query;
     }
     auto arg_list = std::dynamic_pointer_cast<ASTExpressionList>(table_function->arguments);
@@ -196,7 +194,6 @@ ASTPtr InterpreterTreeQuery::fillHashedChunksStorageSinks(ASTPtr from_query, UIn
     auto sinks_arg = std::make_shared<ASTLiteral>(Field(sinks));
     arg_list->children.push_back(sinks_arg);
 
-    LOG_TRACE(logger, "New query: {}", queryToString(from_query));
     return from_query;
     
 }
@@ -205,11 +202,6 @@ std::vector<StoragePtr> InterpreterTreeQuery::getSelectStorages(ASTPtr ast)
 {
     CollectStoragesMatcher::Data data{.context = context};
     CollectStoragesVisitor(data).visit(ast);
-    LOG_TRACE(logger, "get storages size: {}", data.storages.size());
-    for (const auto & storage : data.storages)
-    {
-        LOG_TRACE(logger, "get storage:{}, {}", storage->getName(), storage->getStorageID().getNameForLogs());
-    }
     return data.storages;
 }
 
@@ -237,7 +229,6 @@ ASTPtr InterpreterTreeQuery::unwrapSingleSelectQuery(const ASTPtr & ast)
 
 std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedInsertQueries(ASTPtr from_query)
 {
-    LOG_TRACE(logger, "tryToMakeDistributedInsertQueries. query:{}", queryToString(from_query));
     String cluster_name = context->getSettings().distributed_shuffle_cluster.value;
     auto insert_query = std::dynamic_pointer_cast<ASTInsertQuery>(from_query);
     auto storages = getSelectStorages(insert_query->select);
@@ -283,7 +274,6 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
             cluster_name, context, nested_select_query, storages[0]);
         if (tasks.empty())
         {
-            LOG_TRACE(logger, "Tasks is empty for {}", storages[0]->getName());
             return {};
         }
     }
@@ -307,12 +297,10 @@ QueryBlockIO InterpreterTreeQuery::buildSelectBlockIO(std::shared_ptr<ASTSelectW
     auto distributed_queries = tryToMakeDistributedSelectQueries(select_query);
     if (!distributed_queries)
     {   
-        LOG_TRACE(logger, "initiator run, query:{}", queryToString(select_query));
         InterpreterSelectWithUnionQuery interpreter(select_query, context, options);
         auto res = std::make_shared<BlockIO>(interpreter.execute());
         return {.block_io = res, .query = select_query};
     }
-    LOG_TRACE(logger, "run query({}) in distributed mode, nodes={}", queryToString(select_query), distributed_queries->size());
     InterpreterSelectWithUnionQuery select_interpreter(select_query, context, options);
     Block header = select_interpreter.getSampleBlock();
     const Scalars & scalars = context->hasQueryContext() ? context->getQueryContext()->getScalars() : Scalars{};
@@ -334,7 +322,6 @@ QueryBlockIO InterpreterTreeQuery::buildSelectBlockIO(std::shared_ptr<ASTSelectW
                 node.compression,
                 node.secure);
         
-        LOG_TRACE(logger, "run on node:{}, header: {}, query:{}", node.host_name, header.dumpNames(), remote_query);
         auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
             connection,
             remote_query,
@@ -367,7 +354,6 @@ std::list<std::pair<DistributedTask, String>> InterpreterTreeQuery::buildSelectT
         {
             DistributedTask task(node, RemoteQueryExecutor::Extension{});
             res.emplace_back(std::make_pair(task, query_str));
-            LOG_TRACE(logger, "run select on node: {}, query:{}", node.host_name, query_str);
         }
     }
     return res;
@@ -375,13 +361,9 @@ std::list<std::pair<DistributedTask, String>> InterpreterTreeQuery::buildSelectT
 }
 std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuery::tryToMakeDistributedSelectQueries(ASTPtr from_query)
 {
-    #if 1
-    LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}", queryToString(from_query));
     auto storages = getSelectStorages(from_query);
     bool has_groupby = ASTAnalyzeUtil::hasGroupByRecursively(from_query);
     bool has_agg = ASTAnalyzeUtil::hasAggregationColumnRecursively(from_query);
-    LOG_TRACE(logger, "tryToMakeDistributedSelectQueries. query:{}. has_groupby:{}, has_agg:{}", queryToString(from_query), has_groupby, has_agg);
-    LOG_TRACE(logger, "storage[0] is {}", storages[0]->getName());
     if (storages.size() == 2)
     {
         for (const auto & storage : storages)
@@ -400,10 +382,8 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterTreeQuer
     }
     else if (storages.size() == 1 && storages[0]->getName() == StorageShuffleAggregation::NAME && has_groupby)
     {
-        LOG_TRACE(logger, "run distributed groupby");
         return buildSelectTasks(from_query);
     }
-    #endif
     return {};
 
 }

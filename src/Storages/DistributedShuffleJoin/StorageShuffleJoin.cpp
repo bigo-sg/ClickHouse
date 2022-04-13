@@ -94,6 +94,7 @@ public:
         return res;
         #else
         Chunk res = table_storage->popChunk();
+        /*
         if (!res.hasRows())
         {
             LOG_TRACE(logger, "reading finish. table:{}.{}", session_id, table_id);
@@ -102,6 +103,7 @@ public:
         {
             LOG_TRACE(logger, "read first chunk. {}.{}", session_id, table_id);
         }
+        */
         read_rows += res.getNumRows();
         //LOG_TRACE9logger, "{}.{} generate rows:{}. read_rows:{}", table_storage->getSessionId(), table_storage->getTableId(), res.getNumRows(), read_rows);
         return res;
@@ -166,7 +168,7 @@ public:
 
     void onFinish() override
     {
-        LOG_TRACE(logger, "{}.{} finish sinking", session_id, table_id);
+        //LOG_TRACE(logger, "{}.{} finish sinking", session_id, table_id);
         // Just for signal remote nodes that this node has finished loading
         if (unlikely(!has_initialized))
         {
@@ -177,7 +179,7 @@ public:
         input_blocks_condition.notify_all();
         if (block_split_thread_pool)
             block_split_thread_pool->wait();
-        LOG_TRACE(logger, "{}.{} all block split threads finished", session_id, table_id);
+        //LOG_TRACE(logger, "{}.{} all block split threads finished", session_id, table_id);
 
         splitted_finished = true;
         for (auto & condition : insert_new_block_conditions)
@@ -186,15 +188,15 @@ public:
         }
         if (block_send_thread_pool)
             block_send_thread_pool->wait();
-        LOG_TRACE(logger, "{}.{} all block send threads finished", session_id, table_id);
+        //LOG_TRACE(logger, "{}.{} all block send threads finished", session_id, table_id);
         for (auto & inserter : node_inserters)
         {
             Block empty_block = getInputPort().getHeader();
-            LOG_TRACE(logger, "{}.{} send an empty block:{} {}", session_id, table_id, empty_block.dumpNames(), empty_block.rows());
+            //LOG_TRACE(logger, "{}.{} send an empty block:{} {}", session_id, table_id, empty_block.dumpNames(), empty_block.rows());
             inserter->write(empty_block);
             inserter->onFinish();
         }
-        LOG_TRACE(logger, "{}.{} notify insert finish. nums:{}", session_id, table_id, node_inserters.size());
+        //LOG_TRACE(logger, "{}.{} notify insert finish. nums:{}", session_id, table_id, node_inserters.size());
 
         if (watch)
         {
@@ -222,7 +224,7 @@ protected:
         #else
         std::unique_lock lock(input_blocks_mutex);
         input_blocks_buffer.emplace_back(getInputPort().getHeader().cloneWithColumns(chunk_columns));
-        LOG_TRACE(logger, "{}.{} insert new input block. blocks size:{}", session_id, table_id, input_blocks_buffer.size());
+        //LOG_TRACE(logger, "{}.{} insert new input block. blocks size:{}", session_id, table_id, input_blocks_buffer.size());
         input_blocks_condition.notify_all();
         #endif
     }
@@ -248,12 +250,20 @@ private:
     std::atomic<bool> splitted_finished = false;
     std::vector<std::shared_ptr<std::mutex>> insert_new_block_mutexs;
     std::vector<std::shared_ptr<std::condition_variable>> insert_new_block_conditions;
-    std::vector<BackgroundSchedulePool::TaskHolder> inserters_tasks;
+    
+    //UInt32 finished_inserter_tasks_counter = 0;
+    //std::mutex finished_inserter_tasks_mutex;
+    //std::condition_variable finished_inserter_tasks_condition;
+    //std::vector<BackgroundSchedulePool::TaskHolder> inserters_tasks;
 
     std::list<Block> input_blocks_buffer;
     std::mutex input_blocks_mutex;
     std::condition_variable input_blocks_condition;
-    std::vector<BackgroundSchedulePool::TaskHolder> consume_tasks;
+
+    //UInt32 finished_consume_tasks_counter = 0;
+    //std::mutex finished_consume_tasks_mutex;
+    //std::condition_variable finished_consume_tasks_condition;
+    //std::vector<BackgroundSchedulePool::TaskHolder> consume_tasks;
 
     std::unique_ptr<ThreadPool> block_split_thread_pool;
     std::unique_ptr<ThreadPool> block_send_thread_pool;
@@ -270,20 +280,19 @@ private:
         initHashExpressionActions();
 
         const UInt32 block_split_threads = context->getSettings().max_threads;
-        block_split_thread_pool = std::make_unique<ThreadPool>(block_split_threads);
-        auto consume_task = [&](size_t n) {
-            LOG_TRACE(logger, "{}.{} new consume task {}", session_id, table_id, n);
+        auto consume_task = [&](size_t /*n*/) {
+            //LOG_TRACE(logger, "{}.{} new consume task {}", session_id, table_id, n);
             while (true)
             {
                 Block tmp_block;
                 {
                     std::unique_lock input_lock(input_blocks_mutex);
-                    LOG_TRACE(logger, "{}.{} before wait @ {}  {} {}", session_id, table_id, n, input_finished, input_blocks_buffer.size());
+                    //LOG_TRACE(logger, "{}.{} before wait @ {}  {} {}", session_id, table_id, n, input_finished, input_blocks_buffer.size());
                     while (!input_finished && input_blocks_buffer.empty())
                     {
                         input_blocks_condition.wait(input_lock);
                     }
-                    LOG_TRACE(logger, "{}.{} after wait @ {} {} {}", session_id, table_id, n, input_finished, input_blocks_buffer.size());
+                    //LOG_TRACE(logger, "{}.{} after wait @ {} {} {}", session_id, table_id, n, input_finished, input_blocks_buffer.size());
                     if (!input_blocks_buffer.empty())
                     {
                         tmp_block.swap(input_blocks_buffer.front());
@@ -302,17 +311,17 @@ private:
                         break;
                 }
             }
-
-            LOG_TRACE(logger, "{}.{} @ {} finished splitted. counter:{}", session_id, table_id, n, finished_consume_tasks);
+            //LOG_TRACE(logger, "{}.{} @ {} finished splitted. counter:{}", session_id, table_id, n, finished_consume_tasks);
         };
-        //for (size_t i = 0; i < context->getSettings().max_threads; ++i)
+        
+        block_split_thread_pool = std::make_unique<ThreadPool>(block_split_threads);
         for (size_t i = 0; i < block_split_threads; ++i)
         {
             block_split_thread_pool->scheduleOrThrowOnError([consume_task, i]{ consume_task(i); });
         }
 
         has_initialized = true;
-        LOG_TRACE(logger, "{}.{} consume first chunk", session_id, table_id);
+        //LOG_TRACE(logger, "{}.{} consume first chunk", session_id, table_id);
     }
 
     void initInserters()
@@ -345,7 +354,7 @@ private:
                 while(!buffer.empty())
                 {
                     auto block = buffer.front();
-                    LOG_TRACE(logger, "{}.{} @ {} to send block. rows:{}", session_id, table_id, buffer_index, block.rows());
+                    //LOG_TRACE(logger, "{}.{} @ {} to send block. rows:{}", session_id, table_id, buffer_index, block.rows());
                     inserter->write(block);
                     buffer.pop_front();
                 }
@@ -353,7 +362,7 @@ private:
                     break;
             }
 
-            LOG_TRACE(logger, "finish sinking. inserter {}.{} @ {} counter:{}", session_id, table_id, buffer_index, finshed_inserters_counter);
+            //LOG_TRACE(logger, "finish sinking. inserter {}.{} @ {} counter:{}", session_id, table_id, buffer_index, finshed_inserters_counter);
         };
 
         // prepare remote call
@@ -528,7 +537,7 @@ private:
             auto & mutex = *insert_new_block_mutexs[i];
             auto & condition = *insert_new_block_conditions[i];
             auto & buffer = node_inserters_buffers[i];
-            LOG_TRACE(logger, "{}.{} send block. rows:{}, cols:{}, names:{}, inserter:{}", session_id, table_id, block.rows(), block.columns(), block.dumpNames(), i);
+            //LOG_TRACE(logger, "{}.{} send block. rows:{}, cols:{}, names:{}, inserter:{}", session_id, table_id, block.rows(), block.columns(), block.dumpNames(), i);
             if (block.rows())
             {
                 Block tmp;
@@ -596,12 +605,6 @@ Pipe StorageShuffleBase::read(
         auto source = std::make_shared<StorageShuffleJoinSource>(context_, session_id, table_id, header);
         return Pipe(source);
     }
-#if 0
-    if (processed_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
-    {
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageShuffleJoin doesn't support two phases merge processing. current processing stage:{}", processed_stage_);
-    }
-#endif
     // Since the query_info_.query has been rewritten, it may cause an ambiguous column exception in join case.
     // So we use the original_query here.
     auto remote_query = queryToString(query_info_.original_query);
@@ -737,7 +740,7 @@ public:
 
     void onFinish() override
     { 
-        LOG_TRACE(logger, "finish sinking.{} table:{}.{}", reinterpret_cast<UInt64>(this), session_id, table_id);
+        //LOG_TRACE(logger, "finish sinking.{} table:{}.{}", reinterpret_cast<UInt64>(this), session_id, table_id);
         table_storage->increaseFinishedSinkCount();
     }
     String getName() const override { return "StorageShuffleJoinPartSink"; }

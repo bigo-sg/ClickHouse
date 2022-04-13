@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <Common/HashTable/Hash.h>
 #include <Common/HashTable/HashTable.h>
 #include <Common/HashTable/HashTableAllocator.h>
@@ -319,3 +320,64 @@ using HashMapWithStackMemory = HashMapTable<
     HashTableAllocatorWithStackMemory<
         (1ULL << initial_size_degree)
         * sizeof(HashMapCellWithSavedHash<Key, Mapped, Hash>)>>;
+
+template<
+    typename Key,
+    typename Cell,
+    typename Mapped,
+    typename Hash = DefaultHash<Key>,
+    typename Allocator = HashTableAllocator,
+    size_t PARALLEL = 4>
+class CurrentHashMap
+{
+public:
+    using HashMapBase = HashMapTable<Key, Cell, Hash, Allocator>;
+    using Self = CurrentHashMap;
+    using Base = HashMapBase;
+    using LookupResult = typename HashMapBase::LookupResult;
+    using Base::Base;
+
+    CurrentHashMap()
+    {
+        for(size_t i = 0; i < PARALLEL; ++i)
+        {
+            maps.emplace_back(std::make_unique<HashMapBase>());
+        }
+    }
+
+    template<typename Func>
+    void ALWAYS_INLINE mergeToViaEmplace(Self & that, Func && func)
+    {
+        for (auto & map : maps)
+        {
+            for(auto it = map->begin(), end = map->end(); it != end; ++it)
+            {
+                typename Self::LookupResult res_it;
+                bool inserted;
+                that.emplace(Cell::getKey(it->getValue()), res_it, inserted, it.getHash());
+                func(res_it->getMapped(), it->getMapped(), inserted);
+            }
+        }
+    }
+
+    template<typename Func>
+    void forEachValue(Func && func)
+    {
+        for(auto & map : maps)
+        {
+            for(auto & v : *map)
+            {
+                func(v.getKey(), v.getMapped());
+            }
+        }
+    }
+
+
+private:
+    struct MapHolder
+    {
+        std::mutex mutex;
+        HashMapBase map;
+    };
+    std::vector<std::unique_ptr<MapHolder>> maps;
+};

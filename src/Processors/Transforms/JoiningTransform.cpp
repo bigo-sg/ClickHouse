@@ -105,7 +105,7 @@ IProcessor::Status JoiningTransform::prepare()
     {
         watch->stop();
         wait_right_table_elapsed = watch->elapsedMilliseconds();
-        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "right table finish loading. elapse:{}", wait_right_table_elapsed);
+        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "{} right table finish loading. elapse:{}. join: {}", reinterpret_cast<UInt64>(this), wait_right_table_elapsed, reinterpret_cast<UInt64>(join.get()));
         watch->start();
     }
 
@@ -120,7 +120,7 @@ IProcessor::Status JoiningTransform::prepare()
             return Status::Ready;
 
         output.finish();
-        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "left table finish loading. elapse:{}", watch->elapsedMilliseconds());
+        LOG_TRACE(&Poco::Logger::get("JoiningTransform"), "{} left table finish loading. elapse:{}. join: {}", reinterpret_cast<UInt64>(this), watch->elapsedMilliseconds(), reinterpret_cast<UInt64>(join.get()));
         return Status::Finished;
     }
 

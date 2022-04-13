@@ -342,8 +342,15 @@ std::unique_ptr<QueryPipelineBuilder> QueryPipelineBuilder::joinPipelines(
     /// (right) ┘         │                        ╟──┘└─┐
     ///                   ╞> FillingJoin ─> Resize ╣     ╞> Joining ─> (totals)
     /// (totals) ─────────┘                        ╙─────┘
-
+    
+    // we resize the left stream to improve the performance. The original stream num is always not large enough
+    // and make the left join part slow.
+    //size_t cpu_cores = std::thread::hardware_concurrency();
+    //size_t left_resize_num_streams = std::min(cpu_cores, std::max(cpu_cores, left->getNumStreams()));
+    //left->resize(left_resize_num_streams);
+    left->resize(1);
     size_t num_streams = left->getNumStreams();
+
     right->resize(1);
 
     auto adding_joined = std::make_shared<FillingRightJoinSideTransform>(right->getHeader(), join);

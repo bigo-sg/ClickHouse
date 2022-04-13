@@ -134,7 +134,14 @@ public:
             {
                 current_idx = source_info->next_uri_to_read.fetch_add(1);
                 if (current_idx >= source_info->hive_files.size())
+                {
+                    LOG_TRACE(
+                        &Poco::Logger::get("StorageHiveSource"),
+                        "{} hive source finished. {}",
+                        source_info->table_name,
+                        reinterpret_cast<UInt64>(this));
                     return {};
+                }
 
                 const auto & curr_file = source_info->hive_files[current_idx];
                 current_path = curr_file->getPath();
@@ -238,6 +245,7 @@ public:
             pipeline.reset();
             read_buf.reset();
         }
+
     }
 
 private:
@@ -466,7 +474,7 @@ Pipe StorageHive::read(
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
     {
-        pipes.emplace_back(std::make_shared<StorageHiveSource>(
+        auto hive_source = std::make_shared<StorageHiveSource>(
             sources_info,
             hdfs_namenode_url,
             format_name,
@@ -474,7 +482,10 @@ Pipe StorageHive::read(
             sample_block,
             context_,
             max_block_size,
-            text_input_field_names));
+            text_input_field_names);
+        pipes.emplace_back(hive_source);
+
+        LOG_TRACE(&Poco::Logger::get("StorageHive"), "{} create new source {}", hive_table, reinterpret_cast<UInt64>(hive_source.get()));
     }
     return Pipe::unitePipes(std::move(pipes));
 }
