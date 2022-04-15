@@ -6,6 +6,7 @@
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
 #include "Common/Stopwatch.h"
+#include "Processors/Port.h"
 #include "base/defines.h"
 
 namespace DB

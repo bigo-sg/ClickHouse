@@ -56,6 +56,7 @@
 #include <Processors/Executors/PullingAsyncPipelineExecutor.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Parsers/formatAST.h>
+#include <Interpreters/ConcurrentHashJoin.h>
 
 namespace DB
 {
@@ -932,7 +933,13 @@ static std::shared_ptr<IJoin> chooseJoinAlgorithm(std::shared_ptr<TableJoin> ana
 
     bool allow_merge_join = analyzed_join->allowMergeJoin();
     if (analyzed_join->forceHashJoin() || (analyzed_join->preferMergeJoin() && !allow_merge_join))
+    {
+        #if 1
+        if (analyzed_join->kind() == ASTTableJoin::Kind::Inner)
+            return std::make_shared<JoinStuff::ConcurrentHashJoin>(context, analyzed_join, 16, sample_block);
+        #endif
         return std::make_shared<HashJoin>(analyzed_join, sample_block);
+    }
     else if (analyzed_join->forceMergeJoin() || (analyzed_join->preferMergeJoin() && allow_merge_join))
         return std::make_shared<MergeJoin>(analyzed_join, sample_block);
     return std::make_shared<JoinSwitcher>(analyzed_join, sample_block);

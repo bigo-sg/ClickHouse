@@ -17,10 +17,15 @@
 #include <Interpreters/ExpressionActions.h>
 #include <Common/typeid_cast.h>
 #include <Common/CurrentThread.h>
+#include "Processors/IProcessor.h"
 #include <Processors/DelayedPortsProcessor.h>
 #include <Processors/RowsBeforeLimitCounter.h>
 #include <Processors/Sources/RemoteSource.h>
 #include <Processors/QueryPlan/QueryPlan.h>
+#include <Interpreters/IJoin.h>
+
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 namespace DB
 {
@@ -345,20 +350,40 @@ std::unique_ptr<QueryPipelineBuilder> QueryPipelineBuilder::joinPipelines(
     
     // we resize the left stream to improve the performance. The original stream num is always not large enough
     // and make the left join part slow.
-    //size_t cpu_cores = std::thread::hardware_concurrency();
-    //size_t left_resize_num_streams = std::min(cpu_cores, std::max(cpu_cores, left->getNumStreams()));
-    //left->resize(left_resize_num_streams);
-    left->resize(1);
+    size_t cpu_cores = std::thread::hardware_concurrency();
+    size_t resize_num_streams = std::min(cpu_cores, std::max(cpu_cores, left->getNumStreams()));
+    left->resize(resize_num_streams);
+    
     size_t num_streams = left->getNumStreams();
 
-    right->resize(1);
+    if (join->supportParallelJoin() && !right->hasTotals())
+    {
+        right->resize(resize_num_streams);
+        auto concurrent_right_filling_transform = [&](OutputPortRawPtrs outports)
+        {
+            Processors processors;
+            for (auto & outport : outports)
+            {
+                auto adding_joined = std::make_shared<FillingRightJoinSideTransform>(right->getHeader(), join);
+                connect(*outport, adding_joined->getInputs().front());
+                processors.emplace_back(adding_joined);
+            }
+            return processors;
+        };
+        right->transform(concurrent_right_filling_transform);
+    }
+    else
+    {
+        LOG_TRACE(&Poco::Logger::get("QueryPipelineBuilder"), "run in single thread on right loading");
+        right->resize(1);
 
-    auto adding_joined = std::make_shared<FillingRightJoinSideTransform>(right->getHeader(), join);
-    InputPort * totals_port = nullptr;
-    if (right->hasTotals())
-        totals_port = adding_joined->addTotalsPort();
+        auto adding_joined = std::make_shared<FillingRightJoinSideTransform>(right->getHeader(), join);
+        InputPort * totals_port = nullptr;
+        if (right->hasTotals())
+            totals_port = adding_joined->addTotalsPort();
 
-    right->addTransform(std::move(adding_joined), totals_port, nullptr);
+        right->addTransform(std::move(adding_joined), totals_port, nullptr);
+    }
 
     size_t num_streams_including_totals = num_streams + (left->hasTotals() ? 1 : 0);
     right->resize(num_streams_including_totals);
