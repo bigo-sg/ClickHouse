@@ -371,6 +371,7 @@ std::unique_ptr<QueryPipelineBuilder> QueryPipelineBuilder::joinPipelines(
             return processors;
         };
         right->transform(concurrent_right_filling_transform);
+        right->resize(1);
     }
     else
     {

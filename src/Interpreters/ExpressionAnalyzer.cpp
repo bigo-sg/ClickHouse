@@ -936,7 +936,7 @@ static std::shared_ptr<IJoin> chooseJoinAlgorithm(std::shared_ptr<TableJoin> ana
     {
         #if 1
         if (analyzed_join->kind() == ASTTableJoin::Kind::Inner)
-            return std::make_shared<JoinStuff::ConcurrentHashJoin>(context, analyzed_join, 16, sample_block);
+            return std::make_shared<JoinStuff::ConcurrentHashJoin>(context, analyzed_join, 24, sample_block);
         #endif
         return std::make_shared<HashJoin>(analyzed_join, sample_block);
     }

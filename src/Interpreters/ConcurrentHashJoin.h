@@ -60,14 +60,14 @@ private:
 
     Poco::Logger * logger = &Poco::Logger::get("ConcurrentHashJoin");
 
-    size_t make_dispatched_blocks_elapsed = 0;
-    Stopwatch make_dispatched_blocks_watch;
-    size_t insert_right_blocks_elapsed = 0;
-    Stopwatch insert_right_blocks_watch;
-    size_t insert_left_blocks_elapsed = 0;
-    Stopwatch insert_left_blocks_watch;
-    size_t merge_left_blocks_elapsed = 0;
-    Stopwatch merge_left_blocks_watch;
+    std::atomic<size_t> make_dispatched_blocks_elapsed = 0;
+    //Stopwatch make_dispatched_blocks_watch;
+    std::atomic<size_t> insert_right_blocks_elapsed = 0;
+    //Stopwatch insert_right_blocks_watch;
+    std::atomic<size_t> insert_left_blocks_elapsed = 0;
+    //Stopwatch insert_left_blocks_watch;
+    std::atomic<size_t> merge_left_blocks_elapsed = 0;
+    //Stopwatch merge_left_blocks_watch;
 
     std::shared_ptr<ExpressionActions> buildHashExpressionAction(const Block & block, const String & based_column_name, Strings & hash_columns_names);
     BlockDispatchData & getBlockDispatchData(const Block & block, TableIndex table_index);

@@ -54,11 +54,12 @@ ConcurrentHashJoin::~ConcurrentHashJoin()
 
 bool ConcurrentHashJoin::addJoinedBlock(const Block & block, bool check_limits)
 {
+    LOG_TRACE(logger, "addJoinedBlock. rows:{}", block.rows());
     auto & dispatch_data = getBlockDispatchData(block, RIHT);
     std::vector<Block> dispatched_blocks;
     Block cloned_block = block;
     dispatchBlock(dispatch_data, cloned_block, dispatched_blocks);
-    insert_right_blocks_watch.start();
+    Stopwatch insert_right_blocks_watch;
     for (size_t i = 0; i < dispatched_blocks.size(); ++i)
     {   
         auto & hash_join = hash_joins[i];
@@ -74,24 +75,25 @@ bool ConcurrentHashJoin::addJoinedBlock(const Block & block, bool check_limits)
 
 void ConcurrentHashJoin::joinBlock(Block & block, std::shared_ptr<ExtraBlock> & /*not_processed*/)
 {
+    LOG_TRACE(logger, "joinBlock. rows:{}", block.rows());
     auto & dispatch_data = getBlockDispatchData(block, LEFT);
     std::vector<Block> dispatched_blocks;
     Block cloned_block = block;
     dispatchBlock(dispatch_data, cloned_block, dispatched_blocks);
-    insert_left_blocks_watch.start();
+    Stopwatch insert_left_blocks_watch;
     for (size_t i = 0; i < dispatched_blocks.size(); ++i)
     {
         std::shared_ptr<ExtraBlock> none_extra_block;
         auto & hash_join = hash_joins[i];
         auto & dispatched_block = dispatched_blocks[i];
-        std::lock_guard lock(hash_join->mutex);
+        //std::lock_guard lock(hash_join->mutex);
         hash_join->data->joinBlock(dispatched_block, none_extra_block);
         if (none_extra_block && !none_extra_block->empty())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "not_processed should be empty");
     }
     insert_left_blocks_elapsed += insert_left_blocks_watch.elapsedMicroseconds();
 
-    merge_left_blocks_watch.start();
+    Stopwatch merge_left_blocks_watch;
     ColumnsWithTypeAndName final_columns;
     MutableColumns mutable_final_columns;
     NamesAndTypesList names_and_types = dispatched_blocks[0].getNamesAndTypesList();
@@ -246,7 +248,7 @@ ConcurrentHashJoin::BlockDispatchData & ConcurrentHashJoin::getBlockDispatchData
 
 void ConcurrentHashJoin::dispatchBlock(BlockDispatchData & dispatch_data, Block & from_block, std::vector<Block> & dispatched_blocks)
 {
-    make_dispatched_blocks_watch.start();
+    Stopwatch make_dispatched_blocks_watch;
     auto rows_before_filtration = from_block.rows();
     dispatch_data.hash_expression_actions->execute(from_block, rows_before_filtration);
     for (const auto & filter_column_name : dispatch_data.hash_columns_names)
