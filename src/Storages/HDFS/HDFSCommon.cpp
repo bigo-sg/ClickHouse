@@ -1,10 +1,13 @@
 #include <Storages/HDFS/HDFSCommon.h>
-#include <Poco/URI.h>
-#include <boost/algorithm/string/replace.hpp>
-#include <re2/re2.h>
-#include <filesystem>
 
 #if USE_HDFS
+#include <filesystem>
+
+#include <re2/re2.h>
+#include <Poco/URI.h>
+#include <boost/algorithm/string/replace.hpp>
+#include <hdfs/Logger.h>
+
 #include <Common/ShellCommand.h>
 #include <Common/Exception.h>
 #include <IO/WriteBufferFromString.h>
@@ -138,6 +141,11 @@ HDFSBuilderWrapper createHDFSBuilder(const String & uri_str, const Poco::Util::A
                     libhdfs3_conf = std::filesystem::absolute(config_dir / libhdfs3_conf);
             }
             setenv("LIBHDFS3_CONF", libhdfs3_conf.c_str(), 1);
+            setenv("HDFS_ENABLE_LOGGING", "true", 1);
+            
+            String log_path = "/data1/clickhouse_official/log/hdfs.log";
+            // Hdfs::Internal::RootLogger.setOutputFd(open(log_path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644));
+            Hdfs::Internal::RootLogger.setLogSeverity(Hdfs::Internal::LogSeverity::DEBUG3);
         }
     });
 

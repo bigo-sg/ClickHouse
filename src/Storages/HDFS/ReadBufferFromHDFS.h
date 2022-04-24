@@ -17,6 +17,20 @@
 namespace DB
 {
 
+class StopwatchGuard
+{
+public:
+    explicit StopwatchGuard(const String & msg_) : msg(msg_) { }
+
+    ~StopwatchGuard()
+    {
+        std::cout << msg << "cost:" << watch.elapsedMicroseconds() << std::endl;
+    }
+private:
+    String msg;
+    Stopwatch watch;
+};
+
 /** Accepts HDFS path to file and opens it.
  * Closes file by himself (thus "owns" a file descriptor).
  */

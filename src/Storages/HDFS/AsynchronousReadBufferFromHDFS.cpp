@@ -95,6 +95,7 @@ std::optional<size_t> AsynchronousReadBufferFromHDFS::getTotalSize()
 
 bool AsynchronousReadBufferFromHDFS::nextImpl()
 {
+    Stopwatch w;
     if (!hasPendingDataToRead())
         return false;
 
@@ -142,11 +143,13 @@ bool AsynchronousReadBufferFromHDFS::nextImpl()
 
     file_offset_of_buffer_end = impl->getFileOffsetOfBufferEnd();
     prefetch_future = {};
+    std::cout << "method:threadpool next cost:" << w.elapsedMicroseconds() << ",size:" << size << std::endl;
     return size;
 }
 
 off_t AsynchronousReadBufferFromHDFS::seek(off_t offset, int whence)
 {
+    StopwatchGuard guard{"method=threadpool seek"};
     ProfileEvents::increment(ProfileEvents::RemoteFSSeeks);
 
     if (whence != SEEK_SET)

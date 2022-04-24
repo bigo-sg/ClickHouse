@@ -716,6 +716,7 @@ Pipe StorageHive::read(
 
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();
+    std::cout << "num_streams:" << num_streams << std::endl;
 
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
