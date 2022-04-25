@@ -56,7 +56,7 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
 
     ~ReadBufferFromHDFSImpl() override
     {
-        StopwatchGuard guard{"close "};
+        // StopwatchGuard guard{"close "};
         hdfsCloseFile(fs.get(), fin);
     }
 
@@ -99,7 +99,7 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
             working_buffer.resize(bytes_read);
             file_offset += bytes_read;
 
-            std::cout << "method=read next cost:" << watch.elapsedMicroseconds() << ",size:" << bytes_read << std::endl;
+            // std::cout << "method=read next cost:" << watch.elapsedMicroseconds() << ",size:" << bytes_read << std::endl;
             return true;
         }
 
@@ -133,6 +133,7 @@ ReadBufferFromHDFS::ReadBufferFromHDFS(
     : SeekableReadBufferWithSize(nullptr, 0)
     , impl(std::make_unique<ReadBufferFromHDFSImpl>(hdfs_uri_, hdfs_file_path_, config_, buf_size_, read_until_position_))
 {
+    std::cout << "ReadBufferFromHDFS size:" << buf_size_ << std::endl;
 }
 
 std::optional<size_t> ReadBufferFromHDFS::getTotalSize()
@@ -154,7 +155,7 @@ bool ReadBufferFromHDFS::nextImpl()
 
 off_t ReadBufferFromHDFS::seek(off_t offset_, int whence)
 {
-    StopwatchGuard guard{"method=read "};
+    // StopwatchGuard guard{"method=read "};
     if (whence != SEEK_SET)
         throw Exception("Only SEEK_SET mode is allowed.", ErrorCodes::CANNOT_SEEK_THROUGH_FILE);
 

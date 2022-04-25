@@ -18,6 +18,7 @@
 namespace DB
 {
 
+/*
 class StopwatchGuard
 {
 public:
@@ -31,6 +32,7 @@ private:
     String msg;
     Stopwatch watch;
 };
+*/
 
 /** Accepts HDFS path to file and opens it.
  * Closes file by himself (thus "owns" a file descriptor).

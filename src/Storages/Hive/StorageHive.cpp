@@ -158,8 +158,8 @@ public:
                 if (current_idx >= source_info->hive_files.size())
                     return {};
 
-                const auto & curr_file = source_info->hive_files[current_idx];
-                current_path = curr_file->getPath();
+                const auto & current_file = source_info->hive_files[current_idx];
+                current_path = current_file->getPath();
 
                 String uri_with_path = hdfs_namenode_url + current_path;
                 auto compression = chooseCompressionMethod(current_path, compression_method);
@@ -169,12 +169,17 @@ public:
                     auto get_raw_read_buf = [&]() -> std::unique_ptr<ReadBuffer>
                     {
                         auto buf = std::make_unique<ReadBufferFromHDFS>(
-                            hdfs_namenode_url, current_path, getContext()->getGlobalContext()->getConfigRef());
+                            hdfs_namenode_url,
+                            current_path,
+                            getContext()->getGlobalContext()->getConfigRef(),
+                            getContext()->getSettingsRef().max_read_buffer_size);
 
                         bool thread_pool_read = read_settings.remote_fs_method == RemoteFSReadMethod::threadpool;
                         if (thread_pool_read)
                         {
-                            return std::make_unique<AsynchronousReadBufferFromHDFS>(StorageHive::getThreadPoolReader(), read_settings, std::move(buf));
+                            auto current_size = current_file->getSize();
+                            return std::make_unique<AsynchronousReadBufferFromHDFS>(
+                                StorageHive::getThreadPoolReader(), read_settings.adjustBufferSize(current_size), std::move(buf));
                         }
                         else
                         {
@@ -182,10 +187,12 @@ public:
                         }
                     };
                     raw_read_buf = get_raw_read_buf();
+                    /*
                     if (read_settings.remote_fs_prefetch)
                     {
                         raw_read_buf->prefetch();
                     }
+                    */
                 }
                 catch (Exception & e)
                 {
@@ -207,7 +214,7 @@ public:
                     remote_read_buf = RemoteReadBuffer::create(
                         getContext(),
                         std::make_shared<StorageHiveMetadata>(
-                            "Hive", getNameNodeCluster(hdfs_namenode_url), uri_with_path, curr_file->getSize(), curr_file->getLastModTs()),
+                            "Hive", getNameNodeCluster(hdfs_namenode_url), uri_with_path, current_file->getSize(), current_file->getLastModTs()),
                         std::move(raw_read_buf),
                         buff_size,
                         format == "Parquet" || format == "ORC");
@@ -215,13 +222,13 @@ public:
                 else
                     remote_read_buf = std::move(raw_read_buf);
 
-                if (curr_file->getFormat() == FileFormat::TEXT)
+                if (current_file->getFormat() == FileFormat::TEXT)
                     read_buf = wrapReadBufferWithCompressionMethod(std::move(remote_read_buf), compression);
                 else
                     read_buf = std::move(remote_read_buf);
 
                 auto input_format = FormatFactory::instance().getInputFormat(
-                    format, *read_buf, to_read_block, getContext(), max_block_size, updateFormatSettings(curr_file));
+                    format, *read_buf, to_read_block, getContext(), max_block_size, updateFormatSettings(current_file));
 
                 QueryPipelineBuilder builder;
                 builder.init(Pipe(input_format));
@@ -717,6 +724,7 @@ Pipe StorageHive::read(
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();
     std::cout << "num_streams:" << num_streams << std::endl;
+    num_streams = 50;
 
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
