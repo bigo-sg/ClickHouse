@@ -92,6 +92,7 @@
 #include <Server/HTTP/HTTPServer.h>
 #include <Interpreters/AsynchronousInsertQueue.h>
 #include <filesystem>
+#include <Interpreters/StorageDistributedTasksBuilder.h>
 
 #include "config_core.h"
 #include "Common/config_version.h"
@@ -688,6 +689,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
         }
     }
 
+    registerAllStorageDistributedTaskBuilderMakers();
     Poco::ThreadPool server_pool(3, config().getUInt("max_connections", 1024));
     std::mutex servers_lock;
     std::vector<ProtocolServerAdapter> servers;
