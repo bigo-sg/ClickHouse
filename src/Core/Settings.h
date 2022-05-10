@@ -584,6 +584,8 @@ static constexpr UInt64 operator""_Gb(unsigned long long value)
     M(Bool, allow_experimental_object_type, false, "Allow Object and JSON data types", 0) \
     M(String, insert_deduplication_token, "", "If not empty, used for duplicate detection instead of data digest", 0) \
     M(Bool, count_distinct_optimization, false, "Rewrite count distinct to subquery of group by", 0) \
+    M(String, use_cluster_for_distributed_shuffle, "", "If you want to run the join and group by in distributed shuffle mode, set it as one of the available cluster.", 0) \
+    M(UInt64, shuffle_storage_session_timeout, 1800, "How long a session can be alive before expired by timeout", 0) \
     M(Bool, throw_on_unsupported_query_inside_transaction, true, "Throw exception if unsupported query is used inside transaction", 0) \
     M(Bool, throw_if_no_data_to_insert, true, "Enables or disables empty INSERTs, enabled by default", 0) \
     // End of COMMON_SETTINGS

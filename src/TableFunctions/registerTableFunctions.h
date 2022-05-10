@@ -54,6 +54,8 @@ void registerTableFunctionDictionary(TableFunctionFactory & factory);
 
 void registerTableFunctionFormat(TableFunctionFactory & factory);
 
+void registerTableFunctionShuffle(TableFunctionFactory & factory);
+
 void registerTableFunctions();
 
 }
