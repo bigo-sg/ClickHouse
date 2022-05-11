@@ -39,9 +39,10 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
     String hdfs_uri;
     String hdfs_file_path;
 
-    hdfsFile fin;
     HDFSBuilderWrapperPtr builder;
     HDFSFSSharedPtr fs;
+    hdfsFile fin;
+    HDFSFilePool::Entry entry;
 
     off_t file_offset = 0;
     off_t read_until_position = 0;
@@ -56,30 +57,34 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
         : BufferWithOwnMemory<SeekableReadBuffer>(buf_size_)
         , hdfs_uri(hdfs_uri_)
         , hdfs_file_path(hdfs_file_path_)
-        , builder(HDFSBuilderFSFactory::instance().getBuilder(hdfs_uri_, config_))
+        , builder(HDFSHandlerFactory::instance().getBuilder(hdfs_uri_, config_))
         , file_offset(file_offset_)
         , read_until_position(read_until_position_)
     {
         Stopwatch watch;
         assert(builder && builder->get());
-        fs = HDFSBuilderFSFactory::instance().getFS(builder);
-        fin = hdfsOpenFile(fs.get(), hdfs_file_path.c_str(), O_RDONLY, 0, 0, 0);
 
+        auto pair = HDFSHandlerFactory::instance().getFSAndFile(builder, hdfs_file_path);
+        fs = pair.first;
+        entry = pair.second;
+
+        fin = entry.get();
         if (fin == nullptr)
-            throw Exception(ErrorCodes::CANNOT_OPEN_FILE,
+            throw Exception(
+                ErrorCodes::CANNOT_OPEN_FILE,
                 "Unable to open HDFS file: {}. Error: {}",
-                hdfs_uri + hdfs_file_path, std::string(hdfsGetLastError()));
+                hdfs_uri_+ hdfs_file_path,
+                std::string(hdfsGetLastError()));
 
-        if (file_offset)
-        {
-            int seek_status = hdfsSeek(fs.get(), fin, file_offset);
-            if (seek_status != 0)
-                throw Exception(
-                    ErrorCodes::CANNOT_SEEK_THROUGH_FILE,
-                    "Fail to seek HDFS file: {}, error: {}",
-                    hdfs_uri,
-                    std::string(hdfsGetLastError()));
-        }
+        std::cout << "fs:" << fs.get() << std::endl;
+        std::cout << "fin:" << fin << std::endl;
+        int seek_status = hdfsSeek(fs.get(), fin, file_offset);
+        if (seek_status != 0)
+            throw Exception(
+                ErrorCodes::CANNOT_SEEK_THROUGH_FILE,
+                "Fail to seek HDFS file: {}, error: {}",
+                hdfs_uri + hdfs_file_path,
+                std::string(hdfsGetLastError()));
 
         ProfileEvents::increment(ProfileEvents::HDFSReadInitializeMicroseconds, watch.elapsedMicroseconds());
         ProfileEvents::increment(ProfileEvents::HDFSReadInitialize, 1);
@@ -88,7 +93,7 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
     ~ReadBufferFromHDFSImpl() override
     {
         Stopwatch watch;
-        hdfsCloseFile(fs.get(), fin);
+        // hdfsCloseFile(fs.get(), fin);
 
         ProfileEvents::increment(ProfileEvents::HDFSReadCloseMicroseconds, watch.elapsedMicroseconds());
         ProfileEvents::increment(ProfileEvents::HDFSReadClose, 1);

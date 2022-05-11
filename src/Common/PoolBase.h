@@ -88,6 +88,8 @@ public:
         Object & operator*() &              { return *data->data.object; }
         const Object & operator*() const &  { return *data->data.object; }
 
+        Object * get() const { return &*data->data.object; }
+
         /**
          * Expire an object to make it reallocated later.
          */

@@ -22,6 +22,8 @@ namespace ErrorCodes
     extern const int NETWORK_ERROR;
     extern const int EXCESSIVE_ELEMENT_IN_CONFIG;
     extern const int NO_ELEMENTS_IN_CONFIG;
+    extern const int CANNOT_OPEN_FILE;
+    extern const int LOGICAL_ERROR;
 }
 
 static const String HDFS_URL_REGEXP = "^hdfs://[^/]*/.*";
@@ -171,54 +173,114 @@ void HDFSBuilderWrapper::initialize()
     }
 }
 
-HDFSFSPool::HDFSFSPool(uint32_t max_items_, uint32_t min_items_, HDFSBuilderWrapperPtr builder_)
-    : max_items(max_items_), min_items(min_items_), current_index(0), builder(std::move(builder_))
+HDFSFilePool::HDFSFilePool(HDFSFSSharedPtr fs_, const String & hdfs_uri_, const String & hdfs_path_, unsigned pool_size)
+    : PoolBase<std::remove_pointer_t<hdfsFile>>(pool_size, &Poco::Logger::get("HDFSFilePool"))
+    , fs(std::move(fs_))
+    , hdfs_uri(hdfs_uri_)
+    , hdfs_path(hdfs_path_)
 {
-    pool.reserve(max_items);
+    assert(fs);
+}
 
-    if (min_items > max_items)
-        min_items = max_items;
+HDFSFilePool::ObjectPtr HDFSFilePool::allocObject()
+{
+    auto fin = hdfsOpenFile(fs.get(), hdfs_path.c_str(), O_RDONLY, 0, 0, 0);
+    if (fin == nullptr)
+        throw Exception(
+            ErrorCodes::CANNOT_OPEN_FILE,
+            "Unable to open HDFS file: {}. Error: {}",
+            hdfs_uri + hdfs_path,
+            std::string(hdfsGetLastError()));
 
-    if (min_items)
-    {
-        pool.resize(min_items);
-        ThreadPool thread_pool(std::min(static_cast<uint32_t>(32), min_items));
-        for (size_t i = 0; i < min_items; ++i)
+    return {
+        fin,
+        [&](hdfsFile f)
         {
-            thread_pool.scheduleOrThrowOnError([this, i]()
-            {
-                pool[i] = createSharedHDFSFS(builder->get());
+            std::cout << "close file, trace:" << StackTrace().toString() << std::endl;
+            hdfsCloseFile(fs.get(), f);
+        }};
+}
+
+HDFSFSPool::HDFSFSPool(uint32_t max_items_, HDFSBuilderWrapperPtr builder_)
+    : max_items(max_items_), builder(std::move(builder_))
+{
+    assert(max_items);
+    assert(builder && builder->get());
+
+    fses_with_cache.resize(max_items);
+
+    ThreadPool thread_pool(std::min(static_cast<uint32_t>(32), max_items));
+    for (size_t i = 0; i < max_items; ++i)
+    {
+        thread_pool.scheduleOrThrowOnError(
+            [this, i]() {
+                fses_with_cache[i] = {createSharedHDFSFS(builder->get()), std::make_shared<HDFSFilePoolCache>(file_pool_cache_size)};
             });
-        }
-        thread_pool.wait();
     }
+    thread_pool.wait();
 }
 
-HDFSFSSharedPtr HDFSFSPool::get()
+HDFSFSSharedPtr HDFSFSPool::getFS()
 {
-    std::lock_guard lock{mutex};
-
-    if (current_index == pool.size())
+    // std::lock_guard lock{mutex};
+    if (current_index == max_items)
     {
-        if (pool.size() == max_items)
-        {
-            current_index = 0;
-        }
-        else
-        {
-            pool.emplace_back(createSharedHDFSFS(builder->get()));
-        }
+        current_index = 0;
     }
-    return pool[current_index++];
+    return fses_with_cache[current_index++].first;
 }
 
-HDFSBuilderFSFactory & HDFSBuilderFSFactory::instance()
+HDFSFilePool::Entry HDFSFSPool::getFile(HDFSFSSharedPtr fs, const String & path)
 {
-    static HDFSBuilderFSFactory factory;
+    HDFSFilePoolCachePtr file_pool_cache;
+
+    {
+        // std::lock_guard lock{mutex};
+        for (const auto & pair : fses_with_cache)
+        {
+            if (fs == pair.first)
+            {
+                file_pool_cache = pair.second;
+                break;
+            }
+        }
+    }
+
+    if (file_pool_cache)
+    {
+        throw Exception("Can't find hdfsFS in HDFSFSPool", ErrorCodes::LOGICAL_ERROR);
+    }
+    
+    HDFSFilePoolPtr file_pool = file_pool_cache->get(path);
+    if (!file_pool)
+    {
+        file_pool = std::make_shared<HDFSFilePool>(fs, builder->getHDFSUri(), path, file_pool_size);
+        file_pool_cache->set(path, file_pool);
+    }
+    return file_pool->get(-1);
+}
+
+std::pair<HDFSFSSharedPtr, HDFSFilePool::Entry> HDFSFSPool::getFSAndFile(const String & path)
+{
+    auto index = sipHash64(path) % max_items;
+    const auto & [fs, cache] = fses_with_cache[index];
+
+    auto file_pool = cache->get(path);
+    if (!file_pool)
+    {
+        file_pool = std::make_shared<HDFSFilePool>(fs, builder->getHDFSUri(), path, file_pool_size);
+        cache->set(path, file_pool);
+    }
+    return {fs, file_pool->get(-1)};
+}
+
+HDFSHandlerFactory & HDFSHandlerFactory::instance()
+{
+    static HDFSHandlerFactory factory;
     return factory;
 }
 
-void HDFSBuilderFSFactory::setEnv(const Poco::Util::AbstractConfiguration & config)
+void HDFSHandlerFactory::setEnv(const Poco::Util::AbstractConfiguration & config)
 {
     String libhdfs3_conf = config.getString("hdfs.libhdfs3_conf", "");
     if (!libhdfs3_conf.empty())
@@ -234,9 +296,10 @@ void HDFSBuilderFSFactory::setEnv(const Poco::Util::AbstractConfiguration & conf
     }
 }
 
-HDFSBuilderWrapperPtr HDFSBuilderFSFactory::getBuilder(const String & hdfs_uri, const Poco::Util::AbstractConfiguration & config)
+HDFSBuilderWrapperPtr HDFSHandlerFactory::getBuilder(const String & hdfs_uri, const Poco::Util::AbstractConfiguration & config)
 {
     std::lock_guard lock(mutex);
+
     auto it = hdfs_builder_wrappers.find(hdfs_uri);
     if (it == hdfs_builder_wrappers.end())
     {
@@ -247,13 +310,13 @@ HDFSBuilderWrapperPtr HDFSBuilderFSFactory::getBuilder(const String & hdfs_uri, 
     return it->second;
 }
 
-HDFSFSSharedPtr HDFSBuilderFSFactory::getFS(const String & hdfs_uri, const Poco::Util::AbstractConfiguration & config)
+HDFSFSSharedPtr HDFSHandlerFactory::getFS(const String & hdfs_uri, const Poco::Util::AbstractConfiguration & config)
 {
     auto builder = getBuilder(hdfs_uri, config);
     return getFS(std::move(builder));
 }
 
-HDFSFSSharedPtr HDFSBuilderFSFactory::getFS(HDFSBuilderWrapperPtr builder)
+HDFSFSSharedPtr HDFSHandlerFactory::getFS(HDFSBuilderWrapperPtr builder)
 {
     HDFSFSPoolPtr pool;
     const auto hdfs_uri = builder->getHDFSUri();
@@ -263,7 +326,7 @@ HDFSFSSharedPtr HDFSBuilderFSFactory::getFS(HDFSBuilderWrapperPtr builder)
         auto it = hdfs_fs_pools.find(hdfs_uri);
         if (it == hdfs_fs_pools.end())
         {
-            pool = std::make_shared<HDFSFSPool>(max_pool_size, min_pool_size, std::move(builder));
+            pool = std::make_shared<HDFSFSPool>(fs_pool_size, std::move(builder));
             hdfs_fs_pools.emplace(hdfs_uri, pool);
         }
         else
@@ -271,10 +334,29 @@ HDFSFSSharedPtr HDFSBuilderFSFactory::getFS(HDFSBuilderWrapperPtr builder)
             pool = it->second;
         }
     }
-    return pool->get();
-
+    return pool->getFS();
 }
 
+std::pair<HDFSFSSharedPtr, HDFSFilePool::Entry> HDFSHandlerFactory::getFSAndFile(HDFSBuilderWrapperPtr builder, const String & path)
+{
+    HDFSFSPoolPtr pool;
+    auto hdfs_uri = builder->getHDFSUri();
+
+    {
+        std::lock_guard lock(mutex);
+        auto it = hdfs_fs_pools.find(hdfs_uri);
+        if (it == hdfs_fs_pools.end())
+        {
+            pool = std::make_shared<HDFSFSPool>(fs_pool_size, std::move(builder));
+            hdfs_fs_pools.emplace(hdfs_uri, pool);
+        }
+        else
+        {
+            pool = it->second;
+        }
+    }
+    return pool->getFSAndFile(path);
+}
 
 HDFSFSPtr createHDFSFS(hdfsBuilder * builder)
 {

@@ -1004,7 +1004,7 @@ int Server::main(const std::vector<std::string> & /*args*/)
 #endif
 
 #if USE_HDFS
-    HDFSBuilderFSFactory::setEnv(config());
+    HDFSHandlerFactory::setEnv(config());
 #endif
 
     if (config().has("interserver_http_port") && config().has("interserver_https_port"))
