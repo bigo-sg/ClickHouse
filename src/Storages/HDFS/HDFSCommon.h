@@ -27,7 +27,6 @@ namespace detail
         void operator()(hdfsFS fs_ptr)
         {
             hdfsDisconnect(fs_ptr);
-            std::cout << "disconnect hdfs fs: trace" << StackTrace().toString() << std::endl;
         }
     };
 }

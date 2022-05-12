@@ -192,13 +192,7 @@ HDFSFilePool::ObjectPtr HDFSFilePool::allocObject()
             hdfs_uri + hdfs_path,
             std::string(hdfsGetLastError()));
 
-    return {
-        fin,
-        [&](hdfsFile f)
-        {
-            std::cout << "close file, trace:" << StackTrace().toString() << std::endl;
-            hdfsCloseFile(fs.get(), f);
-        }};
+    return {fin, [&](hdfsFile f) { hdfsCloseFile(fs.get(), f); }};
 }
 
 HDFSFSPool::HDFSFSPool(uint32_t max_items_, HDFSBuilderWrapperPtr builder_)

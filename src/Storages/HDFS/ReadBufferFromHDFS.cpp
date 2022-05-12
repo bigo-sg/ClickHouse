@@ -76,8 +76,10 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
                 hdfs_uri_+ hdfs_file_path,
                 std::string(hdfsGetLastError()));
 
-        std::cout << "fs:" << fs.get() << std::endl;
-        std::cout << "fin:" << fin << std::endl;
+        ProfileEvents::increment(ProfileEvents::HDFSReadInitializeMicroseconds, watch.elapsedMicroseconds());
+        ProfileEvents::increment(ProfileEvents::HDFSReadInitialize, 1);
+
+        watch.restart();
         int seek_status = hdfsSeek(fs.get(), fin, file_offset);
         if (seek_status != 0)
             throw Exception(
@@ -86,8 +88,8 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl : public BufferWithOwnMemory<S
                 hdfs_uri + hdfs_file_path,
                 std::string(hdfsGetLastError()));
 
-        ProfileEvents::increment(ProfileEvents::HDFSReadInitializeMicroseconds, watch.elapsedMicroseconds());
-        ProfileEvents::increment(ProfileEvents::HDFSReadInitialize, 1);
+        ProfileEvents::increment(ProfileEvents::HDFSReadSeekMicroseconds, watch.elapsedMicroseconds());
+        ProfileEvents::increment(ProfileEvents::HDFSReadSeek, 1);
     }
 
     ~ReadBufferFromHDFSImpl() override
