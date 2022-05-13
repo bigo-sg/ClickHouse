@@ -13,7 +13,7 @@
 #include <Storages/HDFS/HDFSCommon.h>
 #include <Storages/Hive/HiveCommon.h>
 #include <Storages/Hive/HiveFile.h>
-#include <Storages/Hive/HiveQueryTask.h>
+#include <Storages/Hive/HiveSourceTask.h>
 
 namespace DB
 {
@@ -38,7 +38,9 @@ public:
         const String & comment_,
         const ASTPtr & partition_by_ast_,
         std::unique_ptr<HiveSettings> storage_settings_,
-        ContextPtr context_);
+        ContextPtr context_,
+        std::shared_ptr<HiveSourceFilesCollectorBuilder> hive_task_files_collector_builder_ = nullptr,
+        bool is_distributed_mode_ = false);
 
     String getName() const override { return "Hive"; }
 
@@ -66,26 +68,24 @@ public:
 
     bool isColumnOriented() const override;
 
-protected:
-    friend class StorageHiveSource;
-    StorageHive(
-        const String & hive_metastore_url_,
-        const String & hive_database_,
-        const String & hive_table_,
-        const StorageID & table_id_,
-        const ColumnsDescription & columns_,
-        const ConstraintsDescription & constraints_,
-        const String & comment_,
-        const ASTPtr & partition_by_ast_,
-        std::unique_ptr<HiveSettings> storage_settings_,
-        ContextPtr context_,
-        std::shared_ptr<HiveQueryTaskFilesCollectorBuilder> hive_task_files_collector_builder_ = nullptr);
+    std::optional<UInt64> totalRows(const Settings & settings) const override;
+    std::optional<UInt64> totalRowsByPartitionPredicate(const SelectQueryInfo & query_info, ContextPtr context_) const override;
 
 private:
     using FileFormat = IHiveFile::FileFormat;
     using FileInfo = HiveMetastoreClient::FileInfo;
     using HiveTableMetadataPtr = HiveMetastoreClient::HiveTableMetadataPtr;
+    using PruneLevel = HivePruneLevel;
+
     void getActualColumnsToRead(Block & sample_block, const Block & header_block, const NameSet & partition_columns) const;
+
+    static ASTPtr extractKeyExpressionList(const ASTPtr & node);
+    void lazyInitialize();
+
+    std::optional<UInt64>
+    totalRowsImpl(const SelectQueryInfo & query_info, PruneLevel prune_level) const;
+
+    std::shared_ptr<IHiveSourceFilesCollector> getHiveFilesCollector(const SelectQueryInfo & query_info) const;
 
     String hive_metastore_url;
 
@@ -110,13 +110,10 @@ private:
 
     std::shared_ptr<HiveSettings> storage_settings;
 
-    std::shared_ptr<HiveQueryTaskFilesCollectorBuilder> hive_task_files_collector_builder;
-
     Poco::Logger * log = &Poco::Logger::get("StorageHive");
 
-    static ASTPtr extractKeyExpressionList(const ASTPtr & node);
-
-    void lazyInitialize();
+    std::shared_ptr<HiveSourceFilesCollectorBuilder> hive_task_files_collector_builder;
+    bool is_distributed_mode;
 };
 
 }
