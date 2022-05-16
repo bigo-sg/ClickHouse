@@ -38,6 +38,7 @@ StageQueryDistributedAggregationRewriteAction::StageQueryDistributedAggregationR
 
 void StageQueryDistributedAggregationRewriteAction::beforeVisitChildren(const ASTPtr & ast)
 {
+    LOG_TRACE(logger, "{} push frame. {}:{}", __LINE__, ast->getID(), queryToString(ast));
     frames.pushFrame(ast);
 }
 
@@ -59,6 +60,7 @@ ASTs StageQueryDistributedAggregationRewriteAction::collectChildren(const ASTPtr
 {
     if (!ast)
         return {};
+    LOG_TRACE(logger, "{} collectChildren. {}:{}", __LINE__, ast->getID(), queryToString(ast));
     ASTs children;
     if (const auto * union_select_ast = ast->as<ASTSelectWithUnionQuery>())
     {
@@ -153,6 +155,7 @@ void StageQueryDistributedAggregationRewriteAction::visit(const ASTSubquery * su
 
 void StageQueryDistributedAggregationRewriteAction::visit(const ASTSelectQuery * select_ast)
 {
+    LOG_TRACE(logger, "{} frame size={}, select ast={}", __LINE__, frames.size(), queryToString(*select_ast));
     auto frame = frames.getTopFrame();
     if (frame->children_results.empty()) // join query
     {
@@ -165,12 +168,13 @@ void StageQueryDistributedAggregationRewriteAction::visit(const ASTSelectQuery *
             throw Exception(ErrorCodes::LOGICAL_ERROR, "ASTStageQuery is expected. return query is : {}", queryToString(rewrite_ast));
         auto * return_select_ast = stage_query->current_query->as<ASTSelectQuery>();
         if (!return_select_ast)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "ASTSelectQuery is expected. return query is : {}", queryToString(stage_query->current_query));
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "ASTSelectQuery is expected. return query is :(id={}) {}", stage_query->current_query->getID(), queryToString(stage_query->current_query));
 
 
         ASTs upstream_queries;
         upstream_queries.insert(upstream_queries.end(), stage_query->upstream_queries.begin(), stage_query->upstream_queries.end());
         frame->upstream_queries = std::vector<ASTs>{upstream_queries};
+        //frame->children_results.emplace_back(stage_query->current_query);
         frame->result_ast = stage_query->current_query;
     }
     else
@@ -207,6 +211,7 @@ void StageQueryDistributedAggregationRewriteAction::visit(const ASTSelectQuery *
 
     if (frames.size() == 1)
     {
+        LOG_TRACE(logger, "{} top select ast:{}", __LINE__, queryToString(*select_ast));
         frame->mergeChildrenUpstreamQueries();
         frame->result_ast = ASTStageQuery::make(frame->result_ast, frame->upstream_queries[0]);
     }
@@ -318,7 +323,7 @@ void StageQueryDistributedAggregationRewriteAction::visitSelectQueryWithGroupby(
     auto required_columns = collect_columns_visitor.visit().required_columns;
 
     auto insert_query = createShuffleInsert(
-        TableFunctionLocalShuffle::name,
+        TableFunctionShuffleAggregation::name,
         rewrite_table_expr,
         ColumnWithDetailNameAndType::toNamesAndTypesList(required_columns[0]),
         select_ast->groupBy());

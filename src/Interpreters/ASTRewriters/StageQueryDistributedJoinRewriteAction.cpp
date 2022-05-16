@@ -22,6 +22,8 @@
 #include <TableFunctions/TableFunctionShuffle.h>
 #include <Common/logger_useful.h>
 #include <Common/Exception.h>
+#include <Parsers/ASTFunction.h>
+#include <Storages/StorageDictionary.h>
 #include <Interpreters/JoinedTables.h>
 
 namespace DB
@@ -213,10 +215,11 @@ void StageQueryDistributedJoinRewriteAction::visit(const ASTSelectQuery * select
 
 void StageQueryDistributedJoinRewriteAction::visitSelectQueryWithAggregation(const ASTSelectQuery * select_ast)
 {
+    LOG_TRACE(logger, "{} visitSelectQueryWithAggregation:{}", __LINE__, queryToString(*select_ast));
     auto frame = frames.getTopFrame();
-    StageQueryDistributedAggregationRewriteAction distributed_join_action(context, id_generator);
-    ASTDepthFirstVisitor<StageQueryDistributedAggregationRewriteAction> distributed_join_visitor(distributed_join_action, select_ast->clone());
-    auto rewrite_ast = distributed_join_visitor.visit();
+    StageQueryDistributedAggregationRewriteAction distributed_agg_action(context, id_generator);
+    ASTDepthFirstVisitor<StageQueryDistributedAggregationRewriteAction> distributed_agg_visitor(distributed_agg_action, select_ast->clone());
+    auto rewrite_ast = distributed_agg_visitor.visit();
     auto * stage_query = rewrite_ast->as<ASTStageQuery>();
     if (!stage_query)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "ASTStageQuery is expected. return query is : {}", queryToString(rewrite_ast));
@@ -245,11 +248,6 @@ void StageQueryDistributedJoinRewriteAction::visitSelectQueryOnJoin(const ASTSel
             ASTBuildUtil::createTablesInSelectQueryElement(
                 frame->children_results[1]->as<ASTTableExpression>(), result_ast->join()->table_join)
                 ->as<ASTTablesInSelectQueryElement>());
-        if (frames.size() == 1)
-        {
-            frame->mergeChildrenUpstreamQueries();
-            frame->result_ast = ASTStageQuery::make(frame->result_ast, frame->upstream_queries[0]);
-        }
     }
     else
     {
@@ -371,6 +369,7 @@ bool StageQueryDistributedJoinRewriteAnalyzer::isApplicableJoinType()
     else
         return false;// using clause
     
+    #if 1
     // if it is a special storage, return false
     const auto * join_ast = from_query->join();
     const auto & table_to_join = join_ast->table_expression->as<ASTTableExpression &>();
@@ -378,11 +377,12 @@ bool StageQueryDistributedJoinRewriteAnalyzer::isApplicableJoinType()
     {
          auto joined_table_id = context->resolveStorageID(table_to_join.database_and_table_name);
         StoragePtr storage = DatabaseCatalog::instance().tryGetTable(joined_table_id, context);
-        if (storage)
+        if (std::dynamic_pointer_cast<StorageDictionary>(storage))
         {
             return false;
         }
     }
+    #endif
 
     return true;
 }
@@ -510,8 +510,20 @@ bool StageQueryDistributedJoinRewriteAnalyzer::collectHashKeysOnAnd(
     auto * func = ast->as<ASTFunction>();
     for (auto & arg : func->arguments->children)
     {
-        if (!collectHashKeysOnEqual(arg, keys_list, alias_columns))
-            return false;
+        auto * arg_func = arg->as<ASTFunction>();
+        if (arg_func)
+        {
+            if (arg_func->name == "equals")
+            {
+                if (!collectHashKeysOnEqual(arg, keys_list, alias_columns))
+                    return false;
+            }
+            else if (arg_func->name == "and")
+            {
+                if (!collectHashKeysOnAnd(arg, keys_list, alias_columns))
+                    return false;
+            }
+        }
     }
     return true;
 }

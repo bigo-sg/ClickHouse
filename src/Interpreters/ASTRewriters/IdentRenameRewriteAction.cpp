@@ -58,10 +58,7 @@ ASTs IdentifierRenameAction::collectChildren(const ASTPtr & ast)
     {
         return {};
     }
-    else
-    {
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknow ast type {}. {}", ast->getID(), queryToString(ast));
-    }
+    return {};
 }
 void IdentifierRenameAction::beforeVisitChildren(const ASTPtr & ast)
 {
