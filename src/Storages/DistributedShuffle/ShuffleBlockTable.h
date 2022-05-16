@@ -91,6 +91,7 @@ public:
     using TablePtr = ShuffleBlockTablePtr;
     explicit ShuffleBlockSession(const String & session_id_, ContextPtr context_);
 
+    const String & getSessionId() const { return session_id; }
     TablePtr getTable(const String & table_id_, bool wait_created = false);
     TablePtr getOrSetTable(const String & table_id_, const Block & header_);
     void releaseTable(const String & table_id_);
@@ -102,6 +103,11 @@ public:
     }
 
     bool isTimeout() const;
+
+    void increaseRef() { ref_count += 1; }
+    void decreaseRef();
+    inline UInt32 getRefCount() const { return ref_count; }
+    String dumpTables();
 private:
     Poco::Logger * logger = &Poco::Logger::get("ShuffleBlockSession");
     String session_id;
@@ -111,20 +117,36 @@ private:
     mutable std::mutex mutex;
     std::condition_variable new_table_cond;
     std::unordered_map<String, std::shared_ptr<Table>> tables;
+    std::atomic<UInt32> ref_count = 0;
 };
 using ShuffleBlockSessionPtr = std::shared_ptr<ShuffleBlockSession>;
+
+class ShuffleBlockSessionHolder
+{
+public:
+    ShuffleBlockSessionHolder() = default;
+    explicit ShuffleBlockSessionHolder(ShuffleBlockSessionPtr session_);
+
+    ~ShuffleBlockSessionHolder();
+
+    ShuffleBlockSession & value() { return *session; }
+    
+private:
+    ShuffleBlockSessionPtr session;
+
+};
 
 class ShuffleBlockTableManager : public boost::noncopyable
 {
 public:
     using Session = ShuffleBlockSession;
     using SessionPtr = ShuffleBlockSessionPtr;
+    using SessionHolder = ShuffleBlockSessionHolder;
 
     static ShuffleBlockTableManager & getInstance();
-    SessionPtr getSession(const String & session_id_) const;
-    SessionPtr getOrSetSession(const String & session_id_, ContextPtr context_);
+    std::shared_ptr<SessionHolder> getSession(const String & session_id_) const;
+    std::shared_ptr<SessionHolder> getOrSetSession(const String & session_id_, ContextPtr context_);
 
-    void closeSession(const String & session_id_);
     void tryCloseSession(const String & session_id_);
 protected:
     ShuffleBlockTableManager() = default;

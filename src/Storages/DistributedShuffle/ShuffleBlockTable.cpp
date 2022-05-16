@@ -28,7 +28,7 @@ namespace ErrorCodes
 
 void ShuffleBlockTable::addChunk(Chunk && chunk)
 {
-    if (chunk.hasRows())[[likely]]
+    if (chunk.hasRows()) [[likely]]
     {
         if (is_sink_finished)[[unlikely]]
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Try in insert into a sink finished table({}.{})", session_id, table_id);
@@ -39,7 +39,7 @@ void ShuffleBlockTable::addChunk(Chunk && chunk)
     }
     else
     {
-        LOG_TRACE(logger, "add empty chunk");
+        LOG_TRACE(logger, "Add an empty chunk. table({}.{})", session_id, table_id);
         wait_more_data.notify_all();
     }
 }
@@ -58,19 +58,18 @@ Chunk ShuffleBlockTable::popChunk()
             break;
         }
     }
-    LOG_TRACE(logger, "{}.{} popChunk. isSinkFinished()={}, chunks.size()={}", session_id, table_id, is_sink_finished, chunks.size());
+    //LOG_TRACE(logger, "{}.{} popChunk. isSinkFinished()={}, chunks.size()={}", session_id, table_id, is_sink_finished, chunks.size());
 
     Chunk res;
-    if (likely(!chunks.empty()))
+    if (!chunks.empty()) [[likely]]
     {
         res.swap(chunks.front());
         chunks.pop_front();
         if (unlikely(!res.hasRows()))
         {
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should not be empty");
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should not be empty. table({}.{})", session_id, table_id);
         }
     }
-    lock.unlock();
     return res;
 }
 
@@ -138,7 +137,6 @@ ShuffleBlockTablePtr ShuffleBlockSession::getOrSetTable(const String & table_id_
 void ShuffleBlockSession::releaseTable(const String & table_id_)
 {
     LOG_INFO(logger, "release table {}.{}", session_id, table_id_);
-    size_t table_count = 0;
     {
         std::lock_guard lock(mutex);
         auto iter = tables.find(table_id_);
@@ -147,11 +145,6 @@ void ShuffleBlockSession::releaseTable(const String & table_id_)
             iter->second->makeSinkFinished();
         }
         tables.erase(table_id_);
-        table_count = tables.size();
-    }
-    if (!table_count)
-    {
-        ShuffleBlockTableManager::getInstance().tryCloseSession(session_id);
     }
 }
 
@@ -161,26 +154,49 @@ bool ShuffleBlockSession::isTimeout() const
     return (created_timestamp + timeout_second < now);
 }
 
+void ShuffleBlockSession::decreaseRef()
+{
+    if (ref_count == 0)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Session({}) ref_count = 0", session_id);
+    ref_count -= 1;
+}
+
+String ShuffleBlockSession::dumpTables()
+{
+    std::lock_guard lock(mutex);
+    String table_names;
+    int i = 0;
+    for (auto & table : tables)
+    {
+        if (i)
+            table_names += ",";
+        i += 1;
+        table_names += table.first;
+    }
+    return table_names;
+}
+
 ShuffleBlockTableManager & ShuffleBlockTableManager::getInstance()
 {
     static ShuffleBlockTableManager storage;
     return storage;
 }
 
-ShuffleBlockSessionPtr ShuffleBlockTableManager::getSession(const String & session_id_) const
+std::shared_ptr<ShuffleBlockSessionHolder> ShuffleBlockTableManager::getSession(const String & session_id_) const
 {
     std::lock_guard lock(mutex);
 
     auto iter = sessions.find(session_id_);
     if (iter == sessions.end())
     {
-        LOG_INFO(logger, "Session() not found.", session_id_);
+        LOG_INFO(logger, "Session({}) not found.", session_id_);
         return nullptr;
     }
-    return iter->second;
+    iter->second->increaseRef();
+    return std::make_shared<ShuffleBlockSessionHolder>(iter->second);
 }
 
-ShuffleBlockSessionPtr ShuffleBlockTableManager::getOrSetSession(const String & session_id_, ContextPtr context_)
+std::shared_ptr<ShuffleBlockSessionHolder> ShuffleBlockTableManager::getOrSetSession(const String & session_id_, ContextPtr context_)
 {
     std::lock_guard lock(mutex);
     clearTimeoutSession();
@@ -190,18 +206,23 @@ ShuffleBlockSessionPtr ShuffleBlockTableManager::getOrSetSession(const String & 
     {
         LOG_TRACE(logger, "create new session:{}", session_id_);
         auto session = std::make_shared<Session>(session_id_, context_);
+        session->increaseRef();
         sessions[session_id_] = session;
-        return session;
+        return std::make_shared<ShuffleBlockSessionHolder>(session);
     }
-    return iter->second;
+    iter->second->increaseRef();
+    return std::make_shared<ShuffleBlockSessionHolder>(iter->second);
 }
 
-void ShuffleBlockTableManager::closeSession(const String & session_id_)
+ShuffleBlockSessionHolder::ShuffleBlockSessionHolder(ShuffleBlockSessionPtr session_)
+    : session(session_)
 {
-    LOG_TRACE(logger, "close session:{}", session_id_);
-    std::lock_guard lock(mutex);
-    sessions.erase(session_id_);
 }
+
+ShuffleBlockSessionHolder::~ShuffleBlockSessionHolder()
+{
+}
+
 
 void ShuffleBlockTableManager::tryCloseSession(const String & session_id_)
 {
@@ -213,10 +234,10 @@ void ShuffleBlockTableManager::tryCloseSession(const String & session_id_)
         return;
     }
     auto & session = iter->second;
-
-    if (session->getTablesNumber())
+    session->decreaseRef();
+    if (session->getRefCount() || session->getTablesNumber())
     {
-        LOG_INFO(logger, "session({}) has tables which are in used", session_id_);
+        LOG_INFO(logger, "session({}) is in used. ref={}, tables={}", session_id_, session->getRefCount(), session->dumpTables());
         return;
     }
     LOG_INFO(logger, "close session:{}", session_id_);

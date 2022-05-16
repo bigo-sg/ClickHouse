@@ -233,7 +233,14 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterStageQue
         }
         return res;
     }
-
+    auto * union_select_query = insert_query->select->as<ASTSelectWithUnionQuery>();
+    for (auto & child : union_select_query->list_of_selects->children)
+    {
+        auto * select_query = child->as<ASTSelectQuery>();
+        if (select_query->limitBy() || select_query->limitByLength() || select_query->limitLength() || select_query->limitOffset()
+            || select_query->limitByOffset())
+            return {};
+    }
     auto storages = getSelectStorages(insert_query->select);
     bool has_groupby = ASTAnalyzeUtil::hasGroupByRecursively(from_query);
     bool has_agg = ASTAnalyzeUtil::hasAggregationColumnRecursively(from_query);
@@ -366,6 +373,20 @@ std::optional<std::list<std::pair<DistributedTask, String>>> InterpreterStageQue
     auto storages = getSelectStorages(from_query);
     bool has_groupby = ASTAnalyzeUtil::hasGroupByRecursively(from_query);
     bool has_agg = ASTAnalyzeUtil::hasAggregationColumnRecursively(from_query);
+
+    // if the query has order by or limit, run in single node
+    auto * union_select_query = from_query->as<ASTSelectWithUnionQuery>();
+    for (auto & child : union_select_query->list_of_selects->children)
+    {
+        auto * select_query = child->as<ASTSelectQuery>();
+        if (select_query->orderBy() || select_query->limitBy() || select_query->limitByLength() || select_query->limitLength()
+            || select_query->limitOffset() || select_query->limitByOffset())
+        {
+            LOG_TRACE(logger, "query has order by or limit. [{}] {}", child->getID(), queryToString(child));
+            return {};
+        }
+    }
+
     if (storages.size() == 2)
     {
         for (const auto & storage : storages)

@@ -6,6 +6,7 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/queryToString.h>
+#include "Parsers/ASTExpressionList.h"
 
 namespace DB
 {
@@ -21,6 +22,10 @@ ASTs IdentifiterQualiferRemoveAction::collectChildren(const ASTPtr & ast)
     if (const auto * function_ast = ast->as<ASTFunction>())
     {
         children = function_ast->arguments->children;
+    }
+    else if (const auto * expr_list_ast = ast->as<ASTExpressionList>())
+    {
+        children = expr_list_ast->children;
     }
     return children;
 }
@@ -48,6 +53,13 @@ void IdentifiterQualiferRemoveAction::visit(const ASTPtr & ast)
         frame->result_ast = std::make_shared<ASTIdentifier>(ident_ast->shortName());
         auto * result_ast = frame->result_ast->as<ASTIdentifier>();
         result_ast->alias = ident_ast->tryGetAlias();
+    }
+    else if (const auto * expr_list_ast = ast->as<ASTExpressionList>())
+    {
+        auto frame = frames.getTopFrame();
+        frame->result_ast = std::make_shared<ASTExpressionList>();
+        auto * result_ast = frame->result_ast->as<ASTExpressionList>();
+        result_ast->children = frame->children_results;
     }
     else
     {

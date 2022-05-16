@@ -55,7 +55,7 @@ public:
     {
         if (table)
         {
-            session->releaseTable(table_id);
+            session->value().releaseTable(table_id);
         }
     }
 
@@ -63,7 +63,7 @@ public:
     Chunk generate() override
     {
         tryInitialize();
-        if (unlikely(!table))
+        if (!table) [[unlikely]]
         {
             LOG_INFO(logger, "{}.{} is not found.", session_id, table_id);
             return {};
@@ -79,7 +79,7 @@ private:
     String session_id;
     String table_id;
     Block header;
-    ShuffleBlockSessionPtr session;
+    std::shared_ptr<ShuffleBlockSessionHolder> session;
     ShuffleBlockTablePtr table;
     size_t read_rows = 0;
 
@@ -90,7 +90,7 @@ private:
         session = ShuffleBlockTableManager::getInstance().getOrSetSession(session_id, getContext());
         if (session)
         {
-            table = session->getTable(table_id, true);
+            table = session->value().getTable(table_id, true);
             if (!table)
             {
                 LOG_TRACE(logger, "Not found table:{}-{}", session_id, table_id);
@@ -430,10 +430,10 @@ public:
     explicit StorageLocalShuffleSink(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_)
         : SinkToStorage(header_), context(context_), session_id(session_id_), table_id(table_id_)
     {
-        auto session = ShuffleBlockTableManager::getInstance().getOrSetSession(session_id_, context_);
+        session = ShuffleBlockTableManager::getInstance().getOrSetSession(session_id_, context_);
         if (!session)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Get session({}) storage failed.", session_id_);
-        table_storage = session->getOrSetTable(table_id_, header_);
+        table_storage = session->value().getOrSetTable(table_id_, header_);
         if (!table_storage)
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Get session table({}-{}) failed.", session_id_, table_id_);
     }
@@ -448,6 +448,7 @@ private:
     ContextPtr context;
     String session_id;
     String table_id;
+    std::shared_ptr<ShuffleBlockSessionHolder> session;
     ShuffleBlockTablePtr table_storage;
     Poco::Logger * logger = &Poco::Logger::get("StorageLocalShuffleSink");
     Stopwatch watch;
@@ -745,7 +746,8 @@ protected:
         auto session = ShuffleBlockTableManager::getInstance().getSession(session_id);
         if (!session)
             return;
-        auto table = session->getTable(table_id);
+        LOG_TRACE(logger, "session({}), ref={}, tables={}", session_id, session->value().getRefCount(), session->value().dumpTables());
+        auto table = session->value().getTable(table_id);
         if (!table)
             return;
         table->makeSinkFinished();

@@ -16,16 +16,15 @@ public:
     static String toTableStructureDescription(const ColumnWithDetailNameAndTypes & columns);
 
     /**
-     * @brief Create a Shuffle Table Function object
+     * Create a Shuffle Table Function object
      *
-     * @param function_name which shuffle function to use. see TableFunctionShuffle.h
-     * @param session_id session_od
-     * @param cluster_name cluster name
-     * @param table_id table_id
-     * @param columns describe the table structure. etc. 'x int, y string'
-     * @param hash_expression_list  hash expression list for shuffle hashing. etc. 'x, y'
-     * @param alias table alias
-     * @return ASTPtr ASTFunction
+     * - function_name which shuffle function to use. see TableFunctionShuffle.h
+     * - session_id session_od
+     * - cluster_name cluster name
+     * - table_id table_id
+     * - columns describe the table structure. etc. 'x int, y string'
+     * - hash_expression_list  hash expression list for shuffle hashing. etc. 'x, y'
+     * - alias table alias
      */
     static ASTPtr createShuffleTableFunction(
         const String & function_name,
@@ -37,32 +36,32 @@ public:
         const String & alias = "");
 
     /**
-     * @brief Create a Table Function Insert Select Query object
+     * Create a Table Function Insert Select Query object
      *
-     * @param table_function must be a ASTFunction
-     * @param select_query must be a ASTSelectWithUnionQuery
-     * @return ASTPtr it's a ASTInsertQuery
+     * - table_function must be a ASTFunction
+     * - select_query must be a ASTSelectWithUnionQuery
+     * return ASTPtr it's a ASTInsertQuery
      */
     static ASTPtr createTableFunctionInsertSelectQuery(ASTPtr table_function, ASTPtr select_query);
 
     /**
-     * @brief Create a ASTSelectWithUnionQuery with a ASTSelectQuery
+     * Create a ASTSelectWithUnionQuery with a ASTSelectQuery
      *
-     * @param select_query must be a ASTSelectQuery
-     * @return ASTPtr it's a ASTSelectWithUnionQuery
+     * - select_query must be a ASTSelectQuery
+     * return ASTPtr it's a ASTSelectWithUnionQuery
      */
     static ASTPtr wrapSelectQuery(const ASTSelectQuery * select_query);
 
     /**
-     * @brief Create a Select Expression object
+     * Create a Select Expression object
      *
-     * @param names_and_types Use the names to build the select expression
-     * @return ASTPtr
+     * - names_and_types Use the names to build the select expression
+     * return ASTPtr
      */
     static ASTPtr createSelectExpression(const NamesAndTypesList & names_and_types);
 
     /**
-     * @brief Update ASTSelectQuery::TABLES ASTTableExpressions
+     * Update ASTSelectQuery::TABLES ASTTableExpressions
      */
     static void updateSelectQueryTables(ASTSelectQuery * select_query, const ASTTableExpression * table_expr_);
 
