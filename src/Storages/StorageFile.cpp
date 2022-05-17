@@ -550,6 +550,7 @@ public:
                 }
 
                 pipeline = std::make_unique<QueryPipeline>(QueryPipelineBuilder::getPipeline(std::move(builder)));
+
                 reader = std::make_unique<PullingPipelineExecutor>(*pipeline);
             }
 
@@ -619,10 +620,6 @@ private:
     std::unique_ptr<ReadBuffer> read_buf;
     std::unique_ptr<QueryPipeline> pipeline;
     std::unique_ptr<PullingPipelineExecutor> reader;
-    /// onCancell and generate can be called concurrently and both of them
-    /// have R/W access to reader pointer.
-    std::mutex reader_mutex;
-
 
     ColumnsDescription columns_description;
 
