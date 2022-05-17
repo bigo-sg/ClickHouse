@@ -152,7 +152,7 @@ public:
         {
             if (!reader)
             {
-                if (current_file_remained_rows) [[unlikely]]
+                if (current_file_remained_rows)
                 {
                     return generateChunkByPartitionKeys();
                 }
@@ -300,15 +300,6 @@ public:
             auto col = types[i]->createColumnConst(rows, fields[i]);
             auto col_idx = sample_block.getPositionByName(names[i]);
             cols.insert(cols.begin() + col_idx, col);
-        }
-
-        if (source_info->need_file_column)
-        {
-            size_t last_slash_pos = current_file->getPath().find_last_of('/');
-            auto file_name = current_path.substr(last_slash_pos + 1);
-
-            auto col = DataTypeLowCardinality{std::make_shared<DataTypeString>()}.createColumnConst(rows, std::move(file_name));
-            cols.push_back(col);
         }
         return Chunk(std::move(cols), rows);
     }
