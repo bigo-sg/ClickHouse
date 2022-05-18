@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <condition_variable>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -36,6 +37,7 @@
 #include <Common/ThreadPool.h>
 #include <Common/Exception.h>
 #include <Common/Stopwatch.h>
+#include <Common/WeakHash.h>
 
 namespace DB
 {
@@ -221,6 +223,7 @@ private:
     };
     using InternalInserterPtr = std::shared_ptr<InternalInserter>;
     std::vector<InternalInserterPtr> inserters;
+    const static size_t inserter_group_size = 4;
     std::vector<std::shared_ptr<Connection>> node_connections;
     std::shared_ptr<ExpressionActions> hash_expr_cols_actions;
     String hash_expr_column_name;
@@ -303,6 +306,7 @@ private:
         auto cluster_addresses = getSortedShardAddresses();
         for (const auto & node : cluster_addresses)
         {
+            #if 0
             auto connection = std::make_shared<Connection>(
                 node.host_name,
                 node.port,
@@ -328,6 +332,36 @@ private:
             internal_inserter->inserter = inserter;
             internal_inserter->max_rows_limit = context->getSettingsRef().max_block_size;
             inserters.emplace_back(internal_inserter);
+            #else
+            for (size_t i = 0; i < inserter_group_size; ++i)
+            {
+                auto connection = std::make_shared<Connection>(
+                    node.host_name,
+                    node.port,
+                    context->getGlobalContext()->getCurrentDatabase(),
+                    node.user,
+                    node.password,
+                    node.cluster,
+                    node.cluster_secret,
+                    "StorageShuffleSink",
+                    node.compression,
+                    node.secure);
+                node_connections.emplace_back(connection);
+                auto inserter = std::make_shared<RemoteInserter>(
+                    *connection,
+                    ConnectionTimeouts{
+                        settings.connect_timeout.value.seconds() * 1000,
+                        settings.send_timeout.value.seconds() * 1000,
+                        settings.receive_timeout.value.seconds() * 1000},
+                    insert_sql,
+                    context->getSettings(),
+                    context->getClientInfo());
+                auto internal_inserter = std::make_shared<InternalInserter>();
+                internal_inserter->inserter = inserter;
+                internal_inserter->max_rows_limit = context->getSettingsRef().max_block_size;
+                inserters.emplace_back(internal_inserter);
+            }
+            #endif
         }
     }
 
@@ -358,26 +392,34 @@ private:
         return addresses;
     }
 
+    static IColumn::Selector hashToSelector(const WeakHash32 & hash, size_t num_shards)
+    {
+        const auto & data = hash.getData();
+        size_t num_rows = data.size();
+
+        IColumn::Selector selector(num_rows);
+        for (size_t i = 0; i < num_rows; ++i)
+            selector[i] = data[i] % num_shards;
+        return selector;
+    }
+
     void splitBlock(Block & original_block, std::vector<Block> & split_blocks)
     {
         size_t num_rows = original_block.rows();
-        size_t num_shards = inserters.size();
+        size_t num_shards = inserters.size() / inserter_group_size;
         Block header = original_block.cloneEmpty();
         ColumnRawPtrs hash_cols;
         for (const auto & hash_col_name : hash_expr_columns_names)
         {
             hash_cols.push_back(original_block.getByName(hash_col_name).column.get());
         }
-        IColumn::Selector selector(num_rows);
-        for (size_t i = 0; i < num_rows; ++i)
+
+        WeakHash32 hash(num_rows);
+        for (const auto & hash_col : hash_cols)
         {
-            SipHash hash;
-            for (const auto & hash_col : hash_cols)
-            {
-                hash_col->updateHashWithValue(i, hash);
-            }
-            selector[i] = hash.get64() % num_shards;
+            hash_col->updateWeakHash32(hash);
         }
+        auto selector = hashToSelector(hash, num_shards);
 
         for (size_t i = 0; i < num_shards; ++i)
         {
@@ -394,33 +436,29 @@ private:
             }
         }
     }
+
     void sendBlocks(std::vector<Block> & blocks)
     {
-        std::list<size_t> to_send_blocks;
-        for (size_t i = 0, sz = blocks.size(); i < sz; ++i)
-            to_send_blocks.emplace_back(i);
-        while (!to_send_blocks.empty())
+        #if 0
+        for (size_t i = 0; i < blocks.size(); ++i)
         {
-            for (auto iter = to_send_blocks.begin(); iter != to_send_blocks.end();)
-            {
-                auto & inserter = inserters[*iter];
-                if (inserter->mutex.try_lock())
-                {
-                    auto & block = blocks[*iter];
-                    if (block.rows())
-                    {
-                        inserter->tryWrite(block);
-                        //inserter->inserter->write(block);
-                    }
-                    inserter->mutex.unlock();
-                    iter = to_send_blocks.erase(iter);
-                }
-                else
-                {
-                    iter++;
-                }
-            }
+            auto & block = blocks[i];
+            auto & inserter = inserters[i];
+            std::lock_guard lock(inserter->mutex);
+            inserter->tryWrite(block);
         }
+        #else
+        static std::atomic<size_t> inserter_round_idx = 0;
+        inserter_round_idx += 1;
+        size_t idx = inserter_round_idx % inserter_group_size;
+        for (size_t i = 0; i < blocks.size(); ++i)
+        {
+            auto & block = blocks[i];
+            auto inserter = inserters[i * inserter_group_size + idx];
+            std::lock_guard lock(inserter->mutex);
+            inserter->tryWrite(block);
+        }
+        #endif
     }
 };
 
@@ -522,7 +560,7 @@ Pipe StorageShuffleBase::read(
 
             auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
                 connection, remote_query, header, context_, nullptr, scalars, Tables(), processed_stage_, RemoteQueryExecutor::Extension{});
-            //LOG_TRACE9logger, "run query on node:{}. query:{}", node.host_name, remote_query);
+            LOG_TRACE(logger, "run query on node:{}. query:{}", node.host_name, remote_query);
             pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, false, false));
         }
     }
@@ -629,6 +667,7 @@ Pipe StorageLocalShuffle::read(
 {
     auto header = getInMemoryMetadata().getSampleBlock();
     auto query_kind = context_->getClientInfo().query_kind;
+    LOG_TRACE(logger, "query kind={}, query={}", query_kind, queryToString(query_info_.query));
     if (query_kind != ClientInfo::QueryKind::INITIAL_QUERY)
     {
         return Pipe(std::make_shared<StorageShuffleSource>(context_, session_id, table_id, header));
@@ -656,7 +695,7 @@ Pipe StorageLocalShuffle::read(
 
             auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
                 connection, remote_query, header, context_, nullptr, scalars, Tables(), processed_stage_, RemoteQueryExecutor::Extension{});
-            //LOG_TRACE9logger, "run query on node:{}. query:{}", node.host_name, remote_query);
+            LOG_TRACE(logger, "run query on node:{}. query:{}", node.host_name, remote_query);
             pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, false, false));
         }
     }
@@ -677,7 +716,7 @@ QueryProcessingStage::Enum StorageLocalShuffle::getQueryProcessingStage(
     const StorageSnapshotPtr & /*metadata_snapshot*/,
     SelectQueryInfo & query_info) const
 {
-    //LOG_TRACE9logger, "query:{}, to_stage:{}, query_kind:{}", queryToString(query_info.query), to_stage, local_context->getClientInfo().query_kind);
+    LOG_TRACE(logger, "query:{}, to_stage:{}, query_kind:{}", queryToString(query_info.query), to_stage, local_context->getClientInfo().query_kind);
     if (local_context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
     {
         // When there is join in the query, cannot enable the two phases processing. It will cause

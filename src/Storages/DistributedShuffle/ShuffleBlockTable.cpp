@@ -30,11 +30,18 @@ void ShuffleBlockTable::addChunk(Chunk && chunk)
 {
     if (chunk.hasRows()) [[likely]]
     {
-        if (is_sink_finished)[[unlikely]]
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Try in insert into a sink finished table({}.{})", session_id, table_id);
-        std::unique_lock lock(mutex);
-        rows += chunk.getNumRows();
-        chunks.emplace_back(std::move(chunk));
+        {
+            std::unique_lock lock(mutex);
+            if (is_sink_finished) [[unlikely]]
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Try in insert into a sink finished table({}.{})", session_id, table_id);
+            while (remained_rows > max_rows_limit)
+                wait_consume_data.wait(lock);
+            rows += chunk.getNumRows();
+            remained_rows += chunk.getNumRows();
+            if (remained_rows > max_rows)
+                max_rows = remained_rows;
+            chunks.emplace_back(std::move(chunk));
+        }
         wait_more_data.notify_one();
     }
     else
@@ -46,30 +53,34 @@ void ShuffleBlockTable::addChunk(Chunk && chunk)
 
 Chunk ShuffleBlockTable::popChunk()
 {
-    std::unique_lock lock(mutex);
-    while (chunks.empty())
-    {
-        if (!is_sink_finished)
-        {
-            wait_more_data.wait(lock, [&] { return is_sink_finished || !chunks.empty(); });
-        }
-        else
-        {
-            break;
-        }
-    }
-    //LOG_TRACE(logger, "{}.{} popChunk. isSinkFinished()={}, chunks.size()={}", session_id, table_id, is_sink_finished, chunks.size());
-
     Chunk res;
-    if (!chunks.empty()) [[likely]]
     {
-        res.swap(chunks.front());
-        chunks.pop_front();
-        if (unlikely(!res.hasRows()))
+        std::unique_lock lock(mutex);
+        while (chunks.empty())
         {
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should not be empty. table({}.{})", session_id, table_id);
+            if (!is_sink_finished)
+            {
+                wait_more_data.wait(lock, [&] { return is_sink_finished || !chunks.empty(); });
+            }
+            else
+            {
+                break;
+            }
+        }
+        //LOG_TRACE(logger, "{}.{} popChunk. isSinkFinished()={}, chunks.size()={}", session_id, table_id, is_sink_finished, chunks.size());
+
+        if (!chunks.empty()) [[likely]]
+        {
+            res.swap(chunks.front());
+            remained_rows -= res.getNumRows();
+            chunks.pop_front();
+            if (unlikely(!res.hasRows()))
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Chunk should not be empty. table({}.{})", session_id, table_id);
+            }
         }
     }
+    wait_consume_data.notify_all();
     return res;
 }
 

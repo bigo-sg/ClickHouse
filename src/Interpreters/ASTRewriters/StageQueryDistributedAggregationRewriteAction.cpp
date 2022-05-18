@@ -300,7 +300,12 @@ void StageQueryDistributedAggregationRewriteAction::visitSelectQueryWithAggregat
 
 void StageQueryDistributedAggregationRewriteAction::visitSelectQueryWithGroupby(const ASTSelectQuery * select_ast)
 {
+    LOG_TRACE(logger, "visitSelectQueryWithGroupby:{}", queryToString(*select_ast));
     auto frame = frames.getTopFrame();
+    auto tables = getDatabaseAndTablesWithColumns(getTableExpressions(*select_ast), context, true, true);
+    if (tables.size() != 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Tables size should be 1");
+    
     auto * rewrite_table_expr =  frame->children_results[0]->as<ASTTableExpression>();
     if (!rewrite_table_expr)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "ASTTableExpression is expected. return query is : {}", queryToString(frame->children_results[0]));
@@ -313,20 +318,35 @@ void StageQueryDistributedAggregationRewriteAction::visitSelectQueryWithGroupby(
 
         rewrite_table_expr->subquery->as<ASTSubquery>()->setAlias(table_alias);
     }
-
-    auto tables = getDatabaseAndTablesWithColumns(getTableExpressions(*select_ast), context, true, true);
-    if (tables.size() != 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Tables size should be 1");
+    
+    if (isAllRequiredColumnsLowCardinality(select_ast->groupBy(), tables))
+    {
+        CollectQueryStoragesAction collect_storage_action(context);
+        ASTDepthFirstVisitor<CollectQueryStoragesAction> collect_storage_visitor(collect_storage_action, frame->children_results[0]);
+        auto storages = collect_storage_visitor.visit();
+        /// If all columns used in the groupby clasue are low cardinality, do not shuffle the data and 
+        /// run the groupby in the two-phase way.
+        if (storages.size() > 1)
+            visitSelectQueryWithAggregation(select_ast);
+        return;
+    }
 
     CollectRequiredColumnsAction collect_columns_action(tables);
     ASTDepthFirstVisitor<CollectRequiredColumnsAction> collect_columns_visitor(collect_columns_action, select_ast->clone());
     auto required_columns = collect_columns_visitor.visit().required_columns;
 
-    auto insert_query = createShuffleInsert(
+    ASTPtr insert_query = createShuffleInsert(
         TableFunctionShuffleAggregation::name,
         rewrite_table_expr,
         ColumnWithDetailNameAndType::toNamesAndTypesList(required_columns[0]),
         select_ast->groupBy());
+
+    auto * insert_query_ptr = insert_query->as<ASTInsertQuery>();
+    auto * insert_select_ptr = insert_query_ptr->select->as<ASTSelectWithUnionQuery>()->list_of_selects->children[0]->as<ASTSelectQuery>();
+    IdentifiterQualiferRemoveAction remove_qualifier_action;
+    ASTDepthFirstVisitor<IdentifiterQualiferRemoveAction> remove_qualifier_visitor(remove_qualifier_action, select_ast->where());
+    auto where_expr = remove_qualifier_visitor.visit();
+    insert_select_ptr->setExpression(ASTSelectQuery::Expression::WHERE, std::move(where_expr));
 
     ASTs upstream_queries;
     frame->mergeChildrenUpstreamQueries();
@@ -341,6 +361,7 @@ void StageQueryDistributedAggregationRewriteAction::visitSelectQueryWithGroupby(
 
     frame->result_ast = select_ast->clone();
     auto * result_select_ast = frame->result_ast->as<ASTSelectQuery>();
+    result_select_ast->setExpression(ASTSelectQuery::Expression::WHERE, nullptr);
     ASTBuildUtil::updateSelectQueryTables(
         result_select_ast,
         ASTBuildUtil::createTablesInSelectQueryElement(table_function->as<ASTFunction>())->as<ASTTablesInSelectQueryElement>());
@@ -370,5 +391,24 @@ ASTPtr StageQueryDistributedAggregationRewriteAction::createShuffleInsert(
     select_query->setExpression(ASTSelectQuery::Expression::SELECT, ASTBuildUtil::createSelectExpression(table_desc));
 
     return ASTBuildUtil::createTableFunctionInsertSelectQuery(table_function, ASTBuildUtil::wrapSelectQuery(select_query));
+}
+
+bool StageQueryDistributedAggregationRewriteAction::isAllRequiredColumnsLowCardinality(const ASTPtr & ast, const TablesWithColumns & tables)
+{
+    CollectRequiredColumnsAction collect_columns_action(tables);
+    ASTDepthFirstVisitor<CollectRequiredColumnsAction> collect_columns_visitor(collect_columns_action, ast);
+    auto required_columns = collect_columns_visitor.visit().required_columns;
+    for (auto & cols : required_columns)
+    {
+        for (auto & col : cols)
+        {
+            LOG_TRACE(logger, "check group by col. {} {}", col.full_name, col.type->getName());
+            if (!col.type->lowCardinality())
+                return false;
+        }
+    }
+    LOG_TRACE(logger, "all columns are locaCardinality");
+    return true;
+
 }
 }

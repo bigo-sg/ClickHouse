@@ -32,6 +32,8 @@ ASTs IdentifiterQualiferRemoveAction::collectChildren(const ASTPtr & ast)
 
 void IdentifiterQualiferRemoveAction::visit(const ASTPtr & ast)
 {
+    if (!ast)
+        return;
     if (const auto * function_ast = ast->as<ASTFunction>())
     {
         auto frame = frames.getTopFrame();

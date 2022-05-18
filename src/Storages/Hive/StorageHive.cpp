@@ -454,8 +454,8 @@ HiveFiles StorageHive::collectHiveFilesFromPartition(
     const ContextPtr & context_,
     PruneLevel prune_level) const
 {
-    LOG_DEBUG(
-        log, "Collect hive files from partition {}, prune_level:{}", boost::join(partition.values, ","), pruneLevelToString(prune_level));
+    //LOG_DEBUG(
+    //    log, "Collect hive files from partition {}, prune_level:{}", boost::join(partition.values, ","), pruneLevelToString(prune_level));
 
     /// Skip partition "__HIVE_DEFAULT_PARTITION__"
     bool has_default_partition = false;

@@ -160,8 +160,8 @@ void NestedJoinQueryRewriteAction::visit(const ASTSelectQuery * select_ast)
         {
             auto ident = std::make_shared<ASTIdentifier>(col.splitedFullName());
             ident->alias = col.alias_name;
-            if (ident->alias.empty())
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Alias name is expected for {}", col.full_name);
+            //if (ident->alias.empty())
+            //    throw Exception(ErrorCodes::LOGICAL_ERROR, "Alias is expected for {}", col.full_name);
             nested_select_expr_list->children.emplace_back(ident);
         }
         nested_select_ast->setExpression(ASTSelectQuery::Expression::SELECT, nested_select_expr_list);
