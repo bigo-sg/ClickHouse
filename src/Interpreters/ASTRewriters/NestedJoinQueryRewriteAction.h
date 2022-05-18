@@ -10,6 +10,7 @@
 #include <Parsers/IAST_fwd.h>
 #include <base/types.h>
 #include <Poco/Logger.h>
+#include <Interpreters/DatabaseAndTableWithAlias.h>
 namespace DB
 {
 /**

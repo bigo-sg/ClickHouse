@@ -226,15 +226,8 @@ ParallelStageBlockIOsTransform::ParallelStageBlockIOsTransform(
 
 ParallelStageBlockIOsTransform::~ParallelStageBlockIOsTransform()
 {
-#if 0
-    for (auto & task : background_tasks)
-    {
-        task->deactivate();
-    }
-#else
     if (thread_pool)
         thread_pool->wait();
-#endif
     LOG_TRACE(logger, "run query({}) in elapsedMilliseconds:{}", queryToString(output_block_io.query), elapsed);
 }
 
@@ -305,20 +298,11 @@ void ParallelStageBlockIOsTransform::startBackgroundTasks()
             queryToString(block_io.query),
             task_watch.elapsedMilliseconds());
     };
-#if 0
-    auto & thread_pool = context->getSchedulePool();
-    for (auto & block_io : input_block_ios)
-    {
-        background_tasks.emplace_back(thread_pool.createTask("BackgroundBlockIOTask", [build_task, &block_io](){ build_task(block_io);}));
-        background_tasks.back()->activateAndSchedule();
-    }
-#else
     thread_pool = std::make_unique<ThreadPool>(input_block_ios.size());
     for (auto & block : input_block_ios)
     {
         thread_pool->scheduleOrThrowOnError([&]() { build_task(block); });
     }
-#endif
     has_start_background_tasks = true;
 }
 }

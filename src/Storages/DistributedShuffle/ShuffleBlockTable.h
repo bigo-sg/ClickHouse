@@ -18,19 +18,6 @@
 namespace DB
 {
 ///
-/// How to clear all the data when a query session has finished ?
-/// The following measures were taken at current
-/// 1）Chunks in ShuffleBlockTable are read only once, so we use popChunkWithoutMutex() for loading a chunk.
-///   That ensures that all chunks are released after the loading finish.
-/// 2) When ShuffleBlockTable becomes empty, it will call ShuffleBlockSession::releaseTable() to
-///   release it-self.
-/// 3) When ShuffleBlockSession becomes empty, it will call ShuffleBlockTableManager::tryCloseSession() to
-///   release it-self.
-/// All above will ensure all datas are released in normal processing. But more need be considered, exceptions could
-/// happen during the processing which make the release actions not be called. Some measures may be token.
-/// 1) In TCPHandler, catch all exceptions , and make a session releasing action on all nodes
-/// 2) All sessions have a max TTL, make background routine to check timeout sessions and clear them.
-///
 
 class ShuffleBlockTable
 {
@@ -47,7 +34,7 @@ public:
 
     ~ShuffleBlockTable()
     {
-        LOG_TRACE(logger, "close table {}.{}", session_id, table_id);
+        LOG_TRACE(logger, "close table {}.{}. rows:{}. max_rows:{}", session_id, table_id, rows, max_rows);
     }
 
     inline const Block & getHeader() const
@@ -79,8 +66,12 @@ private:
     std::atomic<bool> is_sink_finished = false;
     std::list<Chunk> chunks;
     std::condition_variable wait_more_data;
+    std::condition_variable wait_consume_data;
     Poco::Logger * logger = &Poco::Logger::get("ShuffleBlockTable");
     size_t rows = 0;
+    size_t remained_rows = 0;
+    size_t max_rows = 0;
+    const static size_t max_rows_limit = 20000000;
 };
 using ShuffleBlockTablePtr = std::shared_ptr<ShuffleBlockTable>;
 

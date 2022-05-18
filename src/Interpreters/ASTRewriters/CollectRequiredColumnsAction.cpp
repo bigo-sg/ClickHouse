@@ -147,6 +147,15 @@ void CollectRequiredColumnsAction::visit(const ASTIdentifier * ident_ast)
                         .alias_name = ident_ast->tryGetAlias(),
                         .type = col.type
                     };
+                    /*
+                    LOG_TRACE(
+                        &Poco::Logger::get("CollectRequiredColumnsAction"),
+                        "add ident @ {}, full name:{}, short name:{}, alias:{}.",
+                        *best_pos,
+                        ident_ast->name(),
+                        ident_ast->shortName(),
+                        ident_ast->tryGetAlias());
+                    */
                     final_result.required_columns[*best_pos].push_back(column_metadta);
                     found = true;
                     added_names.insert(ident_ast->name());

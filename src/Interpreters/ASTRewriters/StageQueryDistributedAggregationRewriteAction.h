@@ -7,6 +7,7 @@
 #include <Parsers/ASTSubquery.h>
 #include <Parsers/IAST.h>
 #include <Parsers/IAST_fwd.h>
+#include <Interpreters/DatabaseAndTableWithAlias.h>
 
 namespace DB
 {
@@ -67,5 +68,7 @@ private:
 
     ASTPtr createShuffleInsert(
         const String & table_function_name, ASTTableExpression * table_expr, const NamesAndTypesList & table_desc, ASTPtr groupby_clause);
+
+    bool isAllRequiredColumnsLowCardinality(const ASTPtr & ast, const TablesWithColumns & tables);
 };
 }
