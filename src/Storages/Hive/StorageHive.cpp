@@ -267,6 +267,36 @@ public:
         }
     }
 
+    Chunk generateChunkByPartitionKeys()
+    {
+        size_t max_rows = getContext()->getSettings().max_block_size;
+        size_t rows = 0;
+        if (max_rows > current_file_remained_rows)
+        {
+            rows = current_file_remained_rows;
+            current_file_remained_rows = 0;
+        }
+        else
+        {
+            rows = max_rows;
+            current_file_remained_rows -= max_rows;
+        }
+
+        Columns cols;
+        auto types = source_info->partition_name_types.getTypes();
+        auto names = source_info->partition_name_types.getNames();
+        auto fields = current_file->getPartitionValues();
+        for (size_t i = 0, sz = types.size(); i < sz; ++i)
+        {
+            if (!sample_block.has(names[i]))
+                continue;
+            auto col = types[i]->createColumnConst(rows, fields[i]);
+            auto col_idx = sample_block.getPositionByName(names[i]);
+            cols.insert(cols.begin() + col_idx, col);
+        }
+        return Chunk(std::move(cols), rows);
+    }
+
 private:
     std::unique_ptr<ReadBuffer> read_buf;
     std::unique_ptr<QueryPipeline> pipeline;
@@ -423,9 +453,6 @@ Pipe StorageHive::read(
         if (column == "_file")
             sources_info->need_file_column = true;
     }
-
-    auto partition_names = partition_name_types.getNames();
-    getActualColumnsToRead(sample_block, header_block, NameSet{partition_names.begin(), partition_names.end()});
 
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();
