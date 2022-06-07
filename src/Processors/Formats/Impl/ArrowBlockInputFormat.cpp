@@ -71,15 +71,7 @@ Chunk ArrowBlockInputFormat::generate()
 
     ++record_batch_current;
 
-    arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result);
-
-    /// If defaults_for_omitted_fields is true, calculate the default values from default expression for omitted fields.
-    /// Otherwise fill the missing columns with zero values of its type.
-    if (format_settings.defaults_for_omitted_fields)
-        for (size_t row_idx = 0; row_idx < res.getNumRows(); ++row_idx)
-            for (const auto & column_idx : missing_columns)
-                block_missing_values.setBit(column_idx, row_idx);
-
+    arrow_column_to_ch_column->arrowTableToCHChunk(res, *table_result, block_missing_values);
     return res;
 }
 
@@ -139,13 +131,7 @@ void ArrowBlockInputFormat::prepareReader()
         schema = file_reader->schema();
     }
 
-    arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(
-        getPort().getHeader(),
-        "Arrow",
-        format_settings.arrow.import_nested,
-        format_settings.arrow.allow_missing_columns,
-        format_settings.arrow.case_insensitive_column_matching);
-    missing_columns = arrow_column_to_ch_column->getMissingColumns(*schema);
+    arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(getPort().getHeader(), schema, "Arrow", format_settings);
 
     if (stream)
         record_batch_total = -1;
