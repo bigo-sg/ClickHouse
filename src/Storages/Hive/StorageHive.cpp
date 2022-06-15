@@ -36,6 +36,8 @@
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/StorageFactory.h>
 #include <Storages/Hive/LocalHiveSourceTask.h>
+#include <DataTypes/NestedUtils.h>
+#include <DataTypes/DataTypeTuple.h>
 
 namespace DB
 {
@@ -444,17 +446,31 @@ Pipe StorageHive::read(
     sources_info->hive_metastore_client = hive_metastore_client;
     sources_info->partition_name_types = partition_name_types;
 
-    const auto & header_block = storage_snapshot->metadata->getSampleBlock();
+    const auto header_block = storage_snapshot->metadata->getSampleBlock();
+    bool support_subset_columns = supportsSubcolumns();
+    Block flatten_block;
+    if (support_subset_columns)
+        flatten_block = Nested::flatten(header_block);
+
     Block sample_block;
     for (const auto & column : column_names)
     {
-        sample_block.insert(header_block.getByName(column));
+        if (header_block.has(column))
+        {
+            sample_block.insert(header_block.getByName(column));
+            continue;
+        }
+        else if (support_subset_columns && flatten_block.has(column))
+        {
+            sample_block.insert(flatten_block.getByName(column));
+            continue;
+        }
         if (column == "_path")
             sources_info->need_path_column = true;
         if (column == "_file")
             sources_info->need_file_column = true;
     }
-
+    LOG_TRACE(&Poco::Logger::get("StorageHive"), "sample_block={}", sample_block.dumpNames());
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();
 
