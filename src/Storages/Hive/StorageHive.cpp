@@ -37,7 +37,6 @@
 #include <Storages/StorageFactory.h>
 #include <Storages/Hive/LocalHiveSourceTask.h>
 #include <DataTypes/NestedUtils.h>
-#include <DataTypes/DataTypeTuple.h>
 
 namespace DB
 {
