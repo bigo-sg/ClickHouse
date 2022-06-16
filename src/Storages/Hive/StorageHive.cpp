@@ -1,3 +1,4 @@
+#include <optional>
 #include <Storages/Hive/StorageHive.h>
 
 #if USE_HIVE
@@ -446,12 +447,19 @@ Pipe StorageHive::read(
     sources_info->partition_name_types = partition_name_types;
 
     const auto header_block = storage_snapshot->metadata->getSampleBlock();
-    bool support_subset_columns = supportsSubcolumns();
-    Block flatten_block;
-    if (support_subset_columns)
-        flatten_block = Nested::flatten(header_block);
+    bool support_subset_columns = supportsSubsetOfColumns();
 
+    auto settings = context_->getSettingsRef();
+    auto case_insensitive_matching = [&]() -> bool
+    {
+        if (format_name == "Parquet")
+            return settings.input_format_parquet_case_insensitive_column_matching;
+        else if (format_name == "ORC")
+            return settings.input_format_orc_case_insensitive_column_matching;
+        return false;
+    };
     Block sample_block;
+    NestedColumnExtractHelper nested_columns_extractor(header_block, case_insensitive_matching());
     for (const auto & column : column_names)
     {
         if (header_block.has(column))
@@ -459,10 +467,14 @@ Pipe StorageHive::read(
             sample_block.insert(header_block.getByName(column));
             continue;
         }
-        else if (support_subset_columns && flatten_block.has(column))
+        else if (support_subset_columns)
         {
-            sample_block.insert(flatten_block.getByName(column));
-            continue;
+            auto subset_column = nested_columns_extractor.extractColumn(column);
+            if (subset_column)
+            {
+                sample_block.insert(*subset_column);
+                continue;
+            }
         }
         if (column == "_path")
             sources_info->need_path_column = true;
