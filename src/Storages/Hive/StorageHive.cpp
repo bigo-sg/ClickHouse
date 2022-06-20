@@ -128,11 +128,19 @@ public:
     {
         auto updated = format_settings;
         if (format == "HiveText")
+        {
             updated.hive_text.input_field_names = text_input_field_names;
+        }
         else if (format == "ORC")
+        {
             updated.orc.skip_stripes = hive_file->getSkipSplits();
+            updated.orc.case_insensitive_column_matching = true;
+        }
         else if (format == "Parquet")
+        {
             updated.parquet.skip_row_groups = hive_file->getSkipSplits();
+            updated.parquet.case_insensitive_column_matching = true;
+        }
         return updated;
     }
 
