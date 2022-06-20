@@ -401,7 +401,8 @@ def test_cache_dir_use(started_cluster):
     )
     assert result0 != "0" and result1 != "0"
 
-def test_table_alter_add(started_cluster):
+
+    def test_table_alter_add(started_cluster):
     node = started_cluster.instances["h0_0_0"]
     result = node.query("DROP TABLE IF EXISTS default.demo_parquet_1")
     result = node.query(
@@ -455,6 +456,7 @@ CREATE TABLE IF NOT EXISTS default.demo_parquet_1 (`id` Nullable(String), `score
     expected_result = """id\tNullable(String)\t\t\tText comment\t\t\nscore\tNullable(Int32)\t\t\t\t\t\nday\tNullable(String)"""
     assert result.strip() == expected_result
 
+
 def test_hive_struct_type(started_cluster):
     node = started_cluster.instances["h0_0_0"]
     result = node.query(
@@ -463,17 +465,17 @@ def test_hive_struct_type(started_cluster):
         """
     )
     result = node.query(
-            """
+        """
     SELECT * FROM default.test_hive_types WHERE day = '2022-02-20' SETTINGS input_format_parquet_import_nested=1
-            """
+        """
     )
-    expected_result = """1      2       3       4       5       6.11    7.22    8       2022-02-20 14:47:04     2022-02-20      hello world     hello world     hello world     true    [1,2,3] ['hello world','hello world']   [1.1,1.2]       {'a':100,'b':200,'c':300}       {'a':'aa','b':'bb','c':'cc'}    {'a':111.1,'b':222.2,'c':333.3} ('aaa',200,333.3,(10,'xyz'))    2022-02-20"""
+    expected_result = """1	2	3	4	5	6.11	7.22	8	2022-02-20 14:47:04	2022-02-20	hello world	hello world	hello world	true	[1,2,3]	['hello world','hello world']	[1.1,1.2]	{'a':100,'b':200,'c':300}	{'a':'aa','b':'bb','c':'cc'}	{'a':111.1,'b':222.2,'c':333.3}	('aaa',200,333.3,(10,'xyz'))	2022-02-20"""
     assert result.strip() == expected_result
 
     result = node.query(
-            """
+        """
     SELECT day, f_struct.a FROM default.test_hive_types WHERE day = '2022-02-20' SETTINGS input_format_parquet_import_nested=1
-            """
+        """
     )
     expected_result = """2022-02-20     aaa     10"""
     assert result.strip() == expected_result
