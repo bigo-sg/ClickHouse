@@ -66,7 +66,7 @@ public:
 
     NamesAndTypesList getVirtuals() const override;
 
-    bool isColumnOriented() const override;
+    bool supportsSubsetOfColumns() const override;
 
     std::optional<UInt64> totalRows(const Settings & settings) const override;
     std::optional<UInt64> totalRowsByPartitionPredicate(const SelectQueryInfo & query_info, ContextPtr context_) const override;
@@ -78,6 +78,7 @@ private:
     using PruneLevel = HivePruneLevel;
 
     static ASTPtr extractKeyExpressionList(const ASTPtr & node);
+
     void lazyInitialize();
 
     std::optional<UInt64>
