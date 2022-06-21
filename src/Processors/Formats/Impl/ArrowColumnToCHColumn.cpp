@@ -32,6 +32,7 @@
 #include <Columns/ColumnNothing.h>
 #include <Interpreters/castColumn.h>
 #include <Common/quoteString.h>
+#include <Functions/FunctionHelpers.h>
 #include <algorithm>
 #include <arrow/builder.h>
 #include <arrow/array.h>
@@ -72,6 +73,7 @@ namespace ErrorCodes
     extern const int THERE_IS_NO_COLUMN;
     extern const int UNKNOWN_EXCEPTION;
     extern const int INCORRECT_NUMBER_OF_COLUMNS;
+    extern const int UNKNOWN_FORMAT;
 }
 
 /// Inserts numeric data right into internal column data to reduce an overhead
@@ -566,21 +568,39 @@ Block ArrowColumnToCHColumn::arrowSchemaToCHHeader(
     return Block(std::move(sample_columns));
 }
 
-ArrowColumnToCHColumn::ArrowColumnToCHColumn(
-    const Block & header_,
-    const std::string & format_name_,
-    bool import_nested_,
-    bool allow_missing_columns_,
-    bool case_insensitive_matching_)
+ArrowColumnToCHColumn::ArrowColumnToCHColumn(const Block & header_, std::shared_ptr<arrow::Schema> schema_, const std::string & format_name_, const FormatSettings & settings_)
     : header(header_)
+    , schema(std::move(schema_))
     , format_name(format_name_)
-    , import_nested(import_nested_)
-    , allow_missing_columns(allow_missing_columns_)
-    , case_insensitive_matching(case_insensitive_matching_)
+    , null_as_default(settings_.null_as_default)
+    , defaults_for_omitted_fields(settings_.defaults_for_omitted_fields)
 {
+    if (format_name == "ORC")
+    {
+        import_nested = settings_.orc.import_nested;
+        allow_missing_columns = settings_.orc.allow_missing_columns;
+        case_insensitive_matching = settings_.orc.case_insensitive_column_matching;
+    }
+    else if (format_name == "Parquet")
+    {
+        import_nested = settings_.parquet.import_nested;
+        allow_missing_columns = settings_.parquet.allow_missing_columns;
+        case_insensitive_matching = settings_.parquet.case_insensitive_column_matching;
+    }
+    else if (format_name == "Arrow")
+    {
+        import_nested = settings_.arrow.import_nested;
+        allow_missing_columns = settings_.arrow.allow_missing_columns;
+        case_insensitive_matching = settings_.arrow.case_insensitive_column_matching;
+    }
+    else
+    {
+        throw Exception(ErrorCodes::UNKNOWN_FORMAT, "Unsupported format {}", format_name);
+    }
 }
 
-void ArrowColumnToCHColumn::arrowTableToCHChunk(Chunk & res, std::shared_ptr<arrow::Table> & table)
+void ArrowColumnToCHColumn::arrowTableToCHChunk(
+    Chunk & res, std::shared_ptr<arrow::Table> & table, BlockMissingValues & block_missing_values)
 {
     NameToColumnPtr name_to_column_ptr;
     for (auto column_name : table->ColumnNames())
@@ -594,10 +614,11 @@ void ArrowColumnToCHColumn::arrowTableToCHChunk(Chunk & res, std::shared_ptr<arr
         name_to_column_ptr[std::move(column_name)] = arrow_column;
     }
 
-    arrowColumnsToCHChunk(res, name_to_column_ptr);
+    arrowColumnsToCHChunk(res, name_to_column_ptr, block_missing_values);
 }
 
-void ArrowColumnToCHColumn::arrowColumnsToCHChunk(Chunk & res, NameToColumnPtr & name_to_column_ptr)
+void ArrowColumnToCHColumn::arrowColumnsToCHChunk(
+    Chunk & res, NameToColumnPtr & name_to_column_ptr, BlockMissingValues & block_missing_values)
 {
     if (unlikely(name_to_column_ptr.empty()))
         throw Exception(ErrorCodes::INCORRECT_NUMBER_OF_COLUMNS, "Columns is empty");
@@ -653,6 +674,8 @@ void ArrowColumnToCHColumn::arrowColumnsToCHChunk(Chunk & res, NameToColumnPtr &
                     throw Exception{ErrorCodes::THERE_IS_NO_COLUMN, "Column '{}' is not presented in input data.", header_column.name};
                 else
                 {
+                    if (defaults_for_omitted_fields)
+                        block_missing_values.setBits(column_i, num_rows);
                     column.name = header_column.name;
                     column.type = header_column.type;
                     column.column = header_column.column->cloneResized(num_rows);
@@ -670,6 +693,32 @@ void ArrowColumnToCHColumn::arrowColumnsToCHChunk(Chunk & res, NameToColumnPtr &
 
         try
         {
+            if (null_as_default && (column.type->isNullable() || column.type->isLowCardinalityNullable())
+                && !header_column.type->isNullable() && !header_column.type->isLowCardinalityNullable())
+            {
+                const bool has_lowcardinality = column.type->isLowCardinalityNullable();
+                if (has_lowcardinality)
+                {
+                    const auto * type_lowcardinality = checkAndGetDataType<DataTypeLowCardinality>(column.type.get());
+                    column.type = type_lowcardinality->getDictionaryType();
+                    column.column = column.column->convertToFullColumnIfLowCardinality();
+                }
+
+                DataTypePtr type_without_nullable;
+                ColumnPtr column_without_nullable;
+                type_without_nullable = removeNullable(column.type);
+                const auto * column_nullable = checkAndGetColumn<ColumnNullable>(column.column.get());
+                column_without_nullable = column_nullable->getNestedColumnPtr();
+
+                const auto & null_map = column_nullable->getNullMapData();
+                for (size_t row_i = 0; row_i < column.column->size(); ++row_i)
+                    if (null_map[row_i])
+                        block_missing_values.setBit(column_i, row_i);
+
+                column.type = type_without_nullable;
+                column.column = column_without_nullable;
+            }
+
             column.column = castColumn(column, header_column.type);
         }
         catch (Exception & e)
@@ -687,28 +736,6 @@ void ArrowColumnToCHColumn::arrowColumnsToCHChunk(Chunk & res, NameToColumnPtr &
     }
 
     res.setColumns(columns_list, num_rows);
-}
-
-std::vector<size_t> ArrowColumnToCHColumn::getMissingColumns(const arrow::Schema & schema) const
-{
-    std::vector<size_t> missing_columns;
-    auto block_from_arrow = arrowSchemaToCHHeader(schema, format_name, false, &header, case_insensitive_matching);
-    NestedColumnExtractHelper nested_columns_extractor(block_from_arrow, case_insensitive_matching);
-
-    for (size_t i = 0, columns = header.columns(); i < columns; ++i)
-    {
-        const auto & header_column = header.getByPosition(i);
-        if (!block_from_arrow.has(header_column.name, case_insensitive_matching))
-        {
-            if (!import_nested || !nested_columns_extractor.extractColumn(header_column.name))
-            {
-                if (!allow_missing_columns)
-                    throw Exception{ErrorCodes::THERE_IS_NO_COLUMN, "Column '{}' is not presented in input data.", header_column.name};
-                missing_columns.push_back(i); 
-            }
-        }
-    }
-    return missing_columns;
 }
 
 }

@@ -1,4 +1,5 @@
 #include <Storages/Hive/StorageHiveCluster.h>
+
 #if USE_HIVE
 #include <algorithm>
 #include <Common/logger_useful.h>
@@ -16,6 +17,7 @@
 #include <Storages/Hive/HiveSourceTask.h>
 #include <Storages/Hive/StorageHive.h>
 #include <Storages/StorageFactory.h>
+#include <Storages/AlterCommands.h>
 namespace DB
 {
 
