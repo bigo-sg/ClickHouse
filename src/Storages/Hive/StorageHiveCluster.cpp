@@ -11,6 +11,7 @@
 #include <Parsers/queryToString.h>
 #include <Processors/Sources/RemoteSource.h>
 #include <QueryPipeline/RemoteQueryExecutor.h>
+#include <Storages/AlterCommands.h>
 #include <Storages/Hive/HiveSettings.h>
 #include <Storages/Hive/HiveSourceTask.h>
 #include <Storages/Hive/StorageHive.h>
