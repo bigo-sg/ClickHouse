@@ -982,6 +982,30 @@ MergeTreeDataSelectAnalysisResultPtr ReadFromMergeTree::selectRangesToRead(
     return std::make_shared<MergeTreeDataSelectAnalysisResult>(MergeTreeDataSelectAnalysisResult{.result = std::move(result)});
 }
 
+void ReadFromMergeTree::setQueryInfoOrderOptimizer(std::shared_ptr<ReadInOrderOptimizer> order_optimizer)
+{
+    if (query_info.projection)
+    {
+        query_info.projection->order_optimizer = order_optimizer;
+    }
+    else
+    {
+        query_info.order_optimizer = order_optimizer;
+    }
+}
+
+void ReadFromMergeTree::setQueryInfoInputOrderInfo(InputOrderInfoPtr order_info)
+{
+    if (query_info.projection)
+    {
+        query_info.projection->input_order_info = order_info;
+    }
+    else
+    {
+        query_info.input_order_info = order_info;
+    }
+}
+
 ReadFromMergeTree::AnalysisResult ReadFromMergeTree::getAnalysisResult() const
 {
     auto result_ptr = analyzed_result_ptr ? analyzed_result_ptr : selectRangesToRead(prepared_parts);
@@ -1065,7 +1089,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
             column_names_to_read,
             result_projection);
     }
-    else if ((settings.optimize_read_in_order || settings.optimize_aggregation_in_order) && input_order_info)
+    else if ((settings.optimize_read_in_order || settings.optimize_aggregation_in_order || settings.optimize_read_in_window_order) && input_order_info)
     {
         pipe = spreadMarkRangesAmongStreamsWithOrder(
             std::move(result.parts_with_ranges),
@@ -1079,6 +1103,9 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
             std::move(result.parts_with_ranges),
             column_names_to_read);
     }
+
+    for (const auto & processor : pipe.getProcessors())
+        processor->setStorageLimits(query_info.storage_limits);
 
     if (pipe.empty())
     {
@@ -1148,11 +1175,11 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, cons
     for (const auto & processor : pipe.getProcessors())
         processors.emplace_back(processor);
 
-    // Attach QueryIdHolder if needed
-    if (query_id_holder)
-        pipe.addQueryIdHolder(std::move(query_id_holder));
 
     pipeline.init(std::move(pipe));
+    // Attach QueryIdHolder if needed
+    if (query_id_holder)
+        pipeline.setQueryIdHolder(std::move(query_id_holder));
 }
 
 static const char * indexTypeToString(ReadFromMergeTree::IndexType type)
