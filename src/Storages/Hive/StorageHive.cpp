@@ -472,7 +472,7 @@ Pipe StorageHive::read(
             auto subset_column = nested_columns_extractor.extractColumn(column);
             if (subset_column)
             {
-                sample_block.insert(*subset_column);
+                sample_block.insert(std::move(*subset_column));
                 continue;
             }
         }
