@@ -101,7 +101,7 @@ Pipe StorageHiveCluster::read(
                 auto connection = std::make_shared<Connection>(
                     node.host_name,
                     node.port,
-                    context_->getGlobalContext()->getCurrentDatabase(),
+                    context_->getCurrentDatabase(),
                     node.user,
                     node.password,
                     node.cluster,
