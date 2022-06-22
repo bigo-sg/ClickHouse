@@ -109,7 +109,7 @@ public:
         ContextPtr context_,
         UInt64 max_block_size_,
         const StorageHive & storage_,
-        const Names & text_input_field_names_ = {})
+        const Names & text_input_field_names_)
         : ISource(getHeader(sample_block_, source_info_))
         , WithContext(context_)
         , source_info(std::move(source_info_))
