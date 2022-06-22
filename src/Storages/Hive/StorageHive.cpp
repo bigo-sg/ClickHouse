@@ -188,7 +188,7 @@ public:
 
     Chunk generate() override
     {
-        while (true)
+        while (!isCancelled())
         {
             bool need_next_file
                 = (!generate_chunk_from_metadata && !reader) || (generate_chunk_from_metadata && !current_file_remained_rows);
@@ -296,10 +296,15 @@ public:
                 return getResultChunk(source_block, num_rows);
             }
 
-            reader.reset();
-            pipeline.reset();
-            read_buf.reset();
+            {
+                std::lock_guard lock(reader_mutex);
+                reader.reset();
+                pipeline.reset();
+                read_buf.reset();
+            }
         }
+
+        return {};
     }
 
     Chunk generateChunkFromMetadata()
@@ -401,6 +406,13 @@ public:
         return Chunk(std::move(cols), rows);
     }
 
+    void onCancel() override
+    {
+        std::lock_guard lock(reader_mutex);
+        if (reader)
+            reader->cancel();
+    }
+
 private:
     std::unique_ptr<ReadBuffer> read_buf;
     std::unique_ptr<QueryPipeline> pipeline;
@@ -424,6 +436,9 @@ private:
 
     bool generate_chunk_from_metadata{false};
     UInt64 current_file_remained_rows = 0;
+
+    /// onCancel and generate can be called concurrently
+    std::mutex reader_mutex;
 
     Poco::Logger * log = &Poco::Logger::get("StorageHive");
 };

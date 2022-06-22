@@ -57,6 +57,9 @@ Chunk IRowInputFormat::generate()
     if (total_rows == 0)
         readPrefix();
 
+    if (is_stopped)
+        return {};
+
     const Block & header = getPort().getHeader();
 
     size_t num_columns = header.columns();
