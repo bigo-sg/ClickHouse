@@ -82,7 +82,7 @@ class HiveSourceCollectCallbackFactory : private boost::noncopyable
 public:
     static HiveSourceCollectCallbackFactory & instance();
 
-    std::optional<HiveSourceFilesCollectCallbackPtr> getCallback(const String name)
+    std::optional<HiveSourceFilesCollectCallbackPtr> getCallback(const String & name)
     {
         auto it = builders.find(name);
         if (it == builders.end())
