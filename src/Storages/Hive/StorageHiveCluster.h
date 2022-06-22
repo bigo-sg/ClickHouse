@@ -39,6 +39,7 @@ public:
 
     String getName() const override { return "HiveCluster"; }
     bool supportsIndexForIn() const override { return true; }
+    bool supportsSubcolumns() const override { return true; }
     bool mayBenefitFromIndexForIn(
         const ASTPtr & /* left_in_operand */,
         ContextPtr /* query_context */,
