@@ -175,11 +175,13 @@ public:
         {
             updated.orc.skip_stripes = hive_file->getSkipSplits();
             updated.orc.case_insensitive_column_matching = true;
+            updated.orc.import_nested = true;
         }
         else if (format == "Parquet")
         {
             updated.parquet.skip_row_groups = hive_file->getSkipSplits();
             updated.parquet.case_insensitive_column_matching = true;
+            updated.parquet.import_nested = true;
         }
         return updated;
     }
@@ -570,16 +572,10 @@ Pipe StorageHive::read(
     bool support_subset_columns = supportsSubcolumns();
 
     auto settings = context_->getSettingsRef();
-    auto case_insensitive_matching = [&]() -> bool
-    {
-        if (format_name == "Parquet")
-            return settings.input_format_parquet_case_insensitive_column_matching;
-        else if (format_name == "ORC")
-            return settings.input_format_orc_case_insensitive_column_matching;
-        return false;
-    };
     Block sample_block;
-    NestedColumnExtractHelper nested_columns_extractor(header_block, case_insensitive_matching());
+
+    /// We need to igore case when reading from Hive.
+    NestedColumnExtractHelper nested_columns_extractor(header_block, true);
     for (const auto & column : column_names)
     {
         if (header_block.has(column))
