@@ -354,7 +354,10 @@ bool StageQueryDistributedJoinRewriteAnalyzer::isApplicableJoinType()
 {
     const auto * join_tables = from_query->join();
     auto * table_join = join_tables->table_join->as<ASTTableJoin>();
-    if (table_join->kind == ASTTableJoin::Kind::Cross)
+
+    if (table_join->kind != ASTTableJoin::Kind::Left && table_join->kind != ASTTableJoin::Kind::Inner)
+        return false;
+    if (table_join->strictness == ASTTableJoin::Strictness::Asof)
         return false;
 
     // TODO if right table is dict or special storage, return false;

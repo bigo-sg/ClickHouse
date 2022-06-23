@@ -689,7 +689,6 @@ int Server::main(const std::vector<std::string> & /*args*/)
         }
     }
 
-    registerAllStorageDistributedTaskBuilderMakers();
     Poco::ThreadPool server_pool(3, config().getUInt("max_connections", 1024));
     std::mutex servers_lock;
     std::vector<ProtocolServerAdapter> servers;

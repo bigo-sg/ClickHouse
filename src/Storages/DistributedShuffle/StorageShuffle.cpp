@@ -22,7 +22,7 @@
 #include <Processors/Chunk.h>
 #include <Processors/Sinks/SinkToStorage.h>
 #include <Processors/Sources/RemoteSource.h>
-#include <Processors/Sources/SourceWithProgress.h>
+#include <Processors/ISource.h>
 #include <QueryPipeline/RemoteInserter.h>
 #include <QueryPipeline/RemoteQueryExecutor.h>
 #include <Storages/DistributedShuffle/ShuffleBlockTable.h>
@@ -45,11 +45,11 @@ namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
 }
-class StorageShuffleSource : public SourceWithProgress, WithContext
+class StorageShuffleSource : public ISource, WithContext
 {
 public:
     StorageShuffleSource(ContextPtr context_, const String & session_id_, const String & table_id_, const Block & header_)
-        : SourceWithProgress(header_), WithContext(context_), session_id(session_id_), table_id(table_id_), header(header_)
+        : ISource(header_), WithContext(context_), session_id(session_id_), table_id(table_id_), header(header_)
     {
     }
 

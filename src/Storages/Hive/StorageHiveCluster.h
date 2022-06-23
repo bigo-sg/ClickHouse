@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <Common/config.h>
 #if USE_HIVE
 #include <Interpreters/Context.h>
@@ -65,6 +66,12 @@ public:
 
     void checkAlterIsPossible(const AlterCommands & commands, ContextPtr local_context) const override;
     void alter(const AlterCommands & params, ContextPtr local_context, AlterLockHolder & alter_lock_holder) override;
+
+    std::shared_ptr<HiveSettings> getStorageHiveSettings() { return storage_settings; }
+    const String & getHiveMetastoreURL() const { return hive_metastore_url; }
+    const String & getHiveDatabase() const { return hive_database; }
+    const String & getHiveTableName() const { return hive_table; }
+    ASTPtr getPartitionByAst() const { return partition_by_ast; }
 
 private:
     String cluster_name;

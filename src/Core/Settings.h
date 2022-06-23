@@ -600,6 +600,7 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     M(String, insert_deduplication_token, "", "If not empty, used for duplicate detection instead of data digest", 0) \
     M(Bool, count_distinct_optimization, false, "Rewrite count distinct to subquery of group by", 0) \
     M(String, use_cluster_for_distributed_shuffle, "", "If you want to run the join and group by in distributed shuffle mode, set it as one of the available cluster.", 0) \
+    M(Bool, enable_distribute_shuffle, false, "Enable shuffle join", 0) \
     M(UInt64, shuffle_storage_session_timeout, 1800, "How long a session can be alive before expired by timeout", 0) \
     M(Bool, throw_on_unsupported_query_inside_transaction, true, "Throw exception if unsupported query is used inside transaction", 0) \
     M(TransactionsWaitCSNMode, wait_changes_become_visible_after_commit_mode, TransactionsWaitCSNMode::WAIT_UNKNOWN, "Wait for committed changes to become actually visible in the latest snapshot", 0) \

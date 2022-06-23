@@ -104,7 +104,6 @@ BlockIO InterpreterStageQuery::execute(const QueryBlockIO & output_io, const Que
     auto pipeline_builder = query_plan.buildQueryPipeline(
         QueryPlanOptimizationSettings::fromContext(context),
         BuildQueryPipelineSettings::fromContext(context));
-    pipeline_builder->addInterpreterContext(context);
     BlockIO res;
     res.pipeline = QueryPipelineBuilder::getPipeline(std::move(*pipeline_builder));
     return res;

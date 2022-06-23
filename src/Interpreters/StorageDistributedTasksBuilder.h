@@ -34,5 +34,5 @@ private:
 
 };
 
-void registerAllStorageDistributedTaskBuilderMakers();
+void registerAllStorageDistributedTaskBuilderMakers(StorageDistributedTaskBuilderFactory & instance);
 }

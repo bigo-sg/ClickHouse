@@ -1,3 +1,4 @@
+#include <mutex>
 #include <Interpreters/StorageDistributedTasksBuilder.h>
 #include <Common/ErrorCodes.h>
 
@@ -7,9 +8,13 @@ namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
 }
+
+static std::once_flag init_builder_flag;
+void registerAllStorageDistributedTaskBuilderMakers();
 StorageDistributedTaskBuilderFactory & StorageDistributedTaskBuilderFactory::getInstance()
 {
     static StorageDistributedTaskBuilderFactory instance;
+    std::call_once(init_builder_flag, [](){ registerAllStorageDistributedTaskBuilderMakers(instance); });
     return instance;
 }
 
@@ -31,7 +36,9 @@ StorageDistributedTaskBuilderPtr StorageDistributedTaskBuilderFactory::getBuilde
     return iter->second();
 }
 
-void registerAllStorageDistributedTaskBuilderMakers()
+void registerHiveClusterTasksBuilder(StorageDistributedTaskBuilderFactory & instance);
+void registerAllStorageDistributedTaskBuilderMakers(StorageDistributedTaskBuilderFactory & instance)
 {
+    registerHiveClusterTasksBuilder(instance);
 }
 }

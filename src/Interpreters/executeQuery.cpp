@@ -641,7 +641,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                         select_with_union->set_of_modes.size(),
                         select_with_union->list_of_selects->getID());
                 }
-                if (!context->getSettings().use_cluster_for_distributed_shuffle.value.empty())
+                if (!context->getSettingsRef().use_cluster_for_distributed_shuffle.value.empty() && context->getSettingsRef().enable_distribute_shuffle)
                 {
                     MakeFunctionColumnAliasAction function_alias_action;
                     ASTDepthFirstVisitor<MakeFunctionColumnAliasAction> function_alias_visitor(function_alias_action, ast);
@@ -666,6 +666,7 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
                     ast = add_finish_event_result;
                 }
             }
+
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
 
             if (context->getCurrentTransaction() && !interpreter->supportsTransactions() &&
