@@ -37,7 +37,7 @@ public:
         const ASTPtr & partition_by_ast_,
         std::unique_ptr<HiveSettings> storage_settings_,
         ContextPtr context_,
-        bool is_remote_ = true);
+        bool is_remote_);
 
     String getName() const override { return "HiveCluster"; }
     bool supportsIndexForIn() const override { return true; }

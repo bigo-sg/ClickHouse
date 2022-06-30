@@ -80,7 +80,8 @@ StoragePtr TableFunctionHiveCluster::executeImpl(
         "",
         partition_by_ast,
         std::make_unique<HiveSettings>(),
-        context_);
+        context_,
+        true);
 
     return storage;
 }
