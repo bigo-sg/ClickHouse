@@ -1,6 +1,6 @@
 #pragma once
 #include <Common/config.h>
-#include "Parsers/IAST_fwd.h"
+
 #if USE_HIVE
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionAnalyzer.h>
@@ -50,7 +50,6 @@ public:
         return true;
     }
 
-    //bool isRemote() const override { return true; }
     bool isRemote() const override { return is_remote; }
 
     void read(

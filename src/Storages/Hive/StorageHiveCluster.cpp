@@ -1,7 +1,4 @@
 #include <Storages/Hive/StorageHiveCluster.h>
-#include "Parsers/ASTSelectQuery.h"
-#include "Parsers/IAST_fwd.h"
-#include "QueryPipeline/QueryPipeline.h"
 
 #if USE_HIVE
 #include <algorithm>
@@ -74,11 +71,9 @@ void StorageHiveCluster::read(
     size_t max_block_size_,
     unsigned num_streams_)
 {
-    //auto query_kind = context_->getClientInfo().query_kind;
 
     auto policy_name = context_->getSettings().getString("hive_cluster_task_iterate_policy");
     // first stage. create remote executors pipeline
-    //if (is_remote && query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
     if (is_remote)
     {
         auto iterate_callback_builder = HiveSourceCollectCallbackFactory::instance().getCallback(policy_name);

@@ -40,7 +40,7 @@ private:
     ColumnsDescription actual_columns;
 };
 
-/// For quering remote shards of the hive cluster table 
+/// For quering remote shards of the hive cluster table
 class TableFunctionHivClusterLocalShard : public ITableFunction
 {
 public:
