@@ -84,7 +84,7 @@ private:
 
     Poco::Logger * logger = &Poco::Logger::get("StorageHiveCluster");
 
-    ASTPtr rewriteQuery(const ASTPtr & original_query);
+    ASTPtr rewriteQuery(const ASTPtr & query);
 };
 }
 
