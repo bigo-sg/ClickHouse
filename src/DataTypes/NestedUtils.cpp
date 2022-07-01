@@ -106,7 +106,7 @@ Block flatten(const Block & block)
                     res.insert(ColumnWithTypeAndName(
                         is_const
                             ? ColumnConst::create(std::move(column_array_of_element), block.rows())
-                            : std::move(column_array_of_element),
+                            : column_array_of_element,
                         std::make_shared<DataTypeArray>(element_types[i]),
                         nested_name));
                 }
@@ -121,7 +121,7 @@ Block flatten(const Block & block)
                 const DataTypes & element_types = type_tuple->getElements();
                 const Strings & names = type_tuple->getElementNames();
                 const ColumnTuple * column_tuple;
-                if(isColumnConst(*elem.column))
+                if (isColumnConst(*elem.column))
                     column_tuple = typeid_cast<const ColumnTuple *>(&assert_cast<const ColumnConst &>(*elem.column).getDataColumn());
                 else
                     column_tuple = typeid_cast<const ColumnTuple *>(elem.column.get());

@@ -9,6 +9,7 @@
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Parsers/ASTCreateQuery.h>
+#include <Parsers/ASTFunction.h>
 #include <Parsers/queryToString.h>
 #include <Processors/Sources/RemoteSource.h>
 #include <Processors/QueryPlan/QueryPlan.h>
@@ -19,6 +20,7 @@
 #include <Storages/Hive/StorageHive.h>
 #include <Storages/StorageFactory.h>
 #include <Storages/AlterCommands.h>
+#include <TableFunctions/Hive/TableFunctionHiveCluster.h>
 namespace DB
 {
 
@@ -40,7 +42,8 @@ StorageHiveCluster::StorageHiveCluster(
     const String & comment_,
     const ASTPtr & partition_by_ast_,
     std::unique_ptr<HiveSettings> storage_settings_,
-    ContextPtr context_)
+    ContextPtr context_,
+    bool is_remote_)
     : IStorage(table_id_)
     , WithContext(context_)
     , cluster_name(cluster_name_)
@@ -49,6 +52,7 @@ StorageHiveCluster::StorageHiveCluster(
     , hive_table(hive_table_)
     , partition_by_ast(partition_by_ast_)
     , storage_settings(std::move(storage_settings_))
+    , is_remote(is_remote_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -67,11 +71,10 @@ void StorageHiveCluster::read(
     size_t max_block_size_,
     unsigned num_streams_)
 {
-    auto query_kind = context_->getClientInfo().query_kind;
 
     auto policy_name = context_->getSettings().getString("hive_cluster_task_iterate_policy");
     // first stage. create remote executors pipeline
-    if (query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
+    if (is_remote)
     {
         auto iterate_callback_builder = HiveSourceCollectCallbackFactory::instance().getCallback(policy_name);
         if (!iterate_callback_builder)
@@ -100,6 +103,8 @@ void StorageHiveCluster::read(
         Pipes pipes;
         const bool add_agg_info = processed_stage_ == QueryProcessingStage::WithMergeableState;
 
+        auto query_str = queryToString(rewriteQuery(query_info_.query));
+
         for (const auto & replicas : cluster->getShardsAddresses())
         {
             for (const auto & node : replicas)
@@ -119,12 +124,12 @@ void StorageHiveCluster::read(
                 auto task_iter_callback = std::make_shared<TaskIterator>([node]() { return node.host_name; });
                 auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
                     connection,
-                    queryToString(query_info_.original_query),
+                    query_str,
                     header,
                     context_,
                     nullptr,
                     scalars,
-                    Tables(),
+                    context_->getExternalTables(),
                     processed_stage_,
                     RemoteQueryExecutor::Extension{.task_iterator = (*iterate_callback_builder)->buildCollectCallback(node)});
                 pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, add_agg_info, false));
@@ -205,6 +210,45 @@ void StorageHiveCluster::alter(const AlterCommands & params, ContextPtr local_co
     params.apply(new_metadata, local_context);
     DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
     setInMemoryMetadata(new_metadata);
+}
+
+/// Replace the table( or table function) with new table function `hiveClusterLocalShard`, so the remote node
+/// will use Context::getReadTaskCallback() to get assigned tasks from this node.
+ASTPtr StorageHiveCluster::rewriteQuery(const ASTPtr & query)
+{
+    auto select_query_ref = query->clone();
+    auto * select_query = select_query_ref->as<ASTSelectQuery>();
+
+
+    auto table_func = std::make_shared<ASTFunction>();
+    table_func->name = TableFunctionHivClusterLocalShard::name;
+    table_func->arguments = std::make_shared<ASTExpressionList>();
+    table_func->children.push_back(table_func->arguments);
+
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(cluster_name)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_metastore_url)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_database)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_table)));
+
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    WriteBufferFromOwnString struct_buf;
+    int i = 0;
+    for (const auto & name_and_type : metadata_snapshot->getColumns().getAllPhysical())
+    {
+        if (i)
+            struct_buf << ",";
+        struct_buf << name_and_type.name << " " << name_and_type.type->getName();
+        i++;
+    }
+    auto hash_table_structure = std::make_shared<ASTLiteral>(struct_buf.str());
+    table_func->arguments->children.push_back(hash_table_structure);
+
+    auto partition_key = std::make_shared<ASTLiteral>(queryToString(partition_by_ast));
+    table_func->arguments->children.push_back(partition_key);
+
+    auto table_function_ast = table_func->clone();
+    select_query->addTableFunction(table_function_ast);
+    return select_query_ref;
 }
 
 void registerStorageHiveCluster(StorageFactory & factory_)

@@ -1,5 +1,6 @@
 #pragma once
 #include <Common/config.h>
+
 #if USE_HIVE
 #include <Interpreters/Context.h>
 #include <Interpreters/ExpressionAnalyzer.h>
@@ -35,7 +36,8 @@ public:
         const String & comment_,
         const ASTPtr & partition_by_ast_,
         std::unique_ptr<HiveSettings> storage_settings_,
-        ContextPtr context_);
+        ContextPtr context_,
+        bool is_remote_);
 
     String getName() const override { return "HiveCluster"; }
     bool supportsIndexForIn() const override { return true; }
@@ -48,7 +50,7 @@ public:
         return true;
     }
 
-    bool isRemote() const override { return true; }
+    bool isRemote() const override { return is_remote; }
 
     void read(
         QueryPlan & query_plan_,
@@ -76,7 +78,13 @@ private:
 
     std::shared_ptr<HiveSettings> storage_settings;
 
+    /// It's false when it's a storage instance created by table function 'hiveClusterLocalShard'
+    /// and in the read() use Context::getReadTaskCallback() to get tasks from the initiator node
+    bool is_remote;
+
     Poco::Logger * logger = &Poco::Logger::get("StorageHiveCluster");
+
+    ASTPtr rewriteQuery(const ASTPtr & original_query);
 };
 }
 
