@@ -240,8 +240,8 @@ ASTPtr StorageHiveCluster::rewriteQuery(const ASTPtr & query)
         struct_buf << name_and_type.name << " " << name_and_type.type->getName();
         i++;
     }
-    auto hash_table_structure = std::make_shared<ASTLiteral>(struct_buf.str());
-    table_func->arguments->children.push_back(hash_table_structure);
+    auto table_structure = std::make_shared<ASTLiteral>(struct_buf.str());
+    table_func->arguments->children.push_back(table_structure);
 
     auto partition_key = std::make_shared<ASTLiteral>(queryToString(partition_by_ast));
     table_func->arguments->children.push_back(partition_key);
@@ -291,7 +291,8 @@ void registerStorageHiveCluster(StorageFactory & factory_)
                 args.comment,
                 partition_by->ptr(),
                 std::move(hive_settings),
-                args.getContext());
+                args.getContext(),
+                true);
         },
         StorageFactory::StorageFeatures{
             .supports_settings = true,
