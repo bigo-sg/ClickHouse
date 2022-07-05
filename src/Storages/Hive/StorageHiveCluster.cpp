@@ -1,21 +1,25 @@
 #include <Storages/Hive/StorageHiveCluster.h>
 #if USE_HIVE
 #include <algorithm>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <Client/IConnections.h>
 #include <Interpreters/evaluateConstantExpression.h>
 #include <Interpreters/Cluster.h>
 #include <Interpreters/InterpreterSelectQuery.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Parsers/ASTCreateQuery.h>
+#include <Parsers/ASTFunction.h>
 #include <Parsers/queryToString.h>
 #include <Processors/Sources/RemoteSource.h>
+#include <Processors/QueryPlan/QueryPlan.h>
 #include <QueryPipeline/RemoteQueryExecutor.h>
+#include <Storages/AlterCommands.h>
 #include <Storages/Hive/HiveSettings.h>
-#include <Storages/Hive/IHiveTaskPolicy.h>
-#include <Storages/Hive/HiveTaskPolicyFactory.h>
+#include <Storages/Hive/HiveSourceTask.h>
 #include <Storages/Hive/StorageHive.h>
 #include <Storages/StorageFactory.h>
+#include <Storages/AlterCommands.h>
+#include <TableFunctions/Hive/TableFunctionHiveCluster.h>
 namespace DB
 {
 
@@ -23,6 +27,7 @@ namespace ErrorCodes
 {
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int BAD_ARGUMENTS;
+    extern const int NOT_IMPLEMENTED;
 }
 
 StorageHiveCluster::StorageHiveCluster(
@@ -36,7 +41,8 @@ StorageHiveCluster::StorageHiveCluster(
     const String & comment_,
     const ASTPtr & partition_by_ast_,
     std::unique_ptr<HiveSettings> storage_settings_,
-    ContextPtr context_)
+    ContextPtr context_,
+    bool is_remote_)
     : IStorage(table_id_)
     , WithContext(context_)
     , cluster_name(cluster_name_)
@@ -45,6 +51,7 @@ StorageHiveCluster::StorageHiveCluster(
     , hive_table(hive_table_)
     , partition_by_ast(partition_by_ast_)
     , storage_settings(std::move(storage_settings_))
+    , is_remote(is_remote_)
 {
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
@@ -53,26 +60,27 @@ StorageHiveCluster::StorageHiveCluster(
     setInMemoryMetadata(storage_metadata);
 }
 
-Pipe StorageHiveCluster::read(
+void StorageHiveCluster::read(
+    QueryPlan & query_plan_,
     const Names & column_names_,
-    const StorageMetadataPtr & metadata_snapshot_,
+    const StorageSnapshotPtr & metadata_snapshot_,
     SelectQueryInfo & query_info_,
     ContextPtr context_,
     QueryProcessingStage::Enum processed_stage_,
     size_t max_block_size_,
     unsigned num_streams_)
 {
-    auto query_kind = context_->getClientInfo().query_kind;
 
     auto policy_name = context_->getSettings().getString("hive_cluster_task_iterate_policy");
     // first stage. create remote executors pipeline
-    if (query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
+    if (is_remote)
     {
-        auto iterate_callback_builder = HiveTaskPolicyFactory::instance().getIterateCallback(policy_name);
+        auto iterate_callback_builder = HiveSourceCollectCallbackFactory::instance().getCallback(policy_name);
         if (!iterate_callback_builder)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive task policy : {}", policy_name);
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive source files collect policy : {}", policy_name);
 
-        IHiveTaskIterateCallback::Arguments args
+
+        IHiveSourceFilesCollectCallback::Arguments args
             = {.cluster_name = cluster_name,
                .storage_settings = storage_settings,
                .columns = getInMemoryMetadata().getColumns(),
@@ -85,7 +93,7 @@ Pipe StorageHiveCluster::read(
                .num_streams = num_streams_
 
             };
-        iterate_callback_builder->setupArgs(args);
+        (*iterate_callback_builder)->initialize(args);
 
         auto cluster = context_->getCluster(cluster_name)->getClusterWithReplicasAsShards(context_->getSettings());
 
@@ -94,6 +102,8 @@ Pipe StorageHiveCluster::read(
         Pipes pipes;
         const bool add_agg_info = processed_stage_ == QueryProcessingStage::WithMergeableState;
 
+        auto query_str = queryToString(rewriteQuery(query_info_.query));
+
         for (const auto & replicas : cluster->getShardsAddresses())
         {
             for (const auto & node : replicas)
@@ -101,7 +111,7 @@ Pipe StorageHiveCluster::read(
                 auto connection = std::make_shared<Connection>(
                     node.host_name,
                     node.port,
-                    context_->getGlobalContext()->getCurrentDatabase(),
+                    context_->getCurrentDatabase(),
                     node.user,
                     node.password,
                     node.cluster,
@@ -113,29 +123,27 @@ Pipe StorageHiveCluster::read(
                 auto task_iter_callback = std::make_shared<TaskIterator>([node]() { return node.host_name; });
                 auto remote_query_executor = std::make_shared<RemoteQueryExecutor>(
                     connection,
-                    queryToString(query_info_.query),
+                    query_str,
                     header,
                     context_,
                     nullptr,
                     scalars,
-                    Tables(),
+                    context_->getExternalTables(),
                     processed_stage_,
-                    RemoteQueryExecutor::Extension{.task_iterator = iterate_callback_builder->buildCallback(node)});
+                    RemoteQueryExecutor::Extension{.task_iterator = (*iterate_callback_builder)->buildCollectCallback(node)});
                 pipes.emplace_back(std::make_shared<RemoteSource>(remote_query_executor, add_agg_info, false));
             }
         }
-        metadata_snapshot_->check(column_names_, getVirtuals(), getStorageID());
-        return Pipe::unitePipes(std::move(pipes));
+        metadata_snapshot_->check(column_names_);
+        readFromPipe(query_plan_, Pipe::unitePipes(std::move(pipes)), column_names_, metadata_snapshot_, query_info_, context_, getName());
+        return;
     }
 
-    auto files_collector = HiveTaskPolicyFactory::instance().getFilesCollector(policy_name);
-    if (!files_collector)
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive task policy : {}", policy_name);
+    auto files_collector_ref = HiveSourceCollectorFactory::instance().getCollector(policy_name);
+    if (!files_collector_ref)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown hive source files collect policy : {}", policy_name);
     String task_resp = context_->getReadTaskCallback()();
-    HiveTaskPackage task_package;
-    stringToPackage(task_resp, task_package);
-    files_collector->setupCallbackData(task_package.data);
-    IHiveTaskFilesCollector::Arguments args
+    IHiveSourceFilesCollector::Arguments args
         = {.context = context_,
            .query_info = &query_info_,
            .hive_metastore_url = hive_metastore_url,
@@ -144,37 +152,102 @@ Pipe StorageHiveCluster::read(
            .storage_settings = storage_settings,
            .columns = getInMemoryMetadata().getColumns(),
            .num_streams = num_streams_,
-           .partition_by_ast = partition_by_ast};
-    files_collector->setupArgs(args);
-    auto files_collector_builder = [&files_collector]() { return files_collector; };
+           .partition_by_ast = partition_by_ast,
+           .callback_data = task_resp};
+    auto files_collector = *files_collector_ref;
+    files_collector->initialize(args);
+    auto files_collector_builder = [files_collector]() { return files_collector; };
 
     // second stage, create local hive storage reading pipeline
     auto local_storage_settings = std::make_unique<HiveSettings>();
     local_storage_settings->applyChanges(*storage_settings);
-    auto metadata = getInMemoryMetadataPtr();
-    auto storage_hive = StorageHive::create(
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    auto local_hive_storage = std::make_shared<StorageHive>(
         hive_metastore_url,
         hive_database,
         hive_table,
         StorageID("StorageHiveCluster", hive_database + "_" + hive_table),
-        metadata->columns,
-        metadata->constraints,
-        metadata->comment,
+        metadata_snapshot->columns,
+        metadata_snapshot->constraints,
+        metadata_snapshot->comment,
         partition_by_ast,
         std::move(local_storage_settings),
         context_,
-        std::make_shared<HiveTaskFilesCollectorBuilder>(files_collector_builder));
-
-    return storage_hive->read(column_names_, metadata_snapshot_, query_info_, context_, processed_stage_, max_block_size_, num_streams_);
+        std::make_shared<HiveSourceFilesCollectorBuilder>(files_collector_builder),
+        true);
+    query_plan_.addStorageHolder(local_hive_storage);
+    auto pipe = local_hive_storage->read(column_names_, metadata_snapshot_, query_info_, context_, processed_stage_, max_block_size_, num_streams_);
+    readFromPipe(query_plan_, std::move(pipe), column_names_, metadata_snapshot_, query_info_, context_, getName());
 }
 
 QueryProcessingStage::Enum StorageHiveCluster::getQueryProcessingStage(
-    ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageMetadataPtr &, SelectQueryInfo &) const
+    ContextPtr context_, QueryProcessingStage::Enum to_stage_, const StorageSnapshotPtr &, SelectQueryInfo &) const
 {
     if (context_->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY)
         if (to_stage_ >= QueryProcessingStage::Enum::WithMergeableState)
             return QueryProcessingStage::Enum::WithMergeableState;
     return QueryProcessingStage::Enum::FetchColumns;
+}
+
+void StorageHiveCluster::checkAlterIsPossible(const AlterCommands & commands, ContextPtr /*local_context*/) const
+{
+    for (const auto & command : commands)
+    {
+        if (command.type != AlterCommand::Type::ADD_COLUMN && command.type != AlterCommand::Type::MODIFY_COLUMN
+            && command.type != AlterCommand::Type::DROP_COLUMN && command.type != AlterCommand::Type::COMMENT_COLUMN
+            && command.type != AlterCommand::Type::COMMENT_TABLE)
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Alter of type '{}' is not supported by storage {}", command.type, getName());
+    }
+}
+
+void StorageHiveCluster::alter(const AlterCommands & params, ContextPtr local_context, AlterLockHolder & /*alter_lock_holder*/)
+{
+    auto table_id = getStorageID();
+    checkAlterIsPossible(params, local_context);
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    StorageInMemoryMetadata new_metadata = *metadata_snapshot;
+    params.apply(new_metadata, local_context);
+    DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
+    setInMemoryMetadata(new_metadata);
+}
+
+/// Replace the table( or table function) with new table function `hiveClusterLocalShard`, so the remote node
+/// will use Context::getReadTaskCallback() to get assigned tasks from this node.
+ASTPtr StorageHiveCluster::rewriteQuery(const ASTPtr & query)
+{
+    auto select_query_ref = query->clone();
+    auto * select_query = select_query_ref->as<ASTSelectQuery>();
+
+
+    auto table_func = std::make_shared<ASTFunction>();
+    table_func->name = TableFunctionHivClusterLocalShard::name;
+    table_func->arguments = std::make_shared<ASTExpressionList>();
+    table_func->children.push_back(table_func->arguments);
+
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(cluster_name)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_metastore_url)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_database)));
+    table_func->arguments->children.push_back(std::make_shared<ASTLiteral>(Field(hive_table)));
+
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    WriteBufferFromOwnString struct_buf;
+    int i = 0;
+    for (const auto & name_and_type : metadata_snapshot->getColumns().getAllPhysical())
+    {
+        if (i)
+            struct_buf << ",";
+        struct_buf << name_and_type.name << " " << name_and_type.type->getName();
+        i++;
+    }
+    auto table_structure = std::make_shared<ASTLiteral>(struct_buf.str());
+    table_func->arguments->children.push_back(table_structure);
+
+    auto partition_key = std::make_shared<ASTLiteral>(queryToString(partition_by_ast));
+    table_func->arguments->children.push_back(partition_key);
+
+    auto table_function_ast = table_func->clone();
+    select_query->addTableFunction(table_function_ast);
+    return select_query_ref;
 }
 
 void registerStorageHiveCluster(StorageFactory & factory_)
@@ -206,7 +279,7 @@ void registerStorageHiveCluster(StorageFactory & factory_)
             const String & hive_database = engine_args[2]->as<ASTLiteral &>().value.safeGet<String>();
             const String & hive_table = engine_args[3]->as<ASTLiteral &>().value.safeGet<String>();
 
-            return StorageHiveCluster::create(
+            return std::make_shared<StorageHiveCluster>(
                 cluster_name,
                 hive_metastore_url,
                 hive_database,
@@ -217,7 +290,8 @@ void registerStorageHiveCluster(StorageFactory & factory_)
                 args.comment,
                 partition_by->ptr(),
                 std::move(hive_settings),
-                args.getContext());
+                args.getContext(),
+                true);
         },
         StorageFactory::StorageFeatures{
             .supports_settings = true,

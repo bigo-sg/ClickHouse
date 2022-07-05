@@ -15,12 +15,15 @@ class AccessRights
 {
 public:
     AccessRights();
-    AccessRights(const AccessFlags & access);
+    explicit AccessRights(const AccessFlags & access);
+    explicit AccessRights(const AccessRightsElement & element);
+    explicit AccessRights(const AccessRightsElements & elements);
+
     ~AccessRights();
     AccessRights(const AccessRights & src);
     AccessRights & operator =(const AccessRights & src);
-    AccessRights(AccessRights && src);
-    AccessRights & operator =(AccessRights && src);
+    AccessRights(AccessRights && src) noexcept;
+    AccessRights & operator =(AccessRights && src) noexcept;
 
     bool isEmpty() const;
 

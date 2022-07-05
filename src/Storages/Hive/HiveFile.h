@@ -7,40 +7,19 @@
 #include <memory>
 
 #include <boost/algorithm/string/join.hpp>
+#include <arrow/adapters/orc/adapter.h>
+#include <parquet/arrow/reader.h>
 
 #include <Core/Field.h>
 #include <Core/Block.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <Storages/Hive/HiveSettings.h>
+#include <Storages/HDFS/ReadBufferFromHDFS.h>
 
 namespace orc
 {
-class Reader;
 class Statistics;
 class ColumnStatistics;
-}
-
-namespace parquet
-{
-class ParquetFileReader;
-namespace arrow
-{
-    class FileReader;
-}
-}
-
-namespace arrow
-{
-namespace io
-{
-    class RandomAccessFile;
-}
-namespace fs
-{
-    class FileSystem;
-}
-
-class Buffer;
 }
 
 namespace DB
@@ -75,6 +54,10 @@ public:
     inline static const String MR_PARQUET_INPUT_FORMAT = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
     inline static const String AVRO_INPUT_FORMAT = "org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat";
     inline static const String ORC_INPUT_FORMAT = "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat";
+    inline static const String CH_HIVE_TEXT_FORAMT = "HiveText";
+    inline static const String CH_ORC_FORAMT = "ORC";
+    inline static const String CH_PARQUET_FORMAT = "Parquet";
+    inline static const String CH_AVRO_FORMAT = "Avro";
     inline static const std::map<String, FileFormat> VALID_HDFS_FORMATS = {
         {RCFILE_INPUT_FORMAT, FileFormat::RC_FILE},
         {TEXT_INPUT_FORMAT, FileFormat::TEXT},
@@ -84,6 +67,14 @@ public:
         {MR_PARQUET_INPUT_FORMAT, FileFormat::PARQUET},
         {AVRO_INPUT_FORMAT, FileFormat::AVRO},
         {ORC_INPUT_FORMAT, FileFormat::ORC},
+    };
+
+    inline static const std::map<String, String> VALID_CH_FORMATS = {
+        {TEXT_INPUT_FORMAT, CH_HIVE_TEXT_FORAMT},
+        {LZO_TEXT_INPUT_FORMAT, CH_HIVE_TEXT_FORAMT},
+        {AVRO_INPUT_FORMAT, CH_AVRO_FORMAT},
+        {MR_PARQUET_INPUT_FORMAT, CH_PARQUET_FORMAT},
+        {ORC_INPUT_FORMAT, CH_ORC_FORAMT},
     };
 
     static inline bool isFormatClass(const String & format_class) { return VALID_HDFS_FORMATS.count(format_class) > 0; }
@@ -96,19 +87,49 @@ public:
         throw Exception("Unsupported hdfs file format " + format_class, ErrorCodes::NOT_IMPLEMENTED);
     }
 
-    static String toHiveFileFormat(const String & format_class);
+    static inline String toCHFormat(const FileFormat & format)
+    {
+        if (format == FileFormat::TEXT || format == FileFormat::LZO_TEXT)
+        {
+            return CH_HIVE_TEXT_FORAMT;
+        }
+        else if (FileFormat::AVRO == format)
+        {
+            return CH_AVRO_FORMAT;
+        }
+        else if (FileFormat::PARQUET == format)
+        {
+            return CH_PARQUET_FORMAT;
+        }
+        else if (FileFormat::ORC == format)
+        {
+            return CH_ORC_FORAMT;
+        }
+        else
+        {
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Unsupported hdfs file format {}", String(magic_enum::enum_name(format)));
+        }
+    }
+
+    static String toCHFormat(const String & hive_format_class)
+    {
+        const auto iter = VALID_CH_FORMATS.find(hive_format_class);
+        if (iter == VALID_CH_FORMATS.end())
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Unsupported hdfs file format: {}", hive_format_class);
+        return iter->second;
+    }
 
     IHiveFile(
-        const FieldVector & values_,
+        const FieldVector & partition_values_,
         const String & namenode_url_,
         const String & path_,
         UInt64 last_modify_time_,
         size_t size_,
         const NamesAndTypesList & index_names_and_types_,
         const std::shared_ptr<HiveSettings> & storage_settings_,
-        ContextPtr context_)
+        const ContextPtr & context_)
         : WithContext(context_)
-        , partition_values(values_)
+        , partition_values(partition_values_)
         , namenode_url(namenode_url_)
         , path(path_)
         , last_modify_time(last_modify_time_)
@@ -119,124 +140,135 @@ public:
     }
     virtual ~IHiveFile() = default;
 
-    virtual FileFormat getFormat() const = 0;
+    String getFormatName() const { return String(magic_enum::enum_name(getFormat())); }
+    const String & getPath() const { return path; }
+    UInt64 getLastModifiedTimestamp() const { return last_modify_time; }
+    size_t getSize() const { return size; }
+    std::optional<size_t> getRows();
+    const FieldVector & getPartitionValues() const { return partition_values; }
+    const NamesAndTypesList & getIndexNamesAndTypes() const { return index_names_and_types; }
+    const String & getNamenodeUrl() { return namenode_url; }
+    MinMaxIndexPtr getMinMaxIndex() const { return file_minmax_idx; }
+    const std::vector<MinMaxIndexPtr> & getSubMinMaxIndexes() const { return split_minmax_idxes; }
 
-    virtual String getName() const = 0;
+    const std::unordered_set<int> & getSkipSplits() const { return skip_splits; }
+    void setSkipSplits(const std::unordered_set<int> & skip_splits_) { skip_splits = skip_splits_; }
 
-    virtual String getPath() const { return path; }
-
-    virtual FieldVector getPartitionValues() const { return partition_values; }
-
-    virtual String getNamenodeUrl() { return namenode_url; }
-
-    virtual bool hasMinMaxIndex() const { return false; }
-
-    virtual void loadMinMaxIndex()
-    {
-        throw Exception("Method loadMinMaxIndex is not supported by hive file:" + getName(), ErrorCodes::NOT_IMPLEMENTED);
-    }
-
-    virtual MinMaxIndexPtr getMinMaxIndex() const { return minmax_idx; }
-
-    // Do hive file contains sub-file level minmax index?
-    virtual bool hasSubMinMaxIndex() const { return false; }
-
-    virtual void loadSubMinMaxIndex()
-    {
-        throw Exception("Method loadSubMinMaxIndex is not supported by hive file:" + getName(), ErrorCodes::NOT_IMPLEMENTED);
-    }
-
-    virtual const std::vector<MinMaxIndexPtr> & getSubMinMaxIndexes() const { return sub_minmax_idxes; }
-
-    virtual void setSkipSplits(const std::set<int> & splits) { skip_splits = splits; }
-
-    virtual const std::set<int> & getSkipSplits() const { return skip_splits; }
-
-    inline std::string describeMinMaxIndex(const MinMaxIndexPtr & idx) const
+    String describeMinMaxIndex(const MinMaxIndexPtr & idx) const
     {
         if (!idx)
             return "";
-
-        std::vector<std::string> strs;
+        std::vector<String> strs;
         strs.reserve(index_names_and_types.size());
         size_t i = 0;
         for (const auto & name_type : index_names_and_types)
-        {
             strs.push_back(name_type.name + ":" + name_type.type->getName() + idx->hyperrectangle[i++].toString());
-        }
         return boost::algorithm::join(strs, "|");
     }
 
-    inline UInt64 getLastModTs() const { return last_modify_time; }
-    inline size_t getSize() const { return size; }
+    virtual FileFormat getFormat() const = 0;
+
+    /// If hive query could use file level minmax index?
+    virtual bool useFileMinMaxIndex() const { return false; }
+    void loadFileMinMaxIndex();
+
+    /// If hive query could use sub-file level minmax index?
+    virtual bool useSplitMinMaxIndex() const { return false; }
+    void loadSplitMinMaxIndexes();
 
 protected:
+    virtual void loadFileMinMaxIndexImpl()
+    {
+        throw Exception("Method loadFileMinMaxIndexImpl is not supported by hive file:" + getFormatName(), ErrorCodes::NOT_IMPLEMENTED);
+    }
+
+    virtual void loadSplitMinMaxIndexesImpl()
+    {
+        throw Exception("Method loadSplitMinMaxIndexesImpl is not supported by hive file:" + getFormatName(), ErrorCodes::NOT_IMPLEMENTED);
+    }
+
+    virtual std::optional<size_t> getRowsImpl() = 0;
+
     FieldVector partition_values;
     String namenode_url;
     String path;
     UInt64 last_modify_time;
     size_t size;
+    std::optional<size_t> rows;
+
     NamesAndTypesList index_names_and_types;
-    MinMaxIndexPtr minmax_idx;
-    std::vector<MinMaxIndexPtr> sub_minmax_idxes;
-    std::set<int> skip_splits; // skip splits for this file after applying minmax index (if any)
+
+    MinMaxIndexPtr file_minmax_idx;
+    std::atomic<bool> file_minmax_idx_loaded{false};
+
+    std::vector<MinMaxIndexPtr> split_minmax_idxes;
+    std::atomic<bool> split_minmax_idxes_loaded{false};
+
+    /// Skip splits for this file after applying minmax index (if any)
+    std::unordered_set<int> skip_splits;
     std::shared_ptr<HiveSettings> storage_settings;
 };
 
 using HiveFilePtr = std::shared_ptr<IHiveFile>;
 using HiveFiles = std::vector<HiveFilePtr>;
+using HiveFilesCache = LRUCache<String, IHiveFile>;
+using HiveFilesCachePtr = std::shared_ptr<HiveFilesCache>;
 
 class HiveTextFile : public IHiveFile
 {
 public:
     HiveTextFile(
-        const FieldVector & values_,
+        const FieldVector & partition_values_,
         const String & namenode_url_,
         const String & path_,
         UInt64 last_modify_time_,
         size_t size_,
         const NamesAndTypesList & index_names_and_types_,
         const std::shared_ptr<HiveSettings> & hive_settings_,
-        ContextPtr context_)
-        : IHiveFile(values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
+        const ContextPtr & context_)
+        : IHiveFile(partition_values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
     {
     }
 
-    virtual FileFormat getFormat() const override { return FileFormat::TEXT; }
-    virtual String getName() const override { return "TEXT"; }
+    FileFormat getFormat() const override { return FileFormat::TEXT; }
+
+private:
+    std::optional<size_t> getRowsImpl() override { return {}; }
 };
 
-class HiveOrcFile : public IHiveFile
+class HiveORCFile : public IHiveFile
 {
 public:
-    HiveOrcFile(
-        const FieldVector & values_,
+    HiveORCFile(
+        const FieldVector & partition_values_,
         const String & namenode_url_,
         const String & path_,
         UInt64 last_modify_time_,
         size_t size_,
         const NamesAndTypesList & index_names_and_types_,
         const std::shared_ptr<HiveSettings> & hive_settings_,
-        ContextPtr context_)
-        : IHiveFile(values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
+        const ContextPtr & context_)
+        : IHiveFile(partition_values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
     {
     }
 
-    virtual FileFormat getFormat() const override { return FileFormat::ORC; }
-    virtual String getName() const override { return "ORC"; }
-    virtual bool hasMinMaxIndex() const override;
-    virtual void loadMinMaxIndex() override;
+    FileFormat getFormat() const override { return FileFormat::ORC; }
+    bool useFileMinMaxIndex() const override;
+    bool useSplitMinMaxIndex() const override;
 
-    virtual bool hasSubMinMaxIndex() const override;
-    virtual void loadSubMinMaxIndex() override;
+private:
+    static Range buildRange(const orc::ColumnStatistics * col_stats);
 
-protected:
-    virtual std::unique_ptr<MinMaxIndex> buildMinMaxIndex(const orc::Statistics * statistics);
-    virtual Range buildRange(const orc::ColumnStatistics * col_stats);
-    virtual void prepareReader();
-    virtual void prepareColumnMapping();
+    void loadFileMinMaxIndexImpl() override;
+    void loadSplitMinMaxIndexesImpl() override;
+    std::unique_ptr<MinMaxIndex> buildMinMaxIndex(const orc::Statistics * statistics);
+    void prepareReader();
+    void prepareColumnMapping();
 
-    std::shared_ptr<orc::Reader> reader;
+    std::optional<size_t> getRowsImpl() override;
+
+    std::unique_ptr<ReadBufferFromHDFS> in;
+    std::unique_ptr<arrow::adapters::orc::ORCFileReader> reader;
     std::map<String, size_t> orc_column_positions;
 };
 
@@ -244,42 +276,63 @@ class HiveParquetFile : public IHiveFile
 {
 public:
     HiveParquetFile(
-        const FieldVector & values_,
+        const FieldVector & partition_values_,
         const String & namenode_url_,
         const String & path_,
         UInt64 last_modify_time_,
         size_t size_,
         const NamesAndTypesList & index_names_and_types_,
         const std::shared_ptr<HiveSettings> & hive_settings_,
-        ContextPtr context_)
-        : IHiveFile(values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
+        const ContextPtr & context_)
+        : IHiveFile(partition_values_, namenode_url_, path_, last_modify_time_, size_, index_names_and_types_, hive_settings_, context_)
     {
     }
 
-    virtual FileFormat getFormat() const override { return FileFormat::PARQUET; }
-    virtual String getName() const override { return "PARQUET"; }
+    FileFormat getFormat() const override { return FileFormat::PARQUET; }
+    bool useSplitMinMaxIndex() const override;
 
-    virtual bool hasSubMinMaxIndex() const override;
-    virtual void loadSubMinMaxIndex() override;
+private:
+    void loadSplitMinMaxIndexesImpl() override;
+    std::optional<size_t> getRowsImpl() override;
+    void prepareReader();
 
-protected:
-    virtual void prepareReader();
-
-    std::shared_ptr<arrow::fs::FileSystem> fs;
-    std::shared_ptr<parquet::ParquetFileReader> reader;
+    std::unique_ptr<ReadBufferFromHDFS> in;
+    std::unique_ptr<parquet::arrow::FileReader> reader;
     std::map<String, size_t> parquet_column_positions;
 };
 
-HiveFilePtr createHiveFile(
-    const String & format_name,
-    const FieldVector & fields,
-    const String & namenode_url,
-    const String & path,
-    UInt64 ts,
-    size_t size,
-    const NamesAndTypesList & index_names_and_types,
-    const std::shared_ptr<HiveSettings> & hive_settings,
-    ContextPtr context);
+class HiveFileFactory : public boost::noncopyable
+{
+public:
+    using HiveFileCreator = std::function<DB::HiveFilePtr(
+        const FieldVector & /*fields*/,
+        const String & /*namenode_url*/,
+        const String & /*path*/,
+        UInt64 /*ts*/,
+        size_t /*size*/,
+        const NamesAndTypesList & /*index_names_and_types*/,
+        const std::shared_ptr<HiveSettings> & /*hive_settings*/,
+        ContextPtr /*context*/)>;
+    static HiveFileFactory & instance();
+
+    HiveFilePtr createFile(
+        const String & format_name,
+        const FieldVector & fields,
+        const String & namenode_url,
+        const String & path,
+        UInt64 ts,
+        size_t size,
+        const NamesAndTypesList & index_names_and_types,
+        const std::shared_ptr<HiveSettings> & hive_settings,
+        ContextPtr context);
+
+protected :
+    HiveFileFactory() = default;
+
+    static void registerHiveFileCreators(HiveFileFactory & instance);
+
+    std::map<String, HiveFileCreator> creators;
+};
 
 }
 

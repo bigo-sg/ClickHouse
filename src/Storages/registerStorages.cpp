@@ -28,6 +28,9 @@ void registerStorageGenerateRandom(StorageFactory & factory);
 void registerStorageExecutable(StorageFactory & factory);
 void registerStorageWindowView(StorageFactory & factory);
 
+// MEILISEARCH
+void registerStorageMeiliSearch(StorageFactory& factory);
+
 #if USE_AWS_S3
 void registerStorageS3(StorageFactory & factory);
 void registerStorageCOS(StorageFactory & factory);
@@ -106,6 +109,9 @@ void registerStorages()
     registerStorageExecutable(factory);
     registerStorageWindowView(factory);
 
+    // MEILISEARCH
+    registerStorageMeiliSearch(factory);
+
     #if USE_AWS_S3
     registerStorageS3(factory);
     registerStorageCOS(factory);
@@ -134,11 +140,11 @@ void registerStorages()
     registerStorageKafka(factory);
     #endif
 
-#if USE_FILELOG
+    #if USE_FILELOG
     registerStorageFileLog(factory);
-#endif
+    #endif
 
-#if USE_AMQPCPP
+    #if USE_AMQPCPP
     registerStorageRabbitMQ(factory);
     #endif
 

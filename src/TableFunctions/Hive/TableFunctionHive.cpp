@@ -1,4 +1,5 @@
 #include <TableFunctions/Hive/TableFunctionHive.h>
+
 #if USE_HIVE
 #include <memory>
 #include <type_traits>
@@ -7,6 +8,7 @@
 #include <Parsers/ASTLiteral.h>
 #include <Parsers/ParserPartition.h>
 #include <Parsers/ExpressionListParsers.h>
+#include <Parsers/queryToString.h>
 #include <Parsers/parseQuery.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/evaluateConstantExpression.h>
@@ -14,7 +16,7 @@
 #include <Storages/Hive/StorageHive.h>
 #include <TableFunctions/TableFunctionFactory.h>
 #include <TableFunctions/parseColumnsListForTableFunction.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -42,11 +44,11 @@ namespace DB
         for (auto & arg : args)
             arg = evaluateConstantExpressionOrIdentifierAsLiteral(arg, context_);
 
-        hive_metastore_url = args[1]->as<ASTLiteral &>().value.safeGet<String>();
-        hive_database = args[2]->as<ASTLiteral &>().value.safeGet<String>();
-        hive_table = args[3]->as<ASTLiteral &>().value.safeGet<String>();
-        table_structure = args[4]->as<ASTLiteral &>().value.safeGet<String>();
-        partition_by_def = args[5]->as<ASTLiteral &>().value.safeGet<String>();
+        hive_metastore_url = args[0]->as<ASTLiteral &>().value.safeGet<String>();
+        hive_database = args[1]->as<ASTLiteral &>().value.safeGet<String>();
+        hive_table = args[2]->as<ASTLiteral &>().value.safeGet<String>();
+        table_structure = args[3]->as<ASTLiteral &>().value.safeGet<String>();
+        partition_by_def = args[4]->as<ASTLiteral &>().value.safeGet<String>();
 
         actual_columns = parseColumnsListFromString(table_structure, context_);
     }
@@ -68,7 +70,7 @@ namespace DB
             settings.max_query_size,
             settings.max_parser_depth);
         StoragePtr storage;
-        storage = StorageHive::create(
+        storage = std::make_shared<StorageHive>(
             hive_metastore_url,
             hive_database,
             hive_table,

@@ -16,7 +16,7 @@
 #include <Common/ColumnsHashing.h>
 #include <Common/HashTable/HashMap.h>
 #include <Common/HashTable/FixedHashMap.h>
-#include <Common/RWLock.h>
+#include <Storages/TableLockHolder.h>
 
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnFixedString.h>
@@ -61,6 +61,9 @@ public:
 
     template <bool use_flags, bool multiple_disjuncts, typename T>
     void setUsed(const T & f);
+
+    template <bool use_flags, bool multiple_disjunct>
+    void setUsed(const Block * block, size_t row_num, size_t offset);
 
     template <bool use_flags, bool multiple_disjuncts, typename T>
     bool getUsed(const T & f);
@@ -336,7 +339,7 @@ public:
 
     /// We keep correspondence between used_flags and hash table internal buffer.
     /// Hash table cannot be modified during HashJoin lifetime and must be protected with lock.
-    void setLock(RWLockImpl::LockHolder rwlock_holder)
+    void setLock(TableLockHolder rwlock_holder)
     {
         storage_join_lock = rwlock_holder;
     }
@@ -360,8 +363,6 @@ private:
     /// This join was created from StorageJoin and it is already filled.
     bool from_storage_join = false;
 
-    bool nullable_right_side; /// In case of LEFT and FULL joins, if use_nulls, convert right-side columns to Nullable.
-    bool nullable_left_side; /// In case of RIGHT and FULL joins, if use_nulls, convert left-side columns to Nullable.
     bool any_take_last_row; /// Overwrite existing values when encountering the same key again
     std::optional<TypeIndex> asof_type;
     ASOF::Inequality asof_inequality;
@@ -393,7 +394,7 @@ private:
 
     /// Should be set via setLock to protect hash table from modification from StorageJoin
     /// If set HashJoin instance is not available for modification (addJoinedBlock)
-    RWLockImpl::LockHolder storage_join_lock = nullptr;
+    TableLockHolder storage_join_lock = nullptr;
 
     void dataMapInit(MapsVariant &);
 

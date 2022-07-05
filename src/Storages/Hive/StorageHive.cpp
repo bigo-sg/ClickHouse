@@ -1,16 +1,14 @@
-#include <mutex>
+#include <optional>
 #include <Storages/Hive/StorageHive.h>
-#include "IHiveTaskPolicy.h"
-#include "SingleHiveTaskFilesCollector.h"
 
 #if USE_HIVE
 
-#include <fmt/core.h>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
+#include <fmt/core.h>
 #include <Poco/URI.h>
+#include <Common/logger_useful.h>
 
-#include <base/logger_useful.h>
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
 #include <Core/Field.h>
@@ -22,24 +20,27 @@
 #include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/TreeRewriter.h>
 #include <IO/ReadBufferFromString.h>
+#include <Disks/IO/ThreadPoolRemoteFSReader.h>
 #include <Storages/Cache/ExternalDataSourceCache.h>
 #include <Parsers/ASTExpressionList.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTFunction.h>
 #include <Parsers/ASTLiteral.h>
 #include <QueryPipeline/Pipe.h>
-#include <Processors/Sources/SourceWithProgress.h>
+#include <QueryPipeline/QueryPipeline.h>
+#include <Processors/ISource.h>
 #include <Processors/Formats/IInputFormat.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/Transforms/AddingDefaultsTransform.h>
+#include <Storages/AlterCommands.h>
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
+#include <Storages/HDFS/AsynchronousReadBufferFromHDFS.h>
 #include <Storages/Hive/HiveSettings.h>
 #include <Storages/Hive/StorageHiveMetadata.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/StorageFactory.h>
-#include <Storages/Hive/SingleHiveTaskFilesCollector.h>
-
-#include </usr/local/include/gperftools/profiler.h>
+#include <Storages/Hive/LocalHiveSourceTask.h>
+#include <DataTypes/NestedUtils.h>
 
 namespace DB
 {
@@ -49,16 +50,18 @@ namespace ErrorCodes
     extern const int NOT_IMPLEMENTED;
     extern const int BAD_ARGUMENTS;
     extern const int CANNOT_OPEN_FILE;
+    extern const int LOGICAL_ERROR;
+    extern const int THERE_IS_NO_COLUMN;
 }
 
-class StorageHiveSource : public SourceWithProgress, WithContext
+class StorageHiveSource : public ISource, WithContext
 {
 public:
     using FileFormat = StorageHive::FileFormat;
     struct SourcesInfo
     {
         HiveMetastoreClientPtr hive_metastore_client;
-        std::string database;
+        std::string database_name;
         std::string table_name;
         HiveFiles hive_files;
         NamesAndTypesList partition_name_types;
@@ -102,80 +105,148 @@ public:
         String hdfs_namenode_url_,
         String format_,
         String compression_method_,
-        Block header_block_,
         Block sample_block_,
         ContextPtr context_,
         UInt64 max_block_size_,
-        const Names & text_input_field_names_ = {})
-        : SourceWithProgress(getHeader(sample_block_, source_info_))
+        const StorageHive & storage_,
+        const Names & text_input_field_names_)
+        : ISource(getHeader(sample_block_, source_info_))
         , WithContext(context_)
         , source_info(std::move(source_info_))
-        , hdfs_namenode_url(hdfs_namenode_url_)
+        , hdfs_namenode_url(std::move(hdfs_namenode_url_))
         , format(std::move(format_))
-        , compression_method(compression_method_)
+        , compression_method(std::move(compression_method_))
         , max_block_size(max_block_size_)
-        , header_block(header_block_)
-        , sample_block(sample_block_)
-        , to_read_block(sample_block_)
+        , sample_block(std::move(sample_block_))
         , columns_description(getColumnsDescription(sample_block, source_info))
+        , storage(storage_)
         , text_input_field_names(text_input_field_names_)
         , format_settings(getFormatSettings(getContext()))
+        , read_settings(getContext()->getReadSettings())
     {
+        to_read_block = sample_block;
+
         /// Initialize to_read_block, which is used to read data from HDFS.
         for (const auto & name_type : source_info->partition_name_types)
         {
             if (to_read_block.has(name_type.name))
-            {
                 to_read_block.erase(name_type.name);
-            }
         }
-        if (!to_read_block.columns())
+
+        /// Apply read buffer prefetch for HiveText format, because it is read sequentially
+        if (read_settings.remote_fs_prefetch)
+            read_settings.remote_fs_prefetch = format == "HiveText";
+
+        /// Decide if we could generate blocks from partition values
+        /// Only for ORC or Parquet format file, we could get number of rows from metadata without scanning the whole file
+        generate_chunk_from_metadata = (format == "ORC" || format == "Parquet") && !to_read_block.columns();
+
+        /// Make sure to_read_block is not empty. Otherwise input format would always return empty chunk.
+        /// See issue: https://github.com/ClickHouse/ClickHouse/issues/37671
+        if (!generate_chunk_from_metadata && !to_read_block.columns())
         {
-            for (size_t i = 0; i < header_block.columns(); ++i)
+            const auto & metadata = storage.getInMemoryMetadataPtr();
+            for (const auto & column : metadata->getColumns().getAllPhysical())
             {
-                auto & col = header_block.getByPosition(i);
-                if (source_info->partition_name_types.contains(col.name))
-                    continue;
-                LOG_TRACE(&Poco::Logger::get("StorageHiveSource"), "insert column {}", col.name);
-                to_read_block.insert(0, col);
-                all_to_read_are_partition_columns = true;
-                break;
+                bool is_partition_column = false;
+                for (const auto & partition_column : source_info->partition_name_types)
+                {
+                    if (partition_column.name == column.name)
+                    {
+                        is_partition_column = true;
+                        break;
+                    }
+                }
+
+                if (!is_partition_column)
+                    to_read_block.insert(ColumnWithTypeAndName(column.type, column.name));
             }
         }
-        /// Initialize format settings
-        format_settings.hive_text.input_field_names = text_input_field_names;
+    }
+
+    FormatSettings updateFormatSettings(const HiveFilePtr & hive_file)
+    {
+        auto updated = format_settings;
+        if (format == "HiveText")
+        {
+            updated.hive_text.input_field_names = text_input_field_names;
+        }
+        else if (format == "ORC")
+        {
+            updated.orc.skip_stripes = hive_file->getSkipSplits();
+            updated.orc.case_insensitive_column_matching = true;
+            updated.orc.import_nested = true;
+        }
+        else if (format == "Parquet")
+        {
+            updated.parquet.skip_row_groups = hive_file->getSkipSplits();
+            updated.parquet.case_insensitive_column_matching = true;
+            updated.parquet.import_nested = true;
+        }
+        return updated;
     }
 
     String getName() const override { return "Hive"; }
 
     Chunk generate() override
     {
-        while (true)
+        while (!isCancelled())
         {
-            if (!reader)
+            bool need_next_file
+                = (!generate_chunk_from_metadata && !reader) || (generate_chunk_from_metadata && !current_file_remained_rows);
+            if (need_next_file)
             {
+                if (current_file_remained_rows)
+                {
+                    return generateChunkByPartitionKeys();
+                }
+
                 current_idx = source_info->next_uri_to_read.fetch_add(1);
                 if (current_idx >= source_info->hive_files.size())
                     return {};
 
-                const auto & curr_file = source_info->hive_files[current_idx];
-                current_path = curr_file->getPath();
+                current_file = source_info->hive_files[current_idx];
+                current_path = current_file->getPath();
+
+                /// This is the case that all columns to read are partition keys. We can construct const columns
+                /// directly without reading from hive files.
+                if (generate_chunk_from_metadata && current_file->getRows())
+                {
+                    current_file_remained_rows = *(current_file->getRows());
+                    return generateChunkFromMetadata();
+                }
 
                 String uri_with_path = hdfs_namenode_url + current_path;
                 auto compression = chooseCompressionMethod(current_path, compression_method);
                 std::unique_ptr<ReadBuffer> raw_read_buf;
                 try
                 {
-                    raw_read_buf = std::make_unique<ReadBufferFromHDFS>(
-                        hdfs_namenode_url, current_path, getContext()->getGlobalContext()->getConfigRef());
+                    auto get_raw_read_buf = [&]() -> std::unique_ptr<ReadBuffer>
+                    {
+                        auto buf = std::make_unique<ReadBufferFromHDFS>(
+                            hdfs_namenode_url, current_path, getContext()->getGlobalContext()->getConfigRef());
+
+                        bool thread_pool_read = read_settings.remote_fs_method == RemoteFSReadMethod::threadpool;
+                        if (thread_pool_read)
+                        {
+                            return std::make_unique<AsynchronousReadBufferFromHDFS>(
+                                IObjectStorage::getThreadPoolReader(), read_settings, std::move(buf));
+                        }
+                        else
+                        {
+                            return buf;
+                        }
+                    };
+
+                    raw_read_buf = get_raw_read_buf();
+                    if (read_settings.remote_fs_prefetch)
+                        raw_read_buf->prefetch();
                 }
                 catch (Exception & e)
                 {
                     if (e.code() == ErrorCodes::CANNOT_OPEN_FILE)
-                    {
-                        source_info->hive_metastore_client->clearTableMetadata(source_info->database, source_info->table_name);
-                        throw;
-                    }
+                        source_info->hive_metastore_client->clearTableMetadata(source_info->database_name, source_info->table_name);
+                    throw;
                 }
 
                 /// Use local cache for remote storage if enabled.
@@ -189,80 +260,159 @@ public:
                     remote_read_buf = RemoteReadBuffer::create(
                         getContext(),
                         std::make_shared<StorageHiveMetadata>(
-                            "Hive", getNameNodeCluster(hdfs_namenode_url), uri_with_path, curr_file->getSize(), curr_file->getLastModTs()),
+                            "Hive", getNameNodeCluster(hdfs_namenode_url), uri_with_path, current_file->getSize(), current_file->getLastModifiedTimestamp()),
                         std::move(raw_read_buf),
-                        buff_size);
+                        buff_size,
+                        format == "Parquet" || format == "ORC");
                 }
                 else
                     remote_read_buf = std::move(raw_read_buf);
 
-                if (curr_file->getFormat() == FileFormat::TEXT)
+                if (current_file->getFormat() == FileFormat::TEXT)
                     read_buf = wrapReadBufferWithCompressionMethod(std::move(remote_read_buf), compression);
                 else
                     read_buf = std::move(remote_read_buf);
 
                 auto input_format = FormatFactory::instance().getInputFormat(
-                    format, *read_buf, to_read_block, getContext(), max_block_size, format_settings);
+                    format, *read_buf, to_read_block, getContext(), max_block_size, updateFormatSettings(current_file));
 
-                QueryPipelineBuilder builder;
-                builder.init(Pipe(input_format));
+                Pipe pipe(input_format);
                 if (columns_description.hasDefaults())
                 {
-                    builder.addSimpleTransform([&](const Block & header)
+                    pipe.addSimpleTransform([&](const Block & header)
                     {
                         return std::make_shared<AddingDefaultsTransform>(header, columns_description, *input_format, getContext());
                     });
                 }
-                pipeline = std::make_unique<QueryPipeline>(QueryPipelineBuilder::getPipeline(std::move(builder)));
+                pipeline = std::make_unique<QueryPipeline>(std::move(pipe));
                 reader = std::make_unique<PullingPipelineExecutor>(*pipeline);
             }
 
-            Block res;
-            if (reader->pull(res))
+            if (generate_chunk_from_metadata)
+                return generateChunkFromMetadata();
+
+            Block source_block;
+            if (reader->pull(source_block))
             {
-                Columns columns = res.getColumns();
-                UInt64 num_rows = res.rows();
-                if (all_to_read_are_partition_columns)
-                    columns.clear();
-
-                /// Enrich with partition columns.
-                auto types = source_info->partition_name_types.getTypes();
-                for (size_t i = 0; i < types.size(); ++i)
-                {
-                    if (!sample_block.has(source_info->partition_name_types.getNames()[i]))
-                        continue;
-                    auto column = types[i]->createColumnConst(num_rows, source_info->hive_files[current_idx]->getPartitionValues()[i]);
-                    auto previous_idx = sample_block.getPositionByName(source_info->partition_name_types.getNames()[i]);
-                    /* The original implementation is :
-                     *     columns.insert(columns.begin() + previous_idx, column->convertToFullColumnIfConst());
-                     * On profiling, We found that the cost of convertToFullColumnIfConst is too high. If we have confirmed that
-                     * this column is const, there is no need to call this
-                     */
-                    columns.insert(columns.begin() + previous_idx, column);
-                }
-
-                /// Enrich with virtual columns.
-                if (source_info->need_path_column)
-                {
-                    auto column = DataTypeLowCardinality{std::make_shared<DataTypeString>()}.createColumnConst(num_rows, current_path);
-                    columns.push_back(column->convertToFullColumnIfConst());
-                }
-
-                if (source_info->need_file_column)
-                {
-                    size_t last_slash_pos = current_path.find_last_of('/');
-                    auto file_name = current_path.substr(last_slash_pos + 1);
-
-                    auto column
-                        = DataTypeLowCardinality{std::make_shared<DataTypeString>()}.createColumnConst(num_rows, std::move(file_name));
-                    columns.push_back(column->convertToFullColumnIfConst());
-                }
-                return Chunk(std::move(columns), num_rows);
+                auto num_rows = source_block.rows();
+                return getResultChunk(source_block, num_rows);
             }
-            reader.reset();
-            pipeline.reset();
-            read_buf.reset();
+
+            {
+                std::lock_guard lock(reader_mutex);
+                reader.reset();
+                pipeline.reset();
+                read_buf.reset();
+            }
         }
+
+        return {};
+    }
+
+    Chunk generateChunkFromMetadata()
+    {
+        size_t num_rows = std::min(current_file_remained_rows, UInt64(getContext()->getSettings().max_block_size));
+        current_file_remained_rows -= num_rows;
+
+        Block source_block;
+        return getResultChunk(source_block, num_rows);
+    }
+
+    Chunk getResultChunk(const Block & source_block, UInt64 num_rows) const
+    {
+        Columns source_columns = source_block.getColumns();
+
+        const auto & result_header = getPort().getHeader();
+        Columns result_columns;
+        result_columns.reserve(result_header.columns());
+        for (const auto & column : result_header)
+        {
+            if (source_block.has(column.name))
+            {
+                result_columns.emplace_back(std::move(source_columns[source_block.getPositionByName(column.name)]));
+                continue;
+            }
+
+            // Enrich virtual column _path
+            if (column.name == "_path")
+            {
+                auto path_column = DataTypeLowCardinality{std::make_shared<DataTypeString>()}.createColumnConst(num_rows, current_path);
+                result_columns.emplace_back(path_column->convertToFullColumnIfConst());
+                continue;
+            }
+
+            /// Enrich virtual column _file
+            if (column.name == "_file")
+            {
+                size_t last_slash_pos = current_path.find_last_of('/');
+                auto file_name = current_path.substr(last_slash_pos + 1);
+
+                auto file_column
+                    = DataTypeLowCardinality{std::make_shared<DataTypeString>()}.createColumnConst(num_rows, std::move(file_name));
+                result_columns.emplace_back(file_column->convertToFullColumnIfConst());
+                continue;
+            }
+
+            /// Enrich partition columns
+            const auto names = source_info->partition_name_types.getNames();
+            size_t pos = names.size();
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                if (column.name == names[i])
+                {
+                    pos = i;
+                    break;
+                }
+            }
+            if (pos != names.size())
+            {
+                const auto types = source_info->partition_name_types.getTypes();
+                const auto & fields = current_file->getPartitionValues();
+                auto partition_column = types[pos]->createColumnConst(num_rows, fields[pos]);
+                result_columns.emplace_back(partition_column->convertToFullColumnIfConst());
+                continue;
+            }
+
+            throw Exception{ErrorCodes::THERE_IS_NO_COLUMN, "Column '{}' is not presented in input data.", column.name};
+        }
+        return Chunk(std::move(result_columns), num_rows);
+    }
+
+    Chunk generateChunkByPartitionKeys()
+    {
+        size_t max_rows = getContext()->getSettings().max_block_size;
+        size_t rows = 0;
+        if (max_rows > current_file_remained_rows)
+        {
+            rows = current_file_remained_rows;
+            current_file_remained_rows = 0;
+        }
+        else
+        {
+            rows = max_rows;
+            current_file_remained_rows -= max_rows;
+        }
+
+        Columns cols;
+        auto types = source_info->partition_name_types.getTypes();
+        auto names = source_info->partition_name_types.getNames();
+        auto fields = current_file->getPartitionValues();
+        for (size_t i = 0, sz = types.size(); i < sz; ++i)
+        {
+            if (!sample_block.has(names[i]))
+                continue;
+            auto col = types[i]->createColumnConst(rows, fields[i]);
+            auto col_idx = sample_block.getPositionByName(names[i]);
+            cols.insert(cols.begin() + col_idx, col);
+        }
+        return Chunk(std::move(cols), rows);
+    }
+
+    void onCancel() override
+    {
+        std::lock_guard lock(reader_mutex);
+        if (reader)
+            reader->cancel();
     }
 
 private:
@@ -274,16 +424,23 @@ private:
     String format;
     String compression_method;
     UInt64 max_block_size;
-    Block header_block;
     Block sample_block;
     Block to_read_block;
-    bool all_to_read_are_partition_columns = false;
     ColumnsDescription columns_description;
+    const StorageHive & storage;
     const Names & text_input_field_names;
     FormatSettings format_settings;
+    ReadSettings read_settings;
 
+    HiveFilePtr current_file;
     String current_path;
     size_t current_idx = 0;
+
+    bool generate_chunk_from_metadata{false};
+    UInt64 current_file_remained_rows = 0;
+
+    /// onCancel and generate can be called concurrently
+    std::mutex reader_mutex;
 
     Poco::Logger * log = &Poco::Logger::get("StorageHive");
 };
@@ -300,7 +457,8 @@ StorageHive::StorageHive(
     const ASTPtr & partition_by_ast_,
     std::unique_ptr<HiveSettings> storage_settings_,
     ContextPtr context_,
-    std::shared_ptr<HiveTaskFilesCollectorBuilder> hive_task_files_collector_builder_)
+    std::shared_ptr<HiveSourceFilesCollectorBuilder> hive_task_files_collector_builder_,
+    bool is_distributed_mode_)
     : IStorage(table_id_)
     , WithContext(context_)
     , hive_metastore_url(hive_metastore_url_)
@@ -309,14 +467,35 @@ StorageHive::StorageHive(
     , partition_by_ast(partition_by_ast_)
     , storage_settings(std::move(storage_settings_))
     , hive_task_files_collector_builder(hive_task_files_collector_builder_)
+    , is_distributed_mode(is_distributed_mode_)
 {
+    /// Check hive metastore url.
     getContext()->getRemoteHostFilter().checkURL(Poco::URI(hive_metastore_url));
 
     StorageInMemoryMetadata storage_metadata;
     storage_metadata.setColumns(columns_);
     storage_metadata.setConstraints(constraints_);
     storage_metadata.setComment(comment_);
+    storage_metadata.partition_key = KeyDescription::getKeyFromAST(partition_by_ast, storage_metadata.columns, getContext());
+
     setInMemoryMetadata(storage_metadata);
+}
+
+ASTPtr StorageHive::extractKeyExpressionList(const ASTPtr & node)
+{
+    if (!node)
+        return std::make_shared<ASTExpressionList>();
+
+    const auto * expr_func = node->as<ASTFunction>();
+    if (expr_func && expr_func->name == "tuple")
+    {
+        /// Primary key is specified in tuple, extract its arguments.
+        return expr_func->arguments->clone();
+    }
+    /// Primary key consists of one column.
+    auto res = std::make_shared<ASTExpressionList>();
+    res->children.push_back(node);
+    return res;
 }
 
 void StorageHive::lazyInitialize()
@@ -325,37 +504,16 @@ void StorageHive::lazyInitialize()
     if (has_initialized)
         return;
 
+    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url);
+    auto hive_table_metadata = hive_metastore_client->getHiveTable(hive_database, hive_table);
 
-    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url, getContext());
-    auto hive_table_info = hive_metastore_client->getHiveTable(hive_database, hive_table);
+    hdfs_namenode_url = getNameNodeUrl(hive_table_metadata->sd.location);
+    /// Check HDFS namenode url.
+    getContext()->getRemoteHostFilter().checkURL(Poco::URI(hdfs_namenode_url));
 
-    hdfs_namenode_url = getNameNodeUrl(hive_table_info->sd.location);
-    table_schema = hive_table_info->sd.cols;
+    table_schema = hive_table_metadata->sd.cols;
 
-    FileFormat hdfs_file_format = IHiveFile::toFileFormat(hive_table_info->sd.inputFormat);
-    switch (hdfs_file_format)
-    {
-        case FileFormat::TEXT:
-        case FileFormat::LZO_TEXT:
-            format_name = "HiveText";
-            break;
-        case FileFormat::RC_FILE:
-            /// TODO to be implemented
-            throw Exception("Unsopported hive format rc_file", ErrorCodes::NOT_IMPLEMENTED);
-        case FileFormat::SEQUENCE_FILE:
-            /// TODO to be implemented
-            throw Exception("Unsopported hive format sequence_file", ErrorCodes::NOT_IMPLEMENTED);
-        case FileFormat::AVRO:
-            format_name = "Avro";
-            break;
-        case FileFormat::PARQUET:
-            format_name = "Parquet";
-            break;
-        case FileFormat::ORC:
-            format_name = "ORC";
-            break;
-    }
-
+    format_name = IHiveFile::toCHFormat(hive_table_metadata->sd.inputFormat);
     /// Need to specify text_input_fields_names from table_schema for TextInputFormated Hive table
     if (format_name == "HiveText")
     {
@@ -380,22 +538,15 @@ void StorageHive::lazyInitialize()
 
     has_initialized = true;
 }
-ASTPtr StorageHive::extractKeyExpressionList(const ASTPtr & node)
-{
-    if (!node)
-        return std::make_shared<ASTExpressionList>();
-    const auto * expr_func = node->as<ASTFunction>();
-    if (expr_func && expr_func->name == "tuple")
-        return expr_func->arguments->clone();
 
-    auto res = std::make_shared<ASTExpressionList>();
-    res->children.push_back(node);
-    return res;
+bool StorageHive::supportsSubsetOfColumns() const
+{
+    return format_name == "Parquet" || format_name == "ORC";
 }
 
 Pipe StorageHive::read(
     const Names & column_names,
-    const StorageMetadataPtr & metadata_snapshot,
+    const StorageSnapshotPtr & storage_snapshot,
     SelectQueryInfo & query_info,
     ContextPtr context_,
     QueryProcessingStage::Enum /* processed_stage */,
@@ -403,49 +554,49 @@ Pipe StorageHive::read(
     unsigned num_streams)
 {
     lazyInitialize();
-    // If the StorageHive is created in StorageHiveCluster, hive_files_collector must not be null
-    std::shared_ptr<IHiveTaskFilesCollector> hive_task_files_collector;
-    IHiveTaskFilesCollector::Arguments args
-        = {.context = getContext(),
-           .query_info = &query_info,
-           .hive_metastore_url = hive_metastore_url,
-           .hive_database = hive_database,
-           .hive_table = hive_table,
-           .storage_settings = storage_settings,
-           .columns = getInMemoryMetadata().getColumns(),
-           .num_streams = num_streams,
-           .partition_by_ast = partition_by_ast};
-    if (!hive_task_files_collector_builder)
-    {
-        hive_task_files_collector = std::make_shared<SingleHiveTaskFilesCollector>();
-    }
-    else
-        hive_task_files_collector = (*hive_task_files_collector_builder)();
-    hive_task_files_collector->setupArgs(args);
-    /// Hive files to read
-    HiveFiles hive_files = hive_task_files_collector->collectHiveFiles();
 
-    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url, getContext());
+    auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url);
+    auto hive_files_collector = getHiveFilesCollector(query_info);
+    auto hive_files = hive_files_collector->collect(PruneLevel::Max);
+    if (hive_files.empty())
+        return {};
 
     auto sources_info = std::make_shared<StorageHiveSource::SourcesInfo>();
     sources_info->hive_files = std::move(hive_files);
-    sources_info->database = hive_database;
+    sources_info->database_name = hive_database;
     sources_info->table_name = hive_table;
     sources_info->hive_metastore_client = hive_metastore_client;
     sources_info->partition_name_types = partition_name_types;
-    Block to_read_block;
-    const auto & sample_block = metadata_snapshot->getSampleBlock();
+
+    const auto header_block = storage_snapshot->metadata->getSampleBlock();
+    bool support_subset_columns = supportsSubcolumns();
+
+    auto settings = context_->getSettingsRef();
+    Block sample_block;
+
+    /// We need to igore case when reading from Hive.
+    NestedColumnExtractHelper nested_columns_extractor(header_block, true);
     for (const auto & column : column_names)
     {
-        to_read_block.insert(sample_block.getByName(column));
+        if (header_block.has(column))
+        {
+            sample_block.insert(header_block.getByName(column));
+            continue;
+        }
+        else if (support_subset_columns)
+        {
+            auto subset_column = nested_columns_extractor.extractColumn(column);
+            if (subset_column)
+            {
+                sample_block.insert(std::move(*subset_column));
+                continue;
+            }
+        }
         if (column == "_path")
             sources_info->need_path_column = true;
         if (column == "_file")
             sources_info->need_file_column = true;
     }
-
-    if (format_name != "Parquet" && format_name != "ORC")
-        to_read_block = sample_block;
 
     if (num_streams > sources_info->hive_files.size())
         num_streams = sources_info->hive_files.size();
@@ -459,9 +610,9 @@ Pipe StorageHive::read(
             format_name,
             compression_method,
             sample_block,
-            to_read_block,
             context_,
             max_block_size,
+            *this,
             text_input_field_names));
     }
     return Pipe::unitePipes(std::move(pipes));
@@ -478,6 +629,95 @@ NamesAndTypesList StorageHive::getVirtuals() const
         {"_path", std::make_shared<DataTypeLowCardinality>(std::make_shared<DataTypeString>())},
         {"_file", std::make_shared<DataTypeLowCardinality>(std::make_shared<DataTypeString>())}};
 }
+
+std::optional<UInt64> StorageHive::totalRows(const Settings & /*settings*/) const
+{
+    // In hive cluster query, this cannot work
+    if (is_distributed_mode)
+        return {};
+    /// query_info is not used when prune_level == PruneLevel::None
+    SelectQueryInfo query_info;
+    return totalRowsImpl(query_info, PruneLevel::None);
+}
+
+std::optional<UInt64> StorageHive::totalRowsByPartitionPredicate(const SelectQueryInfo & query_info, ContextPtr /*context_*/) const
+{
+    return totalRowsImpl(query_info, PruneLevel::Partition);
+}
+
+void StorageHive::checkAlterIsPossible(const AlterCommands & commands, ContextPtr /*local_context*/) const
+{
+    for (const auto & command : commands)
+    {
+        if (command.type != AlterCommand::Type::ADD_COLUMN && command.type != AlterCommand::Type::MODIFY_COLUMN
+            && command.type != AlterCommand::Type::DROP_COLUMN && command.type != AlterCommand::Type::COMMENT_COLUMN
+            && command.type != AlterCommand::Type::COMMENT_TABLE)
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Alter of type '{}' is not supported by storage {}", command.type, getName());
+    }
+}
+
+void StorageHive::alter(const AlterCommands & params, ContextPtr local_context, AlterLockHolder & /*alter_lock_holder*/)
+{
+    auto table_id = getStorageID();
+    checkAlterIsPossible(params, local_context);
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    StorageInMemoryMetadata new_metadata = *metadata_snapshot;
+    params.apply(new_metadata, local_context);
+    DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(local_context, table_id, new_metadata);
+    setInMemoryMetadata(new_metadata);
+}
+
+std::optional<UInt64>
+StorageHive::totalRowsImpl(const SelectQueryInfo & query_info, PruneLevel prune_level) const
+{
+    /// Row-based format like Text doesn't support totalRowsByPartitionPredicate
+    if (!supportsSubsetOfColumns())
+        return {};
+
+    auto hive_files_collector = getHiveFilesCollector(query_info);
+    auto hive_files = hive_files_collector->collect(prune_level);
+
+    UInt64 total_rows = 0;
+    for (const auto & hive_file : hive_files)
+    {
+        auto file_rows = hive_file->getRows();
+        if (!file_rows)
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR, "Rows of hive file:{} with format:{} not initialized", hive_file->getPath(), format_name);
+        total_rows += *file_rows;
+    }
+    return total_rows;
+}
+
+std::shared_ptr<IHiveSourceFilesCollector> StorageHive::getHiveFilesCollector(const SelectQueryInfo & query_info) const
+{
+    std::shared_ptr<IHiveSourceFilesCollector> hive_task_files_collector;
+    /**
+     * Hdfs files collection action is wrapped into IHiveSourceFilesCollector.
+     * On Hive() engine, hive_task_files_collector_builder is nullptr.
+     * LocalHiveSourceFilesCollector will collect all files.
+     *
+     */
+    if (!hive_task_files_collector_builder)
+    {
+        hive_task_files_collector = std::make_shared<LocalHiveSourceFilesCollector>();
+        IHiveSourceFilesCollector::Arguments args
+            = {.context = getContext(),
+               .query_info = &query_info,
+               .hive_metastore_url = hive_metastore_url,
+               .hive_database = hive_database,
+               .hive_table = hive_table,
+               .storage_settings = storage_settings,
+               .columns = getInMemoryMetadata().getColumns(),
+               .num_streams = getContext()->getSettingsRef().max_threads,
+               .partition_by_ast = partition_by_ast};
+        hive_task_files_collector->initialize(args);
+    }
+    else
+        hive_task_files_collector = (*hive_task_files_collector_builder)();
+    return hive_task_files_collector;
+}
+
 
 void registerStorageHive(StorageFactory & factory)
 {
@@ -506,7 +746,7 @@ void registerStorageHive(StorageFactory & factory)
             const String & hive_metastore_url = engine_args[0]->as<ASTLiteral &>().value.safeGet<String>();
             const String & hive_database = engine_args[1]->as<ASTLiteral &>().value.safeGet<String>();
             const String & hive_table = engine_args[2]->as<ASTLiteral &>().value.safeGet<String>();
-            return StorageHive::create(
+            return std::make_shared<StorageHive>(
                 hive_metastore_url,
                 hive_database,
                 hive_table,
@@ -521,6 +761,7 @@ void registerStorageHive(StorageFactory & factory)
         StorageFactory::StorageFeatures{
             .supports_settings = true,
             .supports_sort_order = true,
+            .source_access_type = AccessType::HIVE,
         });
 }
 

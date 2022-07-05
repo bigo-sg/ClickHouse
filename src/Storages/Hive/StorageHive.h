@@ -8,14 +8,13 @@
 #include <Poco/URI.h>
 #include <ThriftHiveMetastore.h>
 
-#include <base/logger_useful.h>
-#include <base/shared_ptr_helper.h>
+#include <Common/logger_useful.h>
 #include <Interpreters/Context.h>
 #include <Storages/IStorage.h>
 #include <Storages/HDFS/HDFSCommon.h>
 #include <Storages/Hive/HiveCommon.h>
 #include <Storages/Hive/HiveFile.h>
-#include <Storages/Hive/IHiveTaskPolicy.h>
+#include <Storages/Hive/HiveSourceTask.h>
 
 namespace DB
 {
@@ -25,38 +24,11 @@ class HiveSettings;
  * This class represents table engine for external hdfs files.
  * Read method is supported for now.
  */
-class StorageHive final : public shared_ptr_helper<StorageHive>, public IStorage, WithContext
+class StorageHive final : public IStorage, WithContext
 {
-    friend struct shared_ptr_helper<StorageHive>;
-
 public:
-    String getName() const override { return "Hive"; }
-
-    bool supportsIndexForIn() const override { return true; }
-    bool mayBenefitFromIndexForIn(
-        const ASTPtr & /* left_in_operand */,
-        ContextPtr /* query_context */,
-        const StorageMetadataPtr & /* metadata_snapshot */) const override
-    {
-        return true;
-    }
-
-
-    Pipe read(
-        const Names & column_names,
-        const StorageMetadataPtr & metadata_snapshot,
-        SelectQueryInfo & query_info,
-        ContextPtr context,
-        QueryProcessingStage::Enum processed_stage,
-        size_t max_block_size,
-        unsigned num_streams) override;
-
-    SinkToStoragePtr write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, ContextPtr /*context*/) override;
-
-    NamesAndTypesList getVirtuals() const override;
-
-protected:
     friend class StorageHiveSource;
+
     StorageHive(
         const String & hive_metastore_url_,
         const String & hive_database_,
@@ -68,12 +40,57 @@ protected:
         const ASTPtr & partition_by_ast_,
         std::unique_ptr<HiveSettings> storage_settings_,
         ContextPtr context_,
-        std::shared_ptr<HiveTaskFilesCollectorBuilder> hive_task_files_collector_builder_ = nullptr);
+        std::shared_ptr<HiveSourceFilesCollectorBuilder> hive_task_files_collector_builder_ = nullptr,
+        bool is_distributed_mode_ = false);
+
+    String getName() const override { return "Hive"; }
+
+    bool supportsIndexForIn() const override { return true; }
+
+    bool supportsSubcolumns() const override { return true; }
+
+    bool mayBenefitFromIndexForIn(
+        const ASTPtr & /* left_in_operand */,
+        ContextPtr /* query_context */,
+        const StorageMetadataPtr & /* metadata_snapshot */) const override
+    {
+        return true;
+    }
+
+    Pipe read(
+        const Names & column_names,
+        const StorageSnapshotPtr & storage_snapshot,
+        SelectQueryInfo & query_info,
+        ContextPtr context,
+        QueryProcessingStage::Enum processed_stage,
+        size_t max_block_size,
+        unsigned num_streams) override;
+
+    SinkToStoragePtr write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, ContextPtr /*context*/) override;
+
+    NamesAndTypesList getVirtuals() const override;
+
+    bool supportsSubsetOfColumns() const override;
+
+    std::optional<UInt64> totalRows(const Settings & settings) const override;
+    std::optional<UInt64> totalRowsByPartitionPredicate(const SelectQueryInfo & query_info, ContextPtr context_) const override;
+    void checkAlterIsPossible(const AlterCommands & commands, ContextPtr local_context) const override;
+    void alter(const AlterCommands & params, ContextPtr local_context, AlterLockHolder & alter_lock_holder) override;
 
 private:
     using FileFormat = IHiveFile::FileFormat;
     using FileInfo = HiveMetastoreClient::FileInfo;
     using HiveTableMetadataPtr = HiveMetastoreClient::HiveTableMetadataPtr;
+    using PruneLevel = HivePruneLevel;
+
+    static ASTPtr extractKeyExpressionList(const ASTPtr & node);
+
+    void lazyInitialize();
+
+    std::optional<UInt64>
+    totalRowsImpl(const SelectQueryInfo & query_info, PruneLevel prune_level) const;
+
+    std::shared_ptr<IHiveSourceFilesCollector> getHiveFilesCollector(const SelectQueryInfo & query_info) const;
 
     String hive_metastore_url;
 
@@ -81,8 +98,9 @@ private:
     String hive_database;
     String hive_table;
 
-    std::mutex init_mutex;
+    mutable std::mutex init_mutex;
     bool has_initialized = false;
+
     /// Hive table meta
     std::vector<Apache::Hadoop::Hive::FieldSchema> table_schema;
     Names text_input_field_names; /// Defines schema of hive file, only used when text input format is TEXT
@@ -95,19 +113,14 @@ private:
     const ASTPtr partition_by_ast;
     NamesAndTypesList partition_name_types;
 
-    //NamesAndTypesList hivefile_name_types;
-    //ExpressionActionsPtr hivefile_minmax_idx_expr;
-
     std::shared_ptr<HiveSettings> storage_settings;
-
-    std::shared_ptr<HiveTaskFilesCollectorBuilder> hive_task_files_collector_builder;
 
     Poco::Logger * log = &Poco::Logger::get("StorageHive");
 
-    ASTPtr extractKeyExpressionList(const ASTPtr & node);
-
-    void lazyInitialize();
+    std::shared_ptr<HiveSourceFilesCollectorBuilder> hive_task_files_collector_builder;
+    bool is_distributed_mode;
 };
+
 }
 
 #endif
