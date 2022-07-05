@@ -53,6 +53,7 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int TOO_MANY_PARTITIONS;
     extern const int THERE_IS_NO_COLUMN;
+    extern const int INDEX_NOT_USED;
 }
 
 
@@ -750,6 +751,14 @@ Pipe StorageHive::read(
 {
     lazyInitialize();
 
+    auto metadata_snapshot = getInMemoryMetadataPtr();
+    if (metadata_snapshot->hasPartitionKey() && context_->getSettingsRef().force_index_by_date)
+    {
+        const KeyCondition partition_key_condition(query_info, context_, partition_names, partition_minmax_idx_expr);
+        if (partition_key_condition.alwaysUnknownOrTrue())
+            throw Exception("No partition expr is used and setting 'force_index_by_date' is set", ErrorCodes::INDEX_NOT_USED);
+    }
+
     HDFSBuilderWrapper builder = createHDFSBuilder(hdfs_namenode_url, context_->getGlobalContext()->getConfigRef());
     HDFSFSPtr fs = createHDFSFS(builder.get());
     auto hive_metastore_client = HiveMetastoreClientFactory::instance().getOrCreate(hive_metastore_url);
@@ -842,7 +851,7 @@ HiveFiles StorageHive::collectHiveFiles(
     HiveFiles hive_files;
     Int64 hit_parttions_num = 0;
     Int64 hive_max_query_partitions = context_->getSettings().max_partitions_to_read;
-    /// Mutext to protect hive_files, which maybe appended in multiple threads
+    /// Mutex to protect hive_files, which maybe appended in multiple threads
     std::mutex hive_files_mutex;
     ThreadPool pool{max_threads};
     if (!partitions.empty())
