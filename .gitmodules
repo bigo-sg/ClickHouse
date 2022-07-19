@@ -249,7 +249,7 @@
 	url = https://github.com/google/libprotobuf-mutator
 [submodule "contrib/sysroot"]
 	path = contrib/sysroot
-	url = https://github.com/ClickHouse/sysroot.git
+	url = https://github.com/bigo-sg/sysroot.git
 [submodule "contrib/nlp-data"]
 	path = contrib/nlp-data
 	url = https://github.com/ClickHouse/nlp-data.git
@@ -268,3 +268,9 @@
 [submodule "contrib/hashidsxx"]
 	path = contrib/hashidsxx
 	url = https://github.com/schoentoon/hashidsxx.git
+[submodule "contrib/gporca"]
+	path = contrib/gporca
+	url = https://github.com/bigo-sg/gporca.git
+[submodule "contrib/gp-xerces"]
+	path = contrib/gp-xerces
+	url = https://github.com/bigo-sg/gp-xerces.git
