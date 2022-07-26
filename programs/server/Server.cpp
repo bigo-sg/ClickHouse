@@ -93,6 +93,8 @@
 #include <Interpreters/AsynchronousInsertQueue.h>
 #include <filesystem>
 
+#include <Optimizer/Orca/OrcaEnv.h>
+
 #include "config_core.h"
 #include "Common/config_version.h"
 
@@ -687,6 +689,11 @@ int Server::main(const std::vector<std::string> & /*args*/)
             ExternalDataSourceCache::instance().initOnce(global_context, root_dir, limit_size, bytes_read_before_flush);
         }
     }
+
+    if (!config().has("orca_static_metadata_file"))
+        throw Exception(ErrorCodes::INVALID_CONFIG_PARAMETER, "Not found configure(orca_static_metadata_file)");
+
+    OrcaEnv::instance().initOnce(config().getString("orca_static_metadata_file"), config().getString("orca_optimizer_config_file"));
 
     Poco::ThreadPool server_pool(3, config().getUInt("max_connections", 1024));
     std::mutex servers_lock;

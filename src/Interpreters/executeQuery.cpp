@@ -3,6 +3,7 @@
 #include <Common/typeid_cast.h>
 #include <Common/ThreadProfileEvents.h>
 #include <Common/MemoryTrackerBlockerInThread.h>
+#include <config_core.h>
 
 #include <Interpreters/AsynchronousInsertQueue.h>
 #include <IO/WriteBufferFromFile.h>
@@ -69,6 +70,9 @@
 #include <base/demangle.h>
 
 #include <random>
+
+#include <Optimizer/Orca/OrcOptimizerWrapper.h>
+#include <Optimizer/OptimizerFactory.h>
 
 
 namespace ProfileEvents
@@ -404,12 +408,19 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
 
     String query_database;
     String query_table;
+
     try
     {
         ParserQuery parser(end, settings.allow_settings_after_format_in_insert);
 
         /// TODO: parser should fail early when max_query_size limit is reached.
         ast = parseQuery(parser, begin, end, "", max_query_size, settings.max_parser_depth);
+
+        auto optimizer = OptimizerFactory::instance().getOptimizer(OrcaOptimizerWrapper::NAME);
+        std::shared_ptr<OrcaOptimizerRequest> optimization_req = std::make_shared<OrcaOptimizerRequest>();
+        optimization_req->context = context;
+        optimization_req->query = ast;
+        (void)optimizer->optimize(optimization_req);
 
         if (auto txn = context->getCurrentTransaction())
         {

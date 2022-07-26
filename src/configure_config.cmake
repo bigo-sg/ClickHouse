@@ -100,3 +100,5 @@ endif()
 if (TARGET ch_contrib::jemalloc)
     set(USE_JEMALLOC 1)
 endif()
+
+set(USE_ORCA 1)

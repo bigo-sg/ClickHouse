@@ -74,7 +74,7 @@ add_subdirectory (Coordination)
 add_subdirectory (Bridge)
 add_subdirectory (Daemon)
 add_subdirectory (Loggers)
-
+add_subdirectory (Optimizer)
 
 set(dbms_headers)
 set(dbms_sources)
@@ -390,6 +390,7 @@ dbms_target_link_libraries (
         clickhouse_common_config
         clickhouse_common_zookeeper
         clickhouse_dictionaries_embedded
+        clickhouse_optimizer
         clickhouse_parsers
         ch_contrib::lz4
         Poco::JSON
@@ -573,6 +574,7 @@ if (ENABLE_TESTS)
         ch_contrib::gtest_all
         clickhouse_functions
         clickhouse_aggregate_functions
+        clickhouse_optimizer
         clickhouse_parsers
         clickhouse_storages_system
         dbms
