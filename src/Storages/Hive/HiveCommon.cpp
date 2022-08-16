@@ -54,7 +54,7 @@ void HiveMetastoreClient::tryCallHiveClient(std::function<void(ThriftHiveMetasto
 
 HiveMetastoreClient::HiveTableMetadataPtr HiveMetastoreClient::getTableMetadata(const String & db_name, const String & table_name)
 {
-    LOG_TRACE(log, "Get table metadata for {}.{}", db_name, table_name);
+    LOG_DEBUG(log, "Get table metadata for {}.{}", db_name, table_name);
 
     auto table = std::make_shared<Apache::Hadoop::Hive::Table>();
     std::vector<Apache::Hadoop::Hive::Partition> partitions;
@@ -128,7 +128,7 @@ std::vector<Apache::Hadoop::Hive::Partition> HiveMetastoreClient::HiveTableMetad
 
 std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadata::getFilesByLocation(const HDFSFSPtr & fs, const String & location)
 {
-    LOG_TRACE(log, "List directory {}", location);
+    LOG_DEBUG(log, "List directory {}", location);
     std::map<String, PartitionInfo>::iterator it;
     if (!empty_partition_keys)
     {
@@ -139,7 +139,7 @@ std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadat
 
         if (it->second.initialized)
         {
-            LOG_TRACE(log, "Get {} files under directory {}", it->second.files.size(), location);
+            LOG_DEBUG(log, "Get {} files under directory {}", it->second.files.size(), location);
             return it->second.files;
         }
     }
@@ -165,7 +165,7 @@ std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadat
         it->second.files = result;
         it->second.initialized = true;
     }
-    LOG_TRACE(log, "Get {} files under directory {}", result.size(), location);
+    LOG_DEBUG(log, "Get {} files under directory {}", result.size(), location);
     return result;
 }
 
@@ -198,7 +198,7 @@ void HiveMetastoreClient::HiveTableMetadata::updateIfNeeded(const std::vector<Ap
     }
     partition_infos.swap(new_partition_infos);
     last_update_time = time(nullptr);
-    LOG_TRACE(log, "Finish update metadata for table {}.{}", db_name, table_name);
+    LOG_DEBUG(log, "Finish update metadata for table {}.{}", db_name, table_name);
 }
 
 bool HiveMetastoreClient::HiveTableMetadata::shouldUpdate(const std::vector<Apache::Hadoop::Hive::Partition> & partitions)
