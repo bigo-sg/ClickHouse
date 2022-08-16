@@ -196,8 +196,9 @@ void HiveMetastoreClient::HiveTableMetadata::updateIfNeeded(const std::vector<Ap
             new_partition_infos.emplace(partition.sd.location, std::move(it->second));
         }
     }
-
     partition_infos.swap(new_partition_infos);
+    last_update_time = time(nullptr);
+    LOG_TRACE(log, "Finish update metadata for table {}.{}", db_name, table_name);
 }
 
 bool HiveMetastoreClient::HiveTableMetadata::shouldUpdate(const std::vector<Apache::Hadoop::Hive::Partition> & partitions)
@@ -216,7 +217,9 @@ bool HiveMetastoreClient::HiveTableMetadata::shouldUpdate(const std::vector<Apac
         if (!old_partition_info.haveSameParameters(partition))
             return true;
     }
-    return false;
+
+    auto now = time(nullptr);
+    return now - last_update_time >= 300;
 }
 
 

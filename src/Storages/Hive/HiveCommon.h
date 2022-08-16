@@ -111,6 +111,7 @@ public:
         /// Mutex to protect partition_infos.
         mutable std::mutex mutex;
         std::map<String, PartitionInfo> partition_infos;
+        time_t last_update_time{0};
 
         const bool empty_partition_keys;
         const HiveFilesCachePtr hive_files_cache;
