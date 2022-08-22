@@ -98,7 +98,7 @@ HiveFiles HiveFilesCollector::collect(HivePruneLevel prune_level)
         auto file_infos = hive_table_metadata->getFilesByLocation(hdfs_fs, hive_table_metadata->getTable()->sd.location);
         for (const auto & file_info : file_infos)
         {
-            thread_pool.scheduleOrThrow([&]()
+            thread_pool.scheduleOrThrowOnError([&]()
             {
                 auto hive_file = getHiveFileIfNeeded(file_info, {}, hive_table_metadata, prune_level);
                 if (hive_file)
