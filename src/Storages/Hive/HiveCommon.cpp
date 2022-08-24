@@ -139,7 +139,7 @@ std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadat
 
         if (it->second.initialized)
         {
-            LOG_DEBUG(log, "Get {} files under directory {}", it->second.files.size(), location);
+            LOG_DEBUG(log, "Get {} files under directory {} from cache", it->second.files.size(), location);
             return it->second.files;
         }
     }
