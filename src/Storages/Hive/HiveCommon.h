@@ -71,6 +71,7 @@ public:
         void initialize(const std::vector<FileInfo> & files);
 
         bool isValid() const;
+        bool isInitialized() const;
     };
 
     class HiveTableMetadata;

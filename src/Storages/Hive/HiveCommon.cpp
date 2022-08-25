@@ -127,6 +127,11 @@ bool HiveMetastoreClient::PartitionInfo::isValid() const
     return initialized && time(nullptr) < 300 + initialized_time;
 }
 
+bool HiveMetastoreClient::PartitionInfo::isInitialized() const
+{
+    return initialized;
+}
+
 std::vector<Apache::Hadoop::Hive::Partition> HiveMetastoreClient::HiveTableMetadata::getPartitions() const
 {
     std::vector<Apache::Hadoop::Hive::Partition> result;
@@ -212,18 +217,22 @@ void HiveMetastoreClient::HiveTableMetadata::updateIfNeeded(const std::vector<Ap
 
 bool HiveMetastoreClient::HiveTableMetadata::shouldUpdate(const std::vector<Apache::Hadoop::Hive::Partition> & partitions)
 {
-    const auto & old_partiton_infos = partition_infos;
-    if (old_partiton_infos.size() != partitions.size())
+    const auto & old_partition_infos = partition_infos;
+    if (old_partition_infos.size() != partitions.size())
         return true;
 
     for (const auto & partition : partitions)
     {
-        auto it = old_partiton_infos.find(partition.sd.location);
-        if (it == old_partiton_infos.end())
+        auto it = old_partition_infos.find(partition.sd.location);
+        if (it == old_partition_infos.end())
             return true;
 
         const auto & old_partition_info = it->second;
-        if (!old_partition_info.haveSameParameters(partition) || !old_partition_info.isValid())
+        if (!old_partition_info.haveSameParameters(partition))
+            return true;
+        
+        /// Cache is out-of-date
+        if (old_partition_info.isInitialized() && !old_partition_info.isValid())
             return true;
     }
     return false;
