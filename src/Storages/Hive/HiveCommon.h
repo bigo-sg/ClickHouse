@@ -61,11 +61,17 @@ public:
         Apache::Hadoop::Hive::Partition partition;
         std::vector<FileInfo> files;
         bool initialized = false; /// If true, files are initialized.
+        time_t initialized_time{0};
 
-        explicit PartitionInfo(const Apache::Hadoop::Hive::Partition & partition_): partition(partition_) {}
+        explicit PartitionInfo(const Apache::Hadoop::Hive::Partition & partition_) : partition(partition_) { }
         PartitionInfo(PartitionInfo &&) = default;
 
         bool haveSameParameters(const Apache::Hadoop::Hive::Partition & other) const;
+
+        void initialize(const std::vector<FileInfo> & files);
+
+        bool isValid() const;
+        bool isInitialized() const;
     };
 
     class HiveTableMetadata;
@@ -111,7 +117,7 @@ public:
         /// Mutex to protect partition_infos.
         mutable std::mutex mutex;
         std::map<String, PartitionInfo> partition_infos;
-        time_t last_update_time{0};
+        // time_t last_update_time{0};
 
         const bool empty_partition_keys;
         const HiveFilesCachePtr hive_files_cache;

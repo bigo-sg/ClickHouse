@@ -115,6 +115,23 @@ bool HiveMetastoreClient::PartitionInfo::haveSameParameters(const Apache::Hadoop
     return (it == partition.parameters.cend() && oit == other.parameters.cend());
 }
 
+void HiveMetastoreClient::PartitionInfo::initialize(const std::vector<FileInfo> & files_)
+{
+    files = files_;
+    initialized = true;
+    initialized_time = time(nullptr);
+}
+
+bool HiveMetastoreClient::PartitionInfo::isValid() const
+{
+    return initialized && time(nullptr) < 300 + initialized_time;
+}
+
+bool HiveMetastoreClient::PartitionInfo::isInitialized() const
+{
+    return initialized;
+}
+
 std::vector<Apache::Hadoop::Hive::Partition> HiveMetastoreClient::HiveTableMetadata::getPartitions() const
 {
     std::vector<Apache::Hadoop::Hive::Partition> result;
@@ -137,7 +154,7 @@ std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadat
         if (it == partition_infos.end())
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid location {}", location);
 
-        if (it->second.initialized)
+        if (it->second.isValid())
         {
             LOG_DEBUG(log, "Get {} files under directory {} from cache", it->second.files.size(), location);
             return it->second.files;
@@ -162,10 +179,9 @@ std::vector<HiveMetastoreClient::FileInfo> HiveMetastoreClient::HiveTableMetadat
         if (it == partition_infos.end())
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid location {}", location);
 
-        it->second.files = result;
-        it->second.initialized = true;
+        it->second.initialize(result);
     }
-    LOG_DEBUG(log, "Get {} files under directory {}", result.size(), location);
+    LOG_DEBUG(log, "Get {} files under directory {} from HDFS", result.size(), location);
     return result;
 }
 
@@ -186,10 +202,9 @@ void HiveMetastoreClient::HiveTableMetadata::updateIfNeeded(const std::vector<Ap
     for (const auto & partition : partitions)
     {
         auto it = old_partiton_infos.find(partition.sd.location);
-        if (it == old_partiton_infos.end() || !it->second.haveSameParameters(partition) || !it->second.initialized)
+        if (it == old_partiton_infos.end() || !it->second.haveSameParameters(partition) || !it->second.isValid())
         {
             new_partition_infos.emplace(partition.sd.location, PartitionInfo(partition));
-            continue;
         }
         else
         {
@@ -197,29 +212,30 @@ void HiveMetastoreClient::HiveTableMetadata::updateIfNeeded(const std::vector<Ap
         }
     }
     partition_infos.swap(new_partition_infos);
-    last_update_time = time(nullptr);
     LOG_DEBUG(log, "Finish update metadata for table {}.{}", db_name, table_name);
 }
 
 bool HiveMetastoreClient::HiveTableMetadata::shouldUpdate(const std::vector<Apache::Hadoop::Hive::Partition> & partitions)
 {
-    const auto & old_partiton_infos = partition_infos;
-    if (old_partiton_infos.size() != partitions.size())
+    const auto & old_partition_infos = partition_infos;
+    if (old_partition_infos.size() != partitions.size())
         return true;
 
     for (const auto & partition : partitions)
     {
-        auto it = old_partiton_infos.find(partition.sd.location);
-        if (it == old_partiton_infos.end())
+        auto it = old_partition_infos.find(partition.sd.location);
+        if (it == old_partition_infos.end())
             return true;
 
         const auto & old_partition_info = it->second;
         if (!old_partition_info.haveSameParameters(partition))
             return true;
+        
+        /// Cache is out-of-date
+        if (old_partition_info.isInitialized() && !old_partition_info.isValid())
+            return true;
     }
-
-    auto now = time(nullptr);
-    return now - last_update_time >= 300;
+    return false;
 }
 
 
