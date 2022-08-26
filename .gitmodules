@@ -61,7 +61,8 @@
 	url = https://github.com/apache/thrift.git
 [submodule "contrib/libhdfs3"]
 	path = contrib/libhdfs3
-	url = https://github.com/bigo-sg/libhdfs3.git
+	url = https://git.sysop.bigo.sg/bigdata/libhdfs3
+	branch = develop
 [submodule "contrib/libxml2"]
 	path = contrib/libxml2
 	url = https://github.com/GNOME/libxml2.git
