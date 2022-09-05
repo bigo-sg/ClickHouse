@@ -82,7 +82,8 @@ public:
     DB::QueryPlanPtr parseReadRealWithLocalFile(const substrait::ReadRel& rel);
     DB::QueryPlanPtr parseReadRealWithJavaIter(const substrait::ReadRel& rel);
     DB::QueryPlanPtr parseMergeTreeTable(const substrait::ReadRel& rel);
-    bool isReadRelFromJava(const substrait::ReadRel& rel);
+
+    static bool isReadRelFromJava(const substrait::ReadRel& rel);
     static DB::Block parseNameStruct(const substrait::NamedStruct& struct_);
     static DB::DataTypePtr parseType(const substrait::Type& type);
 
@@ -101,13 +102,13 @@ private:
     DB::QueryPlanPtr parseOp(const substrait::Rel &rel);
     void collectJoinKeys(const substrait::Expression& condition, std::vector<std::pair<int32_t, int32_t>>& join_keys, int32_t right_key_start);
     DB::QueryPlanPtr parseJoin(substrait::JoinRel join, DB::QueryPlanPtr left, DB::QueryPlanPtr right);
-    void reorderJoinOutput(DB::QueryPlan & plan, DB::Names cols);
-    std::string getFunctionName(std::string function_sig, const substrait::Expression_ScalarFunction & function);
+    static void reorderJoinOutput(DB::QueryPlan & plan, DB::Names cols);
+    static std::string getFunctionName(std::string function_sig, const substrait::Expression_ScalarFunction & function);
     DB::ActionsDAGPtr parseFunction(const DataStream & input, const substrait::Expression &rel, std::string & result_name, std::vector<String> &required_columns, DB::ActionsDAGPtr actions_dag = nullptr,bool keep_result = false);
     const ActionsDAG::Node * parseFunctionWithDAG(const substrait::Expression &rel, std::string & result_name, std::vector<String> &required_columns, DB::ActionsDAGPtr actions_dag = nullptr, bool keep_result = false);
     DB::QueryPlanStepPtr parseAggregate(DB::QueryPlan & plan, const substrait::AggregateRel &rel, bool & is_final);
     const DB::ActionsDAG::Node * parseArgument(DB::ActionsDAGPtr action_dag, const substrait::Expression &rel);
-    const ActionsDAG::Node * toFunctionNode(ActionsDAGPtr action_dag, const String function, const DB::ActionsDAG::NodeRawConstPtrs args);
+    const ActionsDAG::Node * toFunctionNode(ActionsDAGPtr action_dag, const String & function, const DB::ActionsDAG::NodeRawConstPtrs & args);
     // remove nullable after isNotNull
     void removeNullable(std::vector<String> require_columns, ActionsDAGPtr actionsDag);
     void wrapNullable(std::vector<String> columns, ActionsDAGPtr actionsDag);
@@ -116,7 +117,7 @@ private:
         return name + "_" + std::to_string(name_no++);
     }
 
-    Aggregator::Params getAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
+    static Aggregator::Params getAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
     {
         Settings settings;
         return Aggregator::Params(
@@ -137,7 +138,7 @@ private:
             3);
     }
 
-    Aggregator::Params getMergedAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
+    static Aggregator::Params getMergedAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
     {
         Settings settings;
         return Aggregator::Params(header, keys, aggregates, false, settings.max_threads);
@@ -148,9 +149,6 @@ private:
     std::unordered_map<std::string, std::string> function_mapping;
     std::vector<jobject> input_iters;
     ContextPtr context;
-
-//    DB::QueryPlanPtr query_plan;
-
 };
 
 struct SparkBuffer

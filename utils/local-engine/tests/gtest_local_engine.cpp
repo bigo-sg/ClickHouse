@@ -157,9 +157,6 @@ TEST(TestSelect, TestAgg)
                                                                 mul_exp,
                                                                 dbms::literal(4.0)
                                                             });
-    auto * mul_exp2 = dbms::scalarFunction(dbms::MULTIPLY,
-                                          {dbms::selection(2),
-                                           dbms::literal(1.1)});
     auto * measure = dbms::measureFunction(dbms::SUM, {dbms::selection(2)});
     auto plan = plan_builder
                     .registerSupportedFunctions()
@@ -236,7 +233,6 @@ TEST(TestSelect, MergeTreeWriteTest)
     files_info->files.push_back("/home/kyligence/Documents/test-dataset/intel-gazelle-test-150.snappy.parquet");
     auto source = std::make_shared<BatchParquetFileSource>(files_info, metadata->getSampleBlock(), SerializedPlanParser::global_context);
 
-    QueryPlanOptimizationSettings optimization_settings{.optimize_plan = false};
     QueryPipelineBuilder query_pipeline;
     query_pipeline.init(Pipe(source));
     query_pipeline.setSinks([&](const Block &, Pipe::StreamType type) -> ProcessorPtr
@@ -251,7 +247,7 @@ TEST(TestSelect, MergeTreeWriteTest)
 }
 
 TEST(TESTUtil, TestByteToLong) {
-    long expected = 0xf085460ccf7f0000l;
+    Int64 expected = 0xf085460ccf7f0000l;
     char* arr = new char[8];
     arr[0] = -16;
     arr[1] = -123;
@@ -270,12 +266,11 @@ TEST(TESTUtil, TestByteToLong) {
 
 TEST(TestSubstrait, TestGenerate) {
     dbms::SerializedSchemaBuilder schema_builder;
-    auto schema = schema_builder
-                      .column("l_discount", "FP64")
-                      .column("l_extendedprice", "FP64")
-                      .column("l_quantity", "FP64")
-                      .column("l_shipdate_new", "Date")
-                      .build();
+    auto * schema = schema_builder.column("l_discount", "FP64")
+                        .column("l_extendedprice", "FP64")
+                        .column("l_quantity", "FP64")
+                        .column("l_shipdate_new", "Date")
+                        .build();
     dbms::SerializedPlanBuilder plan_builder;
     auto *agg_mul = dbms::scalarFunction(dbms::MULTIPLY, {dbms::selection(1), dbms::selection(0)});
     auto * measure1 = dbms::measureFunction(dbms::SUM, {agg_mul});

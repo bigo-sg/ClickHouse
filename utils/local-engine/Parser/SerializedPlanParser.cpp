@@ -43,7 +43,6 @@
 
 
 #include <base/logger_useful.h>
-using namespace DB;
 namespace DB
 {
 namespace ErrorCodes
@@ -61,6 +60,7 @@ namespace ErrorCodes
 namespace local_engine
 {
 
+using namespace DB;
 
 void join(ActionsDAG::NodeRawConstPtrs v, char c, std::string & s)
 {
@@ -793,7 +793,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
             false,
             nullptr,
             SortDescription());
-        return aggregating_step;
+        return std::move(aggregating_step);
     }
 }
 
@@ -884,7 +884,7 @@ std::string SerializedPlanParser::getFunctionName(std::string function_signature
 
 
 const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
-    const substrait::Expression & rel, string & result_name, std::vector<String>& required_columns, DB::ActionsDAGPtr actions_dag, bool keep_result)
+    const substrait::Expression & rel, std::string & result_name, std::vector<String>& required_columns, DB::ActionsDAGPtr actions_dag, bool keep_result)
 {
     if (!rel.has_scalar_function())
     {
@@ -961,7 +961,7 @@ ActionsDAGPtr SerializedPlanParser::parseFunction(
     return actions_dag;
 }
 
-const ActionsDAG::Node * SerializedPlanParser::toFunctionNode(ActionsDAGPtr action_dag, const String function, const DB::ActionsDAG::NodeRawConstPtrs args)
+const ActionsDAG::Node * SerializedPlanParser::toFunctionNode(ActionsDAGPtr action_dag, const String & function, const DB::ActionsDAG::NodeRawConstPtrs & args)
 {
     auto function_builder = DB::FunctionFactory::instance().get(function, this->context);
     std::string args_name;
@@ -1227,11 +1227,11 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             auto condition_nums = if_then.ifs_size();
             for (int i = 0; i < condition_nums; ++i)
             {
-                const auto & if_ = if_then.ifs(i);
+                const auto & ifs = if_then.ifs(i);
                 std::string if_name;
                 std::string then_name;
                 std::vector<String> useless;
-                parseFunctionWithDAG(if_.if_(), if_name, useless, action_dag, false);
+                parseFunctionWithDAG(ifs.if_(), if_name, useless, action_dag, false);
                 for (const auto & node : action_dag->getNodes())
                 {
                     if (node.result_name == if_name)
@@ -1240,7 +1240,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                         break;
                     }
                 }
-                const auto * then_node = parseArgument(action_dag, if_.then());
+                const auto * then_node = parseArgument(action_dag, ifs.then());
                 args.emplace_back(then_node);
             }
 

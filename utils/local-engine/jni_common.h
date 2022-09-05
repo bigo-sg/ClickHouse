@@ -8,7 +8,7 @@ static jclass illegal_argument_exception_class;
 
 jclass CreateGlobalClassReference(JNIEnv* env, const char* class_name) {
     jclass local_class = env->FindClass(class_name);
-    jclass global_class = (jclass)env->NewGlobalRef(local_class);
+    jclass global_class = static_cast<jclass>(env->NewGlobalRef(local_class));
     env->DeleteLocalRef(local_class);
     if (global_class == nullptr) {
         std::string error_message =
@@ -25,7 +25,6 @@ jmethodID GetMethodID(JNIEnv* env, jclass this_class, const char* name, const ch
             " within signature" + std::string(sig);
         env->ThrowNew(illegal_access_exception_class, error_message.c_str());
     }
-
     return ret;
 }
 
@@ -44,7 +43,7 @@ jstring charTojstring(JNIEnv* env, const char* pat) {
     jclass strClass = (env)->FindClass("Ljava/lang/String;");
     jmethodID ctorID = (env)->GetMethodID(strClass, "<init>", "([BLjava/lang/String;)V");
     jbyteArray bytes = (env)->NewByteArray(strlen(pat));
-    (env)->SetByteArrayRegion(bytes, 0, strlen(pat), (jbyte*) pat);
+    env->SetByteArrayRegion(bytes, 0, strlen(pat), reinterpret_cast<jbyte *>(pat));
     jstring encoding = (env)->NewStringUTF("UTF-8");
     jstring result = static_cast<jstring>((env)->NewObject(strClass, ctorID, bytes, encoding));
     env->DeleteLocalRef(bytes);
