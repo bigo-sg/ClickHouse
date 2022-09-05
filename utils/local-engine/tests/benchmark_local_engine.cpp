@@ -222,7 +222,8 @@ static void BM_ParquetRead(benchmark::State& state) {
         files->files = {
            //"file:///data0/tpch100_zhichao/parquet_origin/lineitem/part-00079-066b93b4-39e1-4d46-83ab-d7752096b599-c000.snappy.parquet",
             // "file:///home/hongbin/code/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet",
-            "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet",
+            // "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet",
+            "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet"
         };
         auto builder = std::make_unique<QueryPipelineBuilder>();
         builder->init(Pipe(std::make_shared<BatchParquetFileSource>(files, header, SerializedPlanParser::global_context)));
