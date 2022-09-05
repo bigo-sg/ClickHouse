@@ -31,8 +31,9 @@
 #include <Parsers/ASTIdentifier.h>
 #include <Storages/BatchParquetFileSource.h>
 #include <Common/DebugUtils.h>
-
-
+#include <Storages/ch_parquet/ParquetBlockInputFormat.h>
+#include <Storages/ch_parquet/ArrowColumnToCHColumn.h>
+#include <Storages/ch_parquet/arrow/reader.h>
 
 
 #if defined(__SSE2__)
@@ -1500,14 +1501,44 @@ static void BM_JoinTest(benchmark::State& state) {
     }
 }
 
+static void BM_ParquetReadString(benchmark::State& state)
+{
+    using namespace DB;
+    auto type = std::make_shared<DataTypeNullable>(std::make_shared<DataTypeString>());
+    Block header{
+        // ColumnWithTypeAndName(DataTypeString().createColumn(), std::make_shared<DataTypeString>(), "l_returnflag"),
+        // ColumnWithTypeAndName(DataTypeString().createColumn(), std::make_shared<DataTypeString>(), "l_linestatus")
+        ColumnWithTypeAndName(type->createColumn(), type, "l_returnflag"),
+        ColumnWithTypeAndName(type->createColumn(), type, "l_linestatus")
+    };
+    std::string file
+        = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
+    FormatSettings format_settings;
+    Block res;
+
+    for (auto _ : state)
+    {
+        auto in = std::make_unique<ReadBufferFromFile>(file);
+        auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, format_settings);
+        auto pipeline = QueryPipeline(std::move(format));
+        auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
+        while (reader->pull(res))
+        {
+            debug::headBlock(res);
+        }
+    }
+}
+
 // BENCHMARK(BM_TestDecompress)->Arg(0)->Arg(1)->Arg(2)->Arg(3)->Unit(benchmark::kMillisecond)->Iterations(50)->Repetitions(6)->ComputeStatistics("80%", quantile);
 
-//BENCHMARK(BM_JoinTest)->Unit(benchmark::k
+//BENCHMARK(BM_JoinTest)->Unit(benchmark::k/data1/liyang/root/1.cpp
+
 // Millisecond)->Iterations(10)->Repetitions(250)->ComputeStatistics("80%", quantile);
 
 //BENCHMARK(BM_CHColumnToSparkRow)->Unit(benchmark::kMillisecond)->Iterations(40);
 //BENCHMARK(BM_MergeTreeRead)->Arg(1)->Unit(benchmark::kMillisecond)->Iterations(10);
 BENCHMARK(BM_ParquetRead)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_ParquetReadString)->Unit(benchmark::kMillisecond)->Iterations(10);
 
 //BENCHMARK(BM_ShuffleSplitter)->Args({2, 0})->Args({2, 1})->Args({2, 2})->Unit(benchmark::kMillisecond)->Iterations(1);
 //BENCHMARK(BM_HashShuffleSplitter)->Args({2, 0})->Args({2, 1})->Args({2, 2})->Unit(benchmark::kMillisecond)->Iterations(1);
