@@ -1518,11 +1518,20 @@ static void BM_ParquetReadString(benchmark::State& state)
 
     for (auto _ : state)
     {
+        auto files_info = std::make_shared<FilesInfo>();
+        files_info->files = {file};
+
+        auto builder = std::make_unique<QueryPipelineBuilder>();
+        builder->init(Pipe(std::make_shared<BatchParquetFileSource>(files_info, header, SerializedPlanParser::global_context)));
+        auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
+        auto reader = PullingPipelineExecutor(pipeline);
+        /*
         auto in = std::make_unique<ReadBufferFromFile>(file);
         auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, format_settings);
         auto pipeline = QueryPipeline(std::move(format));
         auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
-        while (reader->pull(res))
+        */
+        while (reader.pull(res))
         {
             debug::headBlock(res);
         }
