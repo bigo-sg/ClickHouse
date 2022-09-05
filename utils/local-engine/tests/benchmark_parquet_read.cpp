@@ -49,9 +49,9 @@ static void BM_ParquetReadDate32(benchmark::State& state)
 {
     using namespace DB;
     Block header{
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_shipdate"),
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_commitdate"),
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_receiptdate")
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_shipdate"),
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_commitdate"),
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_receiptdate")
     };
     std::string file
         = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
@@ -107,11 +107,9 @@ static void BM_OptimizedParquetReadDate32(benchmark::State& state)
     using namespace DB;
     using namespace local_engine;
     Block header{
-        // ColumnWithTypeAndName(DataTypeString().createColumn(), std::make_shared<DataTypeString>(), "l_returnflag"),
-        // ColumnWithTypeAndName(DataTypeString().createColumn(), std::make_shared<DataTypeString>(), "l_linestatus")
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_shipdate"),
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_commitdate"),
-        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeString>(), "l_receiptdate")
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_shipdate"),
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_commitdate"),
+        ColumnWithTypeAndName(DataTypeDate32().createColumn(), std::make_shared<DataTypeDate32>(), "l_receiptdate")
     };
     std::string file = "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
                        "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
