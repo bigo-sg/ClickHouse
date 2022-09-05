@@ -21,7 +21,7 @@ class SparkRowReader
 {
 public:
 
-    bool isSet(int index)
+    bool isSet(int index) const
     {
         assert(index >= 0);
         int64_t mask = 1 << (index & 63);
@@ -30,13 +30,13 @@ public:
         return (word & mask) != 0;
     }
 
-    inline void assertIndexIsValid(int index) const
+    static inline void assertIndexIsValid([[maybe_unused]] int index) 
     {
         assert(index >= 0);
         assert(index < num_fields);
     }
 
-    bool isNullAt(int ordinal)
+    bool isNullAt(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return isSet(ordinal);
@@ -114,14 +114,13 @@ public:
 
     void pointTo(int64_t base_offset_, int32_t size_in_bytes_)
     {
-        this->base_offset = base_offset_;
-        this->size_in_bytes = size_in_bytes_;
+        base_offset = base_offset_;
+        size_in_bytes = size_in_bytes_;
     }
 
     explicit SparkRowReader(int32_t numFields)
-        : num_fields(numFields)
     {
-        this->bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
+        bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
     }
 
 private:
@@ -131,7 +130,6 @@ private:
     }
 
     int64_t base_offset;
-    int32_t num_fields;
     int32_t size_in_bytes;
     int32_t bit_set_width_in_bytes;
 };

@@ -1450,7 +1450,7 @@ QueryPlanPtr joinPlan(QueryPlanPtr left, QueryPlanPtr right, String left_key, St
         auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*pipeline_builder));
         auto executor = PullingPipelineExecutor(pipeline);
         Block header = executor.getHeader();
-        int sum = 0;
+        [[maybe_unused]] int sum = 0;
         while (executor.pull(header))
         {
             sum += header.rows();

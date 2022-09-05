@@ -18,7 +18,67 @@
 #include "jni_common.h"
 
 bool inside_main = true;
+
+
 #ifdef __cplusplus
+std::vector<std::string> stringSplit(const std::string & str, char delim)
+{
+    try
+    {
+        std::string s;
+        s.append(1, delim);
+
+        std::regex reg(s);
+        std::vector<std::string> elems(std::sregex_token_iterator(str.begin(), str.end(), reg, -1), std::sregex_token_iterator());
+        return elems;
+    }
+    catch (DB::Exception & e)
+    {
+        local_engine::ExceptionUtils::handleException(e);
+    }
+}
+
+
+DB::ColumnWithTypeAndName getColumnFromColumnVector(JNIEnv * /*env*/, jobject /*obj*/, jlong block_address, jint column_position)
+{
+    try
+    {
+        DB::Block * block = reinterpret_cast<DB::Block *>(block_address);
+        return block->getByPosition(column_position);
+    }
+    catch (DB::Exception & e)
+    {
+        local_engine::ExceptionUtils::handleException(e);
+    }
+}
+
+std::string jstring2string(JNIEnv * env, jstring jStr)
+{
+    try
+    {
+        if (!jStr)
+            return "";
+
+        jclass string_class = env->GetObjectClass(jStr);
+        jmethodID get_bytes = env->GetMethodID(string_class, "getBytes", "(Ljava/lang/String;)[B");
+        jbyteArray string_jbytes = static_cast<jbyteArray>(env->CallObjectMethod(jStr, get_bytes, env->NewStringUTF("UTF-8")));
+
+        size_t length = static_cast<size_t>(env->GetArrayLength(string_jbytes));
+        jbyte * p_bytes = env->GetByteArrayElements(string_jbytes, nullptr);
+
+        std::string ret = std::string(reinterpret_cast<char *>(p_bytes), length);
+        env->ReleaseByteArrayElements(string_jbytes, p_bytes, JNI_ABORT);
+
+        env->DeleteLocalRef(string_jbytes);
+        env->DeleteLocalRef(string_class);
+        return ret;
+    }
+    catch (DB::Exception & e)
+    {
+        local_engine::ExceptionUtils::handleException(e);
+    }
+}
+
 extern "C" {
 #endif
 
@@ -261,18 +321,6 @@ void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeSetMet
 {
 }
 
-DB::ColumnWithTypeAndName inline getColumnFromColumnVector(JNIEnv * /*env*/, jobject /*obj*/, jlong block_address, jint column_position)
-{
-    try
-    {
-        DB::Block * block = reinterpret_cast<DB::Block *>(block_address);
-        return block->getByPosition(column_position);
-    }
-    catch (DB::Exception & e)
-    {
-        local_engine::ExceptionUtils::handleException(e);
-    }
-}
 
 
 jboolean Java_io_glutenproject_vectorized_CHColumnVector_nativeHasNull(JNIEnv * env, jobject obj, jlong block_address, jint column_position)
@@ -620,49 +668,6 @@ void Java_io_glutenproject_vectorized_CHCoalesceOperator_nativeClose(JNIEnv * /*
     delete instance;
 }
 
-std::string jstring2string(JNIEnv * env, jstring jStr)
-{
-    try
-    {
-        if (!jStr)
-            return "";
-
-        jclass string_class = env->GetObjectClass(jStr);
-        jmethodID get_bytes = env->GetMethodID(string_class, "getBytes", "(Ljava/lang/String;)[B");
-        jbyteArray string_jbytes = static_cast<jbyteArray>(env->CallObjectMethod(jStr, get_bytes, env->NewStringUTF("UTF-8")));
-
-        size_t length = static_cast<size_t>(env->GetArrayLength(string_jbytes));
-        jbyte * p_bytes = env->GetByteArrayElements(string_jbytes, nullptr);
-
-        std::string ret = std::string(reinterpret_cast<char *>(p_bytes), length);
-        env->ReleaseByteArrayElements(string_jbytes, p_bytes, JNI_ABORT);
-
-        env->DeleteLocalRef(string_jbytes);
-        env->DeleteLocalRef(string_class);
-        return ret;
-    }
-    catch (DB::Exception & e)
-    {
-        local_engine::ExceptionUtils::handleException(e);
-    }
-}
-
-std::vector<std::string> stringSplit(const std::string & str, char delim)
-{
-    try
-    {
-        std::string s;
-        s.append(1, delim);
-        std::regex reg(s);
-        std::vector<std::string> elems(std::sregex_token_iterator(str.begin(), str.end(), reg, -1), std::sregex_token_iterator());
-        return elems;
-    }
-    catch (DB::Exception & e)
-    {
-        local_engine::ExceptionUtils::handleException(e);
-    }
-}
-
 
 // Splitter Jni Wrapper
 jlong Java_io_glutenproject_vectorized_CHShuffleSplitterJniWrapper_nativeMake(
@@ -953,4 +958,6 @@ jlong Java_io_glutenproject_vectorized_SimpleExpressionEval_nativeNext(JNIEnv * 
 
 #ifdef __cplusplus
 }
+
+
 #endif

@@ -43,7 +43,7 @@ jstring charTojstring(JNIEnv* env, const char* pat) {
     jclass strClass = (env)->FindClass("Ljava/lang/String;");
     jmethodID ctorID = (env)->GetMethodID(strClass, "<init>", "([BLjava/lang/String;)V");
     jbyteArray bytes = (env)->NewByteArray(strlen(pat));
-    env->SetByteArrayRegion(bytes, 0, strlen(pat), reinterpret_cast<jbyte *>(pat));
+    env->SetByteArrayRegion(bytes, 0, strlen(pat), reinterpret_cast<jbyte *>(const_cast<char *>(pat)));
     jstring encoding = (env)->NewStringUTF("UTF-8");
     jstring result = static_cast<jstring>((env)->NewObject(strClass, ctorID, bytes, encoding));
     env->DeleteLocalRef(bytes);
