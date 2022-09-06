@@ -19,7 +19,6 @@
 
 bool inside_main = true;
 
-
 #ifdef __cplusplus
 std::vector<std::string> stringSplit(const std::string & str, char delim)
 {
@@ -37,7 +36,6 @@ std::vector<std::string> stringSplit(const std::string & str, char delim)
         local_engine::ExceptionUtils::handleException(e);
     }
 }
-
 
 DB::ColumnWithTypeAndName getColumnFromColumnVector(JNIEnv * /*env*/, jobject /*obj*/, jlong block_address, jint column_position)
 {
@@ -131,7 +129,6 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
         = GetMethodID(env, local_engine::WriteBufferFromJavaOutputStream::output_stream_class, "write", "([BII)V");
     local_engine::WriteBufferFromJavaOutputStream::output_stream_flush
         = GetMethodID(env, local_engine::WriteBufferFromJavaOutputStream::output_stream_class, "flush", "()V");
-
 
     local_engine::SourceFromJavaIter::serialized_record_batch_iterator_hasNext
         = GetMethodID(env, local_engine::SourceFromJavaIter::serialized_record_batch_iterator_class, "hasNext", "()Z");
@@ -306,7 +303,6 @@ void Java_io_glutenproject_vectorized_BatchIterator_nativeClose(JNIEnv * /*env*/
     delete executor;
 }
 
-
 void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeSetJavaTmpDir(JNIEnv * /*env*/, jobject /*obj*/, jstring /*dir*/)
 {
 }
@@ -320,8 +316,6 @@ void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeSetMet
     JNIEnv * /*env*/, jobject /*obj*/, jboolean /*setMetricsTime*/)
 {
 }
-
-
 
 jboolean Java_io_glutenproject_vectorized_CHColumnVector_nativeHasNull(JNIEnv * env, jobject obj, jlong block_address, jint column_position)
 {
@@ -366,7 +360,6 @@ jint Java_io_glutenproject_vectorized_CHColumnVector_nativeNumNulls(JNIEnv * env
         local_engine::ExceptionUtils::handleException(e);
     }
 }
-
 
 jboolean Java_io_glutenproject_vectorized_CHColumnVector_nativeIsNullAt(
     JNIEnv * env, jobject obj, jint row_id, jlong block_address, jint column_position)
@@ -595,7 +588,6 @@ jlong Java_io_glutenproject_vectorized_CHStreamReader_nativeNext(JNIEnv * /*env*
     return reinterpret_cast<jlong>(block);
 }
 
-
 void Java_io_glutenproject_vectorized_CHStreamReader_nativeClose(JNIEnv * /*env*/, jobject /*obj*/, jlong shuffle_reader)
 {
     local_engine::ShuffleReader * reader = reinterpret_cast<local_engine::ShuffleReader *>(shuffle_reader);
@@ -667,7 +659,6 @@ void Java_io_glutenproject_vectorized_CHCoalesceOperator_nativeClose(JNIEnv * /*
     local_engine::BlockCoalesceOperator * instance = reinterpret_cast<local_engine::BlockCoalesceOperator *>(instance_address);
     delete instance;
 }
-
 
 // Splitter Jni Wrapper
 jlong Java_io_glutenproject_vectorized_CHShuffleSplitterJniWrapper_nativeMake(
@@ -819,7 +810,6 @@ jint Java_io_glutenproject_vectorized_BlockNativeWriter_nativeResultSize(JNIEnv 
     return static_cast<jint>(writer->collect().size());
 }
 
-
 void Java_io_glutenproject_vectorized_BlockNativeWriter_nativeCollect(JNIEnv * env, jobject, jlong instance, jbyteArray result)
 {
     auto * writer = reinterpret_cast<local_engine::NativeWriterInMemory *>(instance);
@@ -958,6 +948,5 @@ jlong Java_io_glutenproject_vectorized_SimpleExpressionEval_nativeNext(JNIEnv * 
 
 #ifdef __cplusplus
 }
-
 
 #endif

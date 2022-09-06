@@ -145,7 +145,6 @@ SerializedPlanBuilder& SerializedPlanBuilder::readMergeTree(std::string database
 }
 
 
-
 std::unique_ptr<substrait::Plan> SerializedPlanBuilder::build()
 {
     return std::move(this->plan);
@@ -178,7 +177,6 @@ SerializedPlanBuilder & SerializedPlanBuilder::project(std::vector<substrait::Ex
     this->prev_rel = project;
     return *this;
 }
-
 
 substrait::Expression * selection(int32_t field_id)
 {

@@ -23,7 +23,6 @@ static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowR
     int32_t num_fields = columns.size();
     for (int32_t i = 0; i < num_fields; i++)
     {
-//        auto column = columns[i];
         WhichDataType which(columns[i]->getDataType());
         if (which.isUInt8())
         {
@@ -68,7 +67,6 @@ static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowR
         {
             PaddedPODArray<UInt8> & column_chars_t = assert_cast<ColumnString &>(*columns[i]).getChars();
             PaddedPODArray<UInt64> & column_offsets = assert_cast<ColumnString &>(*columns[i]).getOffsets();
-//            auto capacity column_offsets.capacity();
             if (row_num == 0)
             {
                 auto total_size = getStringColumnTotalSize(i, spark_row_info);
@@ -117,7 +115,5 @@ local_engine::SparkColumnToCHColumn::convertCHColumnToSparkRow(local_engine::Spa
     mutable_columns.clear();
     return block;
 }
-
-
 
 }

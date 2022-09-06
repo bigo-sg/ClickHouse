@@ -1,26 +1,23 @@
 #pragma once
 
 #include <Core/Block.h>
-#include <base/StringRef.h>
 #include <Parser/CHColumnToSparkRow.h>
+#include <base/StringRef.h>
 
 namespace local_engine
 {
 using namespace DB;
 
-
-
 class SparkColumnToCHColumn
 {
 public:
-    std::unique_ptr<Block> convertCHColumnToSparkRow(SparkRowInfo & spark_row_info, Block& header);
+    static std::unique_ptr<Block> convertCHColumnToSparkRow(SparkRowInfo & spark_row_info, Block & header);
 };
 }
 
 class SparkRowReader
 {
 public:
-
     bool isSet(int index) const
     {
         assert(index >= 0);
@@ -30,7 +27,7 @@ public:
         return (word & mask) != 0;
     }
 
-    static inline void assertIndexIsValid([[maybe_unused]] int index) 
+    static inline void assertIndexIsValid([[maybe_unused]] int index)
     {
         assert(index >= 0);
         assert(index < num_fields);
@@ -53,7 +50,6 @@ public:
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<uint8_t *>(getFieldOffset(ordinal));
     }
-
 
     int16_t getShort(int ordinal)
     {
@@ -118,16 +114,10 @@ public:
         size_in_bytes = size_in_bytes_;
     }
 
-    explicit SparkRowReader(int32_t numFields)
-    {
-        bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
-    }
+    explicit SparkRowReader(int32_t numFields) { bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields); }
 
 private:
-    int64_t getFieldOffset(int ordinal) const
-    {
-        return base_offset + bit_set_width_in_bytes + ordinal * 8L;
-    }
+    int64_t getFieldOffset(int ordinal) const { return base_offset + bit_set_width_in_bytes + ordinal * 8L; }
 
     int64_t base_offset;
     int32_t size_in_bytes;
