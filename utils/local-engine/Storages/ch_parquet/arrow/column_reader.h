@@ -369,9 +369,9 @@ using namespace parquet::internal;
     class CHStringArray : public ::arrow::BinaryArray
     {
     public:
-        CHStringArray(DB::ColumnWithTypeAndName column, std::shared_ptr<::arrow::Array> fake_array) : BinaryArray(fake_array -> data())
+        CHStringArray(DB::ColumnWithTypeAndName column_, std::shared_ptr<::arrow::Array> fake_array_)
+            : BinaryArray(fake_array_->data()), column(std::move(column_))
         {
-            this->column = column;
         }
 
         DB::ColumnWithTypeAndName column;

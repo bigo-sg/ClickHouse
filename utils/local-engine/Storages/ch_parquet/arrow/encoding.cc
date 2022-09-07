@@ -46,6 +46,7 @@
 #include "parquet/platform.h"
 #include "parquet/schema.h"
 #include "parquet/types.h"
+#include <Columns/ColumnNullable.h>
 
 namespace BitUtil = arrow::BitUtil;
 
@@ -975,6 +976,8 @@ class PlainDecoder : public DecoderImpl, virtual public TypedDecoder<DType> {
   int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,
                   int64_t valid_bits_offset,
                   typename EncodingTraits<DType>::DictAccumulator* builder) override;
+
+//   int DecodeClickHouse(int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column) override;
 };
 
 template <>
@@ -1052,6 +1055,44 @@ int PlainDecoder<DType>::DecodeArrow(
   len_ -= sizeof(value_type) * values_decoded;
   return values_decoded;
 }
+
+
+/*
+template <typename DType>
+int PlainDecoder<DType>::DecodeClickHouse(
+    int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column)
+{
+    using value_type = typename DType::c_type;
+
+    constexpr int value_size = static_cast<int>(sizeof(value_type));
+    int values_decoded = num_values - null_count;
+    if (ARROW_PREDICT_FALSE(len_ < value_size * values_decoded)) {
+        ParquetException::EofException();
+    }
+
+    column.reserve(num_values);
+    ColumnNullable & nullable = assert_cast<ColumnNullable &>(column);
+    VisitNullBitmapInline(
+        valid_bits,
+        valid_bits_offset,
+        num_values,
+        null_count,
+        [&]()
+        {
+            // Field f =
+            nullable.insert(::arrow::util::SafeLoadAs<value_type>(data_)));
+            // nullable.insertDefault();
+            data_ += sizeof(value_type);
+        },
+        [&]() { nullable.insertDefault(); });
+
+    num_values_ -= values_decoded;
+    len_ -= sizeof(value_type) * values_decoded;
+    return values_decoded;
+    /// todo exception process
+}
+*/
+
 
 // Decode routine templated on C++ type rather than type enum
 template <typename T>

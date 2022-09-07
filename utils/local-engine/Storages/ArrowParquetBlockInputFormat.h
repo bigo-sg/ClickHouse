@@ -1,5 +1,10 @@
 #pragma once
 
+<<<<<<< HEAD
+=======
+#include "ch_parquet/OptimizedParquetBlockInputFormat.h"
+#include "ch_parquet/OptimizedArrowColumnToCHColumn.h"
+>>>>>>> benchmark_parquet_optimize
 #include <Common/ChunkBuffer.h>
 #include "ch_parquet/ArrowColumnToCHColumn.h"
 #include "ch_parquet/ParquetBlockInputFormat.h"
@@ -13,11 +18,10 @@ class Table;
 
 namespace local_engine
 {
-class ArrowParquetBlockInputFormat : public DB::ParquetBlockInputFormat
+class ArrowParquetBlockInputFormat : public DB::OptimizedParquetBlockInputFormat
 {
 public:
     ArrowParquetBlockInputFormat(DB::ReadBuffer & in, const DB::Block & header, const DB::FormatSettings & formatSettings);
-    //virtual ~ArrowParquetBlockInputFormat();
 
 private:
     DB::Chunk generate() override;

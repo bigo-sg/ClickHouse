@@ -315,6 +315,11 @@ class TypedDecoder : virtual public Decoder {
     }
   }
 
+/*
+  virtual int DecodeClickHouse(int num_values, int null_count, const uint8_t* valid_bits,
+                          int64_t valid_bits_offset, IColumn & column) = 0;
+                          */
+
   virtual int DecodeCH(int num_values, int null_count, const uint8_t* valid_bits,
                           int64_t valid_bits_offset,
                        PaddedPODArray<UInt8>* column_chars_t_p,
