@@ -1,5 +1,7 @@
-from argparse import ArgumentParser
 import os
+import re
+import subprocess
+from argparse import ArgumentParser
 from multiprocessing import Pool
 
 parser = ArgumentParser()
@@ -7,7 +9,7 @@ parser.add_argument("--path", type=str, required=True, help="temp directory for 
 parser.add_argument("--source", type=str, required=True, help="directory of parquet files")
 parser.add_argument("--dst", type=str, required=True, help="destination directory for merge tree")
 parser.add_argument("--schema", type=str,
-                    default="l_orderkey Int64,l_partkey Int64,l_suppkey Int64,l_linenumber Int64,l_quantity Float64,l_extendedprice Float64,l_discount Float64,l_tax Float64,l_returnflag String,l_linestatus String,l_shipdate Date,l_commitdate Date,l_receiptdate Date,l_shipinstruct String,l_shipmode String,l_comment String")
+                    default="l_orderkey Nullable(Int64),l_partkey Nullable(Int64),l_suppkey Nullable(Int64),l_linenumber Nullable(Int64),l_quantity Nullable(Float64),l_extendedprice Nullable(Float64),l_discount Nullable(Float64),l_tax Nullable(Float64),l_returnflag Nullable(String),l_linestatus Nullable(String),l_shipdate Nullable(Date),l_commitdate Nullable(Date),l_receiptdate Nullable(Date),l_shipinstruct Nullable(String),l_shipmode Nullable(String),l_comment Nullable(String)")
 
 
 def get_transform_command(data_path,
@@ -84,6 +86,16 @@ def multi_transform(data_path, source, schema, dst):
     pool.map(engine, list(data_inputs))  # process data_inputs iterable with pool
 
 
+def check_version(version):
+    proc = subprocess.Popen(["clickhouse-local", "--version"], stdout=subprocess.PIPE, shell=False)
+    (out, err) = proc.communicate()
+    if err:
+        raise Exception(f"Fail to call clickhouse-local, error: {err}")
+    ver = re.search(r'version\s*([\d.]+)', str(out)).group(1)
+    ver_12 = float(ver.split('.')[0] + '.' + ver.split('.')[1])
+    if ver_12 >= float(version):
+        raise Exception(f"Version of clickhouse-local too high({ver}), should be <= 22.5")
+
 """
 python3 parquet_to_mergetree.py --path=/root/data/tmp --source=/home/ubuntu/tpch-data-sf100/lineitem --dst=/root/data/mergetree
 """
@@ -92,4 +104,5 @@ if __name__ == '__main__':
     if not os.path.exists(args.dst):
         os.mkdir(args.dst)
     #transform(args.path, args.source, args.schema, args.dst)
+    check_version('22.6')
     multi_transform(args.path, args.source, args.schema, args.dst)
