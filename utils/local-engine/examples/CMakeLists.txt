@@ -1,0 +1,4 @@
+
+add_executable(optimized_parquet_read optimized_parquet_read.cpp)
+
+target_link_libraries(optimized_parquet_read PRIVATE ${LOCALENGINE_SHARED_LIB})

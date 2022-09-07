@@ -32,6 +32,8 @@
 
 #include <base/types.h>
 #include <Columns/ColumnString.h>
+#include <DataTypes/DataTypesNumber.h>
+#include <DataTypes/DataTypeNullable.h>
 
 
 namespace arrow {
@@ -315,10 +317,13 @@ class TypedDecoder : virtual public Decoder {
     }
   }
 
-/*
   virtual int DecodeClickHouse(int num_values, int null_count, const uint8_t* valid_bits,
-                          int64_t valid_bits_offset, IColumn & column) = 0;
-                          */
+                          int64_t valid_bits_offset, IColumn & column)
+//  { std::cout << "decode1" << std::endl;}
+    {
+        // std::cout << StackTrace().toString() << std::endl;
+        throw ParquetException("not implemented for type:" + std::to_string(DType::type_num));
+  }
 
   virtual int DecodeCH(int num_values, int null_count, const uint8_t* valid_bits,
                           int64_t valid_bits_offset,
@@ -485,7 +490,17 @@ std::unique_ptr<typename EncodingTraits<DType>::Decoder> MakeTypedDecoder(
     Encoding::type encoding, const ColumnDescriptor* descr = NULLPTR) {
   using OutType = typename EncodingTraits<DType>::Decoder;
   std::unique_ptr<Decoder> base = MakeDecoder(DType::type_num, encoding, descr);
-  return std::unique_ptr<OutType>(dynamic_cast<OutType*>(base.release()));
+  auto res = std::unique_ptr<OutType>(dynamic_cast<OutType*>(base.release()));
+
+/*
+  using namespace DB;
+  auto type = std::make_shared<DataTypeNullable>(std::make_shared<DataTypeInt64>());
+  auto column = type->createColumn();
+  std::cout << "start" << std::endl;
+  res->DecodeClickHouse(0, 0, nullptr, 0, *column);
+  std::cout << "finish" << std::endl;
+  */
+  return move(res);
 }
 
 }  // namespace parquet

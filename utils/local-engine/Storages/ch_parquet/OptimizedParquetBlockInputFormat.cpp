@@ -62,6 +62,7 @@ Chunk OptimizedParquetBlockInputFormat::generate()
     ++row_group_current;
 
     arrow_column_to_ch_column->arrowTableToCHChunk(res, table);
+    std::cerr << res.getNumRows() << std::endl;
 
     /// If defaults_for_omitted_fields is true, calculate the default values from default expression for omitted fields.
     /// Otherwise fill the missing columns with zero values of its type.

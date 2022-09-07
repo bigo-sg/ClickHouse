@@ -346,13 +346,26 @@ static ColumnWithTypeAndName readColumnFromArrowColumn(
         return {std::move(nullable_column), std::move(nullable_type), column_name};
     }
 
-    auto * ch_chunk_array_p = dynamic_cast<ch_parquet::internal::CHStringArray *>(arrow_column->chunk(0).get());
-    if (ch_chunk_array_p != nullptr)
     {
-        //the values are already written into CH Column, not arrow array
-        ch_chunk_array_p->column.name = column_name;
-        return ch_chunk_array_p->column;
+        auto * ch_chunk_array_p = dynamic_cast<ch_parquet::internal::CHStringArray *>(arrow_column->chunk(0).get());
+        if (ch_chunk_array_p != nullptr)
+        {
+            //the values are already written into CH Column, not arrow array
+            ch_chunk_array_p->column.name = column_name;
+            return ch_chunk_array_p->column;
+        }
     }
+
+    {
+        auto * ch_chunk_array_p = dynamic_cast<ch_parquet::internal::CHInt64Array *>(arrow_column->chunk(0).get());
+        if (ch_chunk_array_p != nullptr)
+        {
+            //the values are already written into CH Column, not arrow array
+            ch_chunk_array_p->column.name = column_name;
+            return ch_chunk_array_p->column;
+        }
+    }
+
 
     switch (arrow_column->type()->id())
     {

@@ -1,13 +1,8 @@
 #pragma once
 
-<<<<<<< HEAD
-=======
+#include <Common/ChunkBuffer.h>
 #include "ch_parquet/OptimizedParquetBlockInputFormat.h"
 #include "ch_parquet/OptimizedArrowColumnToCHColumn.h"
->>>>>>> benchmark_parquet_optimize
-#include <Common/ChunkBuffer.h>
-#include "ch_parquet/ArrowColumnToCHColumn.h"
-#include "ch_parquet/ParquetBlockInputFormat.h"
 #include "ch_parquet/arrow/reader.h"
 
 namespace arrow

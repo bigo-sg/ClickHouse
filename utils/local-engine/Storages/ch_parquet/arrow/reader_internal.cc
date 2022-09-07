@@ -443,6 +443,13 @@ Status TransferBinary(RecordReader* reader, MemoryPool* pool,
       return Status::OK();
   }
 
+  if (chunks.size() > 0 && dynamic_cast<::ch_parquet::internal::CHInt64Array *>(chunks.at(0).get()) != nullptr) {
+      //bypass any cast if it's already CHInt64Array 
+      *out = std::make_shared<ChunkedArray>(chunks, logical_value_type);
+      return Status::OK();
+  }
+
+
   for (auto& chunk : chunks) {
     if (!chunk->type()->Equals(*logical_value_type)) {
       // XXX: if a LargeBinary chunk is larger than 2GB, the MSBs of offsets

@@ -19,6 +19,48 @@
 #include <Storages/BatchParquetFileSource.h>
 #include <Parser/SerializedPlanParser.h>
 
+static void helper(const DB::Block & header, const std::string & file, const DB::FormatSettings & format_settings = {})
+{
+    using namespace DB;
+
+    auto in = std::make_unique<ReadBufferFromFile>(file);
+
+    auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, format_settings);
+
+    auto pipeline = QueryPipeline(std::move(format));
+    auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
+
+    Block res;
+    int rows = 0;
+    while (reader->pull(res))
+    {
+        rows += res.rows();
+    }
+    std::cerr << "rows:" << rows << std::endl;;
+}
+
+static void optimizedHelper(const DB::Block & header, const std::string & file)
+{
+    using namespace DB;
+    using namespace local_engine;
+
+    auto files_info = std::make_shared<local_engine::FilesInfo>();
+    files_info->files = {file};
+
+    auto builder = std::make_unique<QueryPipelineBuilder>();
+    builder->init(Pipe(
+        std::make_shared<local_engine::BatchParquetFileSource>(files_info, header, local_engine::SerializedPlanParser::global_context)));
+    auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
+    auto reader = PullingPipelineExecutor(pipeline);
+
+    Block res;
+    int rows = 0;
+    while (reader.pull(res))
+    {
+        rows += res.rows();
+    }
+    std::cerr << "optimized rows:" << rows << std::endl;;
+}
 
 static void BM_ParquetReadString(benchmark::State& state)
 {
@@ -30,17 +72,10 @@ static void BM_ParquetReadString(benchmark::State& state)
     std::string file
         = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
     FormatSettings format_settings;
-    Block res;
+
     for (auto _ : state)
     {
-        auto in = std::make_unique<ReadBufferFromFile>(file);
-        auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, format_settings);
-        auto pipeline = QueryPipeline(std::move(format));
-        auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
-        while (reader->pull(res))
-        {
-            // debug::headBlock(res);
-        }
+        helper(header, file, format_settings);
     }
 }
 
@@ -56,17 +91,9 @@ static void BM_ParquetReadDate32(benchmark::State& state)
     std::string file
         = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
     FormatSettings format_settings;
-    Block res;
     for (auto _ : state)
     {
-        auto in = std::make_unique<ReadBufferFromFile>(file);
-        auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, format_settings);
-        auto pipeline = QueryPipeline(std::move(format));
-        auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
-        while (reader->pull(res))
-        {
-            // debug::headBlock(res);
-        }
+        helper(header, file, format_settings);
     }
 }
 
@@ -85,18 +112,7 @@ static void BM_OptimizedParquetReadString(benchmark::State& state)
 
     for (auto _ : state)
     {
-        auto files_info = std::make_shared<local_engine::FilesInfo>();
-        files_info->files = {file};
-
-        auto builder = std::make_unique<QueryPipelineBuilder>();
-        builder->init(Pipe(std::make_shared<local_engine::BatchParquetFileSource>(
-            files_info, header, local_engine::SerializedPlanParser::global_context)));
-        auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
-        auto reader = PullingPipelineExecutor(pipeline);
-        while (reader.pull(res))
-        {
-            // debug::headBlock(res);
-        }
+        optimizedHelper(header, file);
     }
 }
 
@@ -113,28 +129,55 @@ static void BM_OptimizedParquetReadDate32(benchmark::State& state)
     };
     std::string file = "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
                        "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
-    Block res;
-
     for (auto _ : state)
     {
-        auto files_info = std::make_shared<local_engine::FilesInfo>();
-        files_info->files = {file};
+        optimizedHelper(header, file);
+    }
+}
 
-        auto builder = std::make_unique<QueryPipelineBuilder>();
-        builder->init(Pipe(std::make_shared<local_engine::BatchParquetFileSource>(
-            files_info, header, local_engine::SerializedPlanParser::global_context)));
-        auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
-        auto reader = PullingPipelineExecutor(pipeline);
-        while (reader.pull(res))
-        {
-            // debug::headBlock(res);
-        }
+
+static void BM_ParquetReadInt64(benchmark::State& state)
+{
+    using namespace DB;
+    using namespace local_engine;
+    Block header{
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_orderkey"),
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_partkey"),
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_suppkey")
+    };
+    std::string file = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
+                       "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
+    for (auto _ : state)
+    {
+        helper(header, file);
+    }
+}
+
+
+static void BM_OptimizedParquetReadInt64(benchmark::State& state)
+{
+    using namespace DB;
+    using namespace local_engine;
+    Block header{
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_orderkey"),
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_partkey"),
+        ColumnWithTypeAndName(DataTypeInt64().createColumn(), std::make_shared<DataTypeInt64>(), "l_suppkey")
+    };
+    std::string file = "file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
+                       "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
+    for (auto _ : state)
+    {
+        optimizedHelper(header, file);
     }
 }
 
 
 BENCHMARK(BM_ParquetReadString)->Unit(benchmark::kMillisecond)->Iterations(10);
-BENCHMARK(BM_ParquetReadDate32)->Unit(benchmark::kMillisecond)->Iterations(10);
 BENCHMARK(BM_OptimizedParquetReadString)->Unit(benchmark::kMillisecond)->Iterations(10);
-BENCHMARK(BM_OptimizedParquetReadDate32)->Unit(benchmark::kMillisecond)->Iterations(200);
+
+BENCHMARK(BM_ParquetReadDate32)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_OptimizedParquetReadDate32)->Unit(benchmark::kMillisecond)->Iterations(10);
+
+BENCHMARK(BM_ParquetReadInt64)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_OptimizedParquetReadInt64)->Unit(benchmark::kMillisecond)->Iterations(10);
 

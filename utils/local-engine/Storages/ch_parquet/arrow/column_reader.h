@@ -377,6 +377,16 @@ using namespace parquet::internal;
         DB::ColumnWithTypeAndName column;
     };
 
+    class CHInt64Array : public ::arrow::Int64Array
+    {
+    public:
+        CHInt64Array(DB::ColumnWithTypeAndName column_, std::shared_ptr<::arrow::Array> fake_array_)
+            : ::arrow::Int64Array(fake_array_->data()), column(std::move(column_))
+        {
+        }
+        DB::ColumnWithTypeAndName column;
+    };
+
     class BinaryRecordReader : virtual public RecordReader {
     public:
         virtual std::vector<std::shared_ptr<::arrow::Array>> GetBuilderChunks() = 0;

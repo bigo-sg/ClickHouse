@@ -325,7 +325,7 @@ int main(int argc, char ** argv)
     local_engine::SerializedPlanParser::global_context = Context::createGlobal(shared_context.get());
     local_engine::SerializedPlanParser::global_context->makeGlobalContext();
     local_engine::SerializedPlanParser::global_context->setConfig(local_engine::SerializedPlanParser::config);
-    local_engine::SerializedPlanParser::global_context->setPath("/tmp");
+    local_engine::SerializedPlanParser::global_context->setPath("/data1/liyang/cppproject/kyli/ClickHouse/utils/local-engine/tests/log");
     local_engine::SerializedPlanParser::global_context->getDisksMap().emplace();
     local_engine::SerializedPlanParser::initFunctionEnv();
     ::testing::InitGoogleTest(&argc, argv);

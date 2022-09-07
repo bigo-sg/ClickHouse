@@ -977,7 +977,7 @@ class PlainDecoder : public DecoderImpl, virtual public TypedDecoder<DType> {
                   int64_t valid_bits_offset,
                   typename EncodingTraits<DType>::DictAccumulator* builder) override;
 
-//   int DecodeClickHouse(int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column) override;
+  int DecodeClickHouse(int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column) override;
 };
 
 template <>
@@ -1056,13 +1056,34 @@ int PlainDecoder<DType>::DecodeArrow(
   return values_decoded;
 }
 
+template <>
+inline int PlainDecoder<Int96Type>::DecodeClickHouse(
+    int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+{
+    ParquetException::NYI("DecodeClickHouse not supported for Int96");
+}
 
-/*
+template <>
+inline int PlainDecoder<ByteArrayType>::DecodeClickHouse(
+    int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+{
+    ParquetException::NYI("DecodeClickHouse not supported for ByteArray");
+}
+
+template <>
+inline int PlainDecoder<FLBAType>::DecodeClickHouse(
+    int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+{
+    ParquetException::NYI("DecodeClickHouse not supported for FLBA");
+}
+
 template <typename DType>
 int PlainDecoder<DType>::DecodeClickHouse(
     int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column)
 {
     using value_type = typename DType::c_type;
+
+    // std::cout << "decodeclickhouse2" << std::endl;
 
     constexpr int value_size = static_cast<int>(sizeof(value_type));
     int values_decoded = num_values - null_count;
@@ -1079,9 +1100,7 @@ int PlainDecoder<DType>::DecodeClickHouse(
         null_count,
         [&]()
         {
-            // Field f =
-            nullable.insert(::arrow::util::SafeLoadAs<value_type>(data_)));
-            // nullable.insertDefault();
+            nullable.insert(::arrow::util::SafeLoadAs<value_type>(data_));
             data_ += sizeof(value_type);
         },
         [&]() { nullable.insertDefault(); });
@@ -1089,9 +1108,7 @@ int PlainDecoder<DType>::DecodeClickHouse(
     num_values_ -= values_decoded;
     len_ -= sizeof(value_type) * values_decoded;
     return values_decoded;
-    /// todo exception process
 }
-*/
 
 
 // Decode routine templated on C++ type rather than type enum
@@ -1673,6 +1690,8 @@ class DictDecoderImpl : public DecoderImpl, virtual public DictDecoder<Type> {
                   int64_t valid_bits_offset,
                   typename EncodingTraits<Type>::DictAccumulator* out) override;
 
+  int DecodeClickHouse(int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column) override;
+
   void InsertDictionary(::arrow::ArrayBuilder* builder) override;
 
   int DecodeIndicesSpaced(int num_values, int null_count, const uint8_t* valid_bits,
@@ -1979,6 +1998,65 @@ int DictDecoderImpl<Type>::DecodeArrow(
       [&]() { builder->UnsafeAppendNull(); });
 
   return num_values - null_count;
+}
+
+
+// template <>
+// int DictDecoderImpl<BooleanType>::DecodeClickHouse(
+    // int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+// {
+    // ParquetException::NYI("No dictionary encoding for BooleanType");
+// }
+// 
+// 
+// template <>
+// int DictDecoderImpl<Int96>::DecodeClickHouse(
+    // int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+// {
+    // ParquetException::NYI("No dictionary encoding for Int96Type");
+// }
+// 
+// 
+// template <>
+// int DictDecoderImpl<ByteArrayType>::DecodeClickHouse(
+    // int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+// {
+    // ParquetException::NYI("No dictionary encoding for ByteArrayType");
+// }
+// 
+// 
+// template <>
+// int DictDecoderImpl<FLBAType>::DecodeClickHouse(
+    // int /*num_values*/, int /*null_count*/, const uint8_t * /*valid_bits*/, int64_t /*valid_bits_offset*/, IColumn & /*column*/)
+// {
+    // ParquetException::NYI("No dictionary encoding for FLBAType");
+// }
+
+template <typename DType>
+int DictDecoderImpl<DType>::DecodeClickHouse(
+    int num_values, int null_count, const uint8_t * valid_bits, int64_t valid_bits_offset, IColumn & column)
+{
+    auto dict_values = reinterpret_cast<const typename DType::c_type *>(dictionary_->data());
+
+    column.reserve(num_values);
+    auto & nullable = assert_cast<ColumnNullable &>(column);
+    VisitNullBitmapInline(
+        valid_bits,
+        valid_bits_offset,
+        num_values,
+        null_count,
+        [&]()
+        {
+            int32_t index;
+            if (ARROW_PREDICT_FALSE(!idx_decoder_.Get(&index)))
+                throw ParquetException("");
+            PARQUET_THROW_NOT_OK(IndexInBounds(index));
+            // nullable.insert(dict_values[index]);
+            nullable.insertDefault();
+        },
+        [&]() { nullable.insertDefault(); });
+
+    return num_values - null_count;
 }
 
 template <typename Type>
@@ -2796,49 +2874,61 @@ std::unique_ptr<Encoder> MakeEncoder(Type::type type_num, Encoding::type encodin
 
 std::unique_ptr<Decoder> MakeDecoder(Type::type type_num, Encoding::type encoding,
                                      const ColumnDescriptor* descr) {
-  if (encoding == Encoding::PLAIN) {
-    switch (type_num) {
-      case Type::BOOLEAN:
-        return std::unique_ptr<Decoder>(new PlainBooleanDecoder(descr));
-      case Type::INT32:
-        return std::unique_ptr<Decoder>(new PlainDecoder<Int32Type>(descr));
-      case Type::INT64:
-        return std::unique_ptr<Decoder>(new PlainDecoder<Int64Type>(descr));
-      case Type::INT96:
-        return std::unique_ptr<Decoder>(new PlainDecoder<Int96Type>(descr));
-      case Type::FLOAT:
-        return std::unique_ptr<Decoder>(new PlainDecoder<FloatType>(descr));
-      case Type::DOUBLE:
-        return std::unique_ptr<Decoder>(new PlainDecoder<DoubleType>(descr));
-      case Type::BYTE_ARRAY:
-        return std::unique_ptr<Decoder>(new PlainByteArrayDecoder(descr));
-      case Type::FIXED_LEN_BYTE_ARRAY:
-        return std::unique_ptr<Decoder>(new PlainFLBADecoder(descr));
-      default:
-        break;
-    }
-  } else if (encoding == Encoding::BYTE_STREAM_SPLIT) {
-    switch (type_num) {
-      case Type::FLOAT:
-        return std::unique_ptr<Decoder>(new ByteStreamSplitDecoder<FloatType>(descr));
-      case Type::DOUBLE:
-        return std::unique_ptr<Decoder>(new ByteStreamSplitDecoder<DoubleType>(descr));
-      default:
-        throw ParquetException("BYTE_STREAM_SPLIT only supports FLOAT and DOUBLE");
-        break;
-    }
-  } else if (encoding == Encoding::DELTA_BINARY_PACKED) {
-    switch (type_num) {
-      case Type::INT32:
-        return std::unique_ptr<Decoder>(new DeltaBitPackDecoder<Int32Type>(descr));
-      case Type::INT64:
-        return std::unique_ptr<Decoder>(new DeltaBitPackDecoder<Int64Type>(descr));
-      default:
-        throw ParquetException("DELTA_BINARY_PACKED only supports INT32 and INT64");
-        break;
-    }
-  } else {
-    ParquetException::NYI("Selected encoding is not supported");
+    // std::cout << "type:" << type_num << ", encoding:" << encoding << ", column:" << descr->ToString() << std::endl;
+    // std::cout << "stack:" << StackTrace().toString() << std::endl;
+    if (encoding == Encoding::PLAIN)
+    {
+        switch (type_num)
+        {
+            case Type::BOOLEAN:
+                return std::unique_ptr<Decoder>(new PlainBooleanDecoder(descr));
+            case Type::INT32:
+                return std::unique_ptr<Decoder>(new PlainDecoder<Int32Type>(descr));
+            case Type::INT64:
+                return std::unique_ptr<Decoder>(new PlainDecoder<Int64Type>(descr));
+            case Type::INT96:
+                return std::unique_ptr<Decoder>(new PlainDecoder<Int96Type>(descr));
+            case Type::FLOAT:
+                return std::unique_ptr<Decoder>(new PlainDecoder<FloatType>(descr));
+            case Type::DOUBLE:
+                return std::unique_ptr<Decoder>(new PlainDecoder<DoubleType>(descr));
+            case Type::BYTE_ARRAY:
+                return std::unique_ptr<Decoder>(new PlainByteArrayDecoder(descr));
+            case Type::FIXED_LEN_BYTE_ARRAY:
+                return std::unique_ptr<Decoder>(new PlainFLBADecoder(descr));
+            default:
+                break;
+        }
+  }
+  else if (encoding == Encoding::BYTE_STREAM_SPLIT)
+  {
+      switch (type_num)
+      {
+          case Type::FLOAT:
+              return std::unique_ptr<Decoder>(new ByteStreamSplitDecoder<FloatType>(descr));
+          case Type::DOUBLE:
+              return std::unique_ptr<Decoder>(new ByteStreamSplitDecoder<DoubleType>(descr));
+          default:
+              throw ParquetException("BYTE_STREAM_SPLIT only supports FLOAT and DOUBLE");
+              break;
+      }
+  }
+  else if (encoding == Encoding::DELTA_BINARY_PACKED)
+  {
+      switch (type_num)
+      {
+          case Type::INT32:
+              return std::unique_ptr<Decoder>(new DeltaBitPackDecoder<Int32Type>(descr));
+          case Type::INT64:
+              return std::unique_ptr<Decoder>(new DeltaBitPackDecoder<Int64Type>(descr));
+          default:
+              throw ParquetException("DELTA_BINARY_PACKED only supports INT32 and INT64");
+              break;
+      }
+  }
+  else
+  {
+      ParquetException::NYI("Selected encoding is not supported");
   }
   DCHECK(false) << "Should not be able to reach this code";
   return nullptr;

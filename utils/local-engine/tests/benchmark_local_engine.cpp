@@ -166,10 +166,8 @@ DB::ContextMutablePtr global_context;
     for (auto _ : state)
     {
         auto files = std::make_shared<FilesInfo>();
-        files->files = {
-            "file:///home/hongbin/code/gluten/jvm/src/test/resources/tpch-data/lineitem/"
-            "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet",
-        };
+        files->files = {"file:///data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
+                        "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet"};
         auto builder = std::make_unique<QueryPipelineBuilder>();
         builder->init(Pipe(std::make_shared<BatchParquetFileSource>(files, header, SerializedPlanParser::global_context)));
         auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
@@ -1498,7 +1496,7 @@ int main(int argc, char ** argv)
     global_context = Context::createGlobal(shared_context.get());
     global_context->makeGlobalContext();
     global_context->setConfig(local_engine::SerializedPlanParser::config);
-    const std::string path = "/";
+    const std::string path = "/data1/liyang/cppproject/kyli/ClickHouse/utils/local-engine/tests/log";
     global_context->setPath(path);
     SerializedPlanParser::global_context = global_context;
     local_engine::SerializedPlanParser::initFunctionEnv();

@@ -694,6 +694,7 @@ namespace {
 
                 std::unique_ptr<DictDecoder<DType>> decoder = MakeDictDecoder<DType>(descr_, pool_);
                 decoder->SetDict(dictionary.get());
+                // std::cout << "branch3, encoding:" << encoding << std::endl;
                 decoders_[encoding] =
                     std::unique_ptr<DecoderType>(dynamic_cast<DecoderType*>(decoder.release()));
             } else {
@@ -797,16 +798,20 @@ namespace {
                 encoding = Encoding::RLE_DICTIONARY;
             }
 
+            // std::cout << "encoding: " << encoding << std::endl;
             auto it = decoders_.find(static_cast<int>(encoding));
             if (it != decoders_.end()) {
+                // std::cout << "branch1:" << descr_->name() << std::endl;
                 DCHECK(it->second.get() != nullptr);
                 if (encoding == Encoding::RLE_DICTIONARY) {
                     DCHECK(current_decoder_->encoding() == Encoding::RLE_DICTIONARY);
                 }
                 current_decoder_ = it->second.get();
             } else {
+                // std::cout << "branch2" << std::endl;
                 switch (encoding) {
                     case Encoding::PLAIN: {
+                        // std::cout << "start make decoder" << std::endl;
                         auto decoder = MakeTypedDecoder<DType>(Encoding::PLAIN, descr_);
                         current_decoder_ = decoder.get();
                         decoders_[static_cast<int>(encoding)] = std::move(decoder);
@@ -1829,6 +1834,94 @@ namespace internal {
             typename EncodingTraits<ByteArrayType>::Accumulator accumulator_;
         };
 
+        class CHInt64ChunkedRecordReader : public TypedRecordReader<Int64Type>, virtual public BinaryRecordReader
+        {
+        public:
+            CHInt64ChunkedRecordReader(const ColumnDescriptor * descr, LevelInfo leaf_info, ::arrow::MemoryPool * pool)
+                : TypedRecordReader<Int64Type>(descr, std::move(leaf_info), pool)
+            {
+                DCHECK_EQ(descr_->physical_type(), Type::INT64);
+                this->pool = pool;
+            }
+
+            void initialize()
+            {
+                accumulator_ = ::arrow::NumericBuilder<::arrow::Int64Type>(pool);
+                if (!fake_array) {
+                    accumulator_.AppendNulls(8192);
+                    accumulator_.Finish(&fake_array);
+                }
+                inited = true;
+            }
+
+            void createColumnIfNeeded() {
+                if (!internal_column || !internal_type) {
+                    internal_type = std::make_shared<DataTypeNullable>(std::make_shared<DataTypeInt64>());
+                    internal_column = internal_type->createColumn();
+                }
+            }
+
+            ::arrow::ArrayVector GetBuilderChunks() override
+            {
+                if (!internal_column) { // !internal_column happens at the last empty chunk
+                    return {};
+                } else {
+                    MutableColumnPtr temp = std::move(internal_column);
+                    internal_column.reset();
+
+                    fake_array->data()->length = temp->size();//the last batch's size may < 8192
+                    fake_array->data()->SetNullCount(null_counter);
+                    null_counter = 0;
+                    value_counter = 0;
+                    return {std::make_shared<CHInt64Array>(
+                        ColumnWithTypeAndName(std::move(temp), internal_type, ""),fake_array)};
+                }
+            }
+
+            void ReadValuesDense(int64_t values_to_read) override
+            {
+                if (unlikely(!inited)) {initialize();}
+
+                createColumnIfNeeded();
+                int64_t num_decoded
+                    = this->current_decoder_->DecodeClickHouse(static_cast<int>(values_to_read), 0, nullptr, 0, *internal_column);
+                DCHECK_EQ(num_decoded, values_to_read);
+                ResetValues();
+
+                value_counter += values_to_read;
+            }
+
+            void ReadValuesSpaced(int64_t values_to_read, int64_t null_count) override
+            {
+                if (unlikely(!inited)) {initialize();}
+
+                createColumnIfNeeded();
+                int64_t num_decoded = this->current_decoder_->DecodeClickHouse(
+                    static_cast<int>(values_to_read),
+                    static_cast<int>(null_count),
+                    valid_bits_->mutable_data(),
+                    values_written_,
+                    *internal_column);
+
+                null_counter += null_count;
+                value_counter += values_to_read;
+                DCHECK_EQ(num_decoded, values_to_read - null_count);
+                ResetValues();
+            }
+
+        private:
+            bool inited = false;
+            DataTypePtr internal_type;
+            MutableColumnPtr internal_column;
+            ::arrow::MemoryPool * pool;
+
+            std::shared_ptr<::arrow::Array> fake_array;
+            int64_t null_counter = 0;
+            int64_t value_counter = 0;
+
+            // Helper data structure for accumulating builder chunks
+            typename EncodingTraits<Int64Type>::Accumulator accumulator_;
+        };
 
 
         class ByteArrayDictionaryRecordReader : public TypedRecordReader<ByteArrayType>,
@@ -1946,7 +2039,8 @@ namespace internal {
             case Type::INT32:
                 return std::make_shared<TypedRecordReader<Int32Type>>(descr, leaf_info, pool);
             case Type::INT64:
-                return std::make_shared<TypedRecordReader<Int64Type>>(descr, leaf_info, pool);
+                // return std::make_shared<TypedRecordReader<Int64Type>>(descr, leaf_info, pool);
+                return std::make_shared<CHInt64ChunkedRecordReader>(descr, leaf_info, pool);
             case Type::INT96:
                 return std::make_shared<TypedRecordReader<Int96Type>>(descr, leaf_info, pool);
             case Type::FLOAT:

@@ -30,7 +30,6 @@ public:
     static inline void assertIndexIsValid([[maybe_unused]] int index)
     {
         assert(index >= 0);
-        assert(index < num_fields);
     }
 
     bool isNullAt(int ordinal) const
