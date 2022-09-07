@@ -92,6 +92,7 @@
 #include <Server/HTTP/HTTPServer.h>
 #include <Interpreters/AsynchronousInsertQueue.h>
 #include <filesystem>
+#include <Interpreters/StorageDistributedTasksBuilder.h>
 
 #include "config_core.h"
 #include "Common/config_version.h"

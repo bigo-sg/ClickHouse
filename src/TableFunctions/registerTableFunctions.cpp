@@ -58,6 +58,8 @@ void registerTableFunctions()
     registerTableFunctionDictionary(factory);
 
     registerTableFunctionFormat(factory);
+
+    registerTableFunctionShuffle(factory);
 }
 
 }

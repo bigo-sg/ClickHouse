@@ -54,6 +54,11 @@
 #include <Interpreters/executeQuery.h>
 #include <Interpreters/TransactionLog.h>
 #include <Interpreters/SelectIntersectExceptQueryVisitor.h>
+#include <Interpreters/ASTRewriters/IdentRenameRewriteAction.h>
+#include <Interpreters/ASTRewriters/NestedJoinQueryRewriteAction.h>
+#include <Interpreters/ASTRewriters/NestedJoinQueryRewriteAction.h>
+#include <Interpreters/ASTRewriters/StageQueryDistributedJoinRewriteAction.h>
+#include <Interpreters/ASTRewriters/StageQueryShuffleFinishEventRewriteAction.h>
 #include <Common/ProfileEvents.h>
 
 #include <Common/SensitiveDataMasker.h>
@@ -626,6 +631,42 @@ static std::tuple<ASTPtr, BlockIO> executeQueryImpl(
         }
         else
         {
+            if (context->getClientInfo().query_kind == ClientInfo::QueryKind::INITIAL_QUERY && std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast))
+            {
+                {
+                    auto select_with_union = std::dynamic_pointer_cast<ASTSelectWithUnionQuery>(ast);
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "union_mode:{}, SelectUnionModes.size:{}, SelectUnionModesSet.size:{}, list_of_selects:{}",
+                        select_with_union->union_mode,
+                        select_with_union->list_of_modes.size(),
+                        select_with_union->set_of_modes.size(),
+                        select_with_union->list_of_selects->getID());
+                }
+                if (!context->getSettingsRef().use_cluster_for_distributed_shuffle.value.empty() && context->getSettingsRef().enable_distribute_shuffle)
+                {
+                    MakeFunctionColumnAliasAction function_alias_action;
+                    ASTDepthFirstVisitor<MakeFunctionColumnAliasAction> function_alias_visitor(function_alias_action, ast);
+                    auto function_alias_visit_result = function_alias_visitor.visit();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "function_alias_visit_result={}", queryToString(function_alias_visit_result));
+
+                    NestedJoinQueryRewriteAction nested_join_query_action(context);
+                    ASTDepthFirstVisitor<NestedJoinQueryRewriteAction> nested_join_query_visitor(nested_join_query_action, function_alias_visit_result);
+                    auto nested_join_query_visit_result = nested_join_query_visitor.visit();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "nested_join_query_visit_result={}", queryToString(nested_join_query_visit_result));
+
+                    StageQueryDistributedJoinRewriteAction join_rewrite_action(context);
+                    ASTDepthFirstVisitor<StageQueryDistributedJoinRewriteAction> join_rewrite_visitor(join_rewrite_action, nested_join_query_visit_result);
+                    auto join_rewrite_result = join_rewrite_visitor.visit();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "join_rewrite_result={}", queryToString(join_rewrite_result));
+
+                    StageQueryShuffleFinishEventRewriteAction add_finish_event_action;
+                    ASTDepthFirstVisitor<StageQueryShuffleFinishEventRewriteAction> add_finish_event_visitor(add_finish_event_action, join_rewrite_result);
+                    auto add_finish_event_result = add_finish_event_visitor.visit();
+                    LOG_TRACE(&Poco::Logger::get("executeQuery"), "add_finish_event_result={}", queryToString(add_finish_event_result));
+
+                    ast = add_finish_event_result;
+                }
+            }
+
             interpreter = InterpreterFactory::get(ast, context, SelectQueryOptions(stage).setInternal(internal));
 
             if (context->getCurrentTransaction() && !interpreter->supportsTransactions() &&

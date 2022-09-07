@@ -35,6 +35,7 @@
 #include <Parsers/Access/ASTShowCreateAccessEntityQuery.h>
 #include <Parsers/Access/ASTShowGrantsQuery.h>
 #include <Parsers/Access/ASTShowPrivilegesQuery.h>
+#include <Parsers/ASTStageQuery.h>
 
 #include <Interpreters/Context.h>
 #include <Interpreters/InterpreterAlterQuery.h>
@@ -65,6 +66,7 @@
 #include <Interpreters/InterpreterWatchQuery.h>
 #include <Interpreters/InterpreterTransactionControlQuery.h>
 #include <Interpreters/OpenTelemetrySpanLog.h>
+#include <Interpreters/InterpreterStageQuery.h>
 
 #include <Interpreters/Access/InterpreterCreateQuotaQuery.h>
 #include <Interpreters/Access/InterpreterCreateRoleQuery.h>
@@ -295,6 +297,10 @@ std::unique_ptr<IInterpreter> InterpreterFactory::get(ASTPtr & query, ContextMut
     else if (query->as<ASTBackupQuery>())
     {
         return std::make_unique<InterpreterBackupQuery>(query, context);
+    }
+    else if (query->as<ASTStageQuery>())
+    {
+        return std::make_unique<InterpreterStageQuery>(query, context, options);
     }
     else
     {
