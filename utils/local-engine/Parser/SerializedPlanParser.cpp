@@ -41,6 +41,8 @@
 #include <Operator/PartitionColumnFillingTransform.h>
 #include <Poco/StringTokenizer.h>
 
+#include <google/protobuf/util/json_util.h>
+
 
 #include <base/logger_useful.h>
 using namespace DB;
@@ -1278,7 +1280,18 @@ QueryPlanPtr SerializedPlanParser::parse(std::string & plan)
 {
     auto plan_ptr = std::make_unique<substrait::Plan>();
     plan_ptr->ParseFromString(plan);
-    LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "parse plan \n{}", plan_ptr->DebugString());
+
+    auto printPlan = [](const std::string & plan_raw){
+        substrait::Plan plan;
+        plan.ParseFromString(plan_raw);
+        std::string json_ret;
+        google::protobuf::util::JsonPrintOptions json_opt;
+        json_opt.add_whitespace = true;
+        google::protobuf::util::MessageToJsonString(plan, &json_ret, json_opt);
+        return json_ret;
+    };
+
+    LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "parse plan \n{}", printPlan(plan));
     return parse(std::move(plan_ptr));
 }
 void SerializedPlanParser::initFunctionEnv()
