@@ -1291,7 +1291,7 @@ SerializedPlanParser::SerializedPlanParser(const ContextPtr & context_) : contex
 }
 ContextMutablePtr SerializedPlanParser::global_context = nullptr;
 
-Context::ConfigurationPtr SerializedPlanParser::config = Poco::AutoPtr(new Poco::Util::MapConfiguration());
+Context::ConfigurationPtr SerializedPlanParser::config = nullptr;
 
 void SerializedPlanParser::collectJoinKeys(const substrait::Expression& condition, std::vector<std::pair<int32_t, int32_t>>& join_keys, int32_t right_key_start)
 {
