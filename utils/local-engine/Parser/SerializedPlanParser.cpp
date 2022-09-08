@@ -40,6 +40,7 @@
 #include <Common/StringUtils.h>
 #include <Operator/PartitionColumnFillingTransform.h>
 #include <Poco/StringTokenizer.h>
+#include <google/protobuf/util/json_util.h>
 
 
 #include <base/logger_useful.h>
@@ -396,6 +397,14 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & type)
 }
 QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 {
+    {
+        namespace pb_util = google::protobuf::util;
+        pb_util::JsonOptions options;
+        std::string json;
+        pb_util::MessageToJsonString(*plan, &json, options);
+        LOG_INFO(&Poco::Logger::get("SerializedPlanParser"), "substrait plan:{}", json);
+    }
+
     if (plan->extensions_size() > 0)
     {
         for (const auto & extension : plan->extensions())
