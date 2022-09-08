@@ -20,6 +20,7 @@ public:
 
 private:
     DB::ColumnPtr createPartitionColumn();
+    static DB::ColumnPtr tryWrapPartitionColumn(const DB::ColumnPtr & nested_col, DB::DataTypePtr original_data_type);
 
     DB::DataTypePtr partition_col_type;
     String partition_col_name;

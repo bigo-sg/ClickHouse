@@ -6,6 +6,12 @@
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
 #include <Common/StringUtils.h>
+#include <Columns/IColumn.h>
+#include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/Serializations/ISerialization.h>
+#include <Interpreters/DatabaseAndTableWithAlias.h>
+#include <base/DayNum.h>
+
 
 using namespace DB;
 
@@ -53,6 +59,18 @@ PartitionColumnFillingTransform::PartitionColumnFillingTransform(
     partition_column = createPartitionColumn();
 }
 
+/// In the case that a partition column is wrapper by nullable and LowCardinality, we need to keep the data type same
+/// as input.
+ColumnPtr PartitionColumnFillingTransform::tryWrapPartitionColumn(const ColumnPtr & nested_col, DataTypePtr original_data_type)
+{
+    auto result = nested_col;
+    if (original_data_type->getTypeId() == TypeIndex::Nullable)
+    {
+        result = ColumnNullable::create(nested_col, ColumnUInt8::create());
+    }
+    return result;
+}
+
 ColumnPtr PartitionColumnFillingTransform::createPartitionColumn()
 {
     ColumnPtr result;
@@ -68,43 +86,51 @@ ColumnPtr PartitionColumnFillingTransform::createPartitionColumn()
     WhichDataType which(nested_type);
     if (which.isInt8())
     {
-        result = createIntPartitionColumn<Int8>(partition_col_type, partition_col_value);
+        result = createIntPartitionColumn<Int8>(nested_type, partition_col_value);
     }
     else if (which.isInt16())
     {
-        result = createIntPartitionColumn<Int16>(partition_col_type, partition_col_value);
+        result = createIntPartitionColumn<Int16>(nested_type, partition_col_value);
     }
     else if (which.isInt32())
     {
-        result = createIntPartitionColumn<Int32>(partition_col_type, partition_col_value);
+        result = createIntPartitionColumn<Int32>(nested_type, partition_col_value);
     }
     else if (which.isInt64())
     {
-        result = createIntPartitionColumn<Int64>(partition_col_type, partition_col_value);
+        result = createIntPartitionColumn<Int64>(nested_type, partition_col_value);
     }
     else if (which.isFloat32())
     {
-        result = createFloatPartitionColumn<Float32>(partition_col_type, partition_col_value);
+        result = createFloatPartitionColumn<Float32>(nested_type, partition_col_value);
     }
     else if (which.isFloat64())
     {
-        result = createFloatPartitionColumn<Float64>(partition_col_type, partition_col_value);
+        result = createFloatPartitionColumn<Float64>(nested_type, partition_col_value);
     }
     else if (which.isDate())
     {
         DayNum value;
         auto value_buffer = ReadBufferFromString(partition_col_value);
         readDateText(value, value_buffer);
-        result = partition_col_type->createColumnConst(1, value);
+        result = nested_type->createColumnConst(1, value);
+    }
+    else if (which.isDate32())
+    {
+        ExtendedDayNum value;
+        auto value_buffer = ReadBufferFromString(partition_col_value);
+        readDateText(value, value_buffer);
+        result = nested_type->createColumnConst(1, value.toUnderType());
     }
     else if (which.isString())
     {
-        result = partition_col_type->createColumnConst(1, partition_col_value);
+        result = nested_type->createColumnConst(1, partition_col_value);
     }
     else
     {
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "unsupported datatype {}", partition_col_type->getFamilyName());
     }
+    result = tryWrapPartitionColumn(result, partition_col_type);
     return result;
 }
 
