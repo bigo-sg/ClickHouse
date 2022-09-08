@@ -7,6 +7,7 @@
 #include <Operator/BlockCoalesceOperator.h>
 #include <Parser/CHColumnToSparkRow.h>
 #include <Parser/SerializedPlanParser.h>
+#include <Parser/SparkRowToCHColumn.h>
 #include <Shuffle/NativeSplitter.h>
 #include <Shuffle/NativeWriterInMemory.h>
 #include <Shuffle/ShuffleReader.h>
@@ -134,6 +135,16 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
         = GetMethodID(env, local_engine::SourceFromJavaIter::serialized_record_batch_iterator_class, "hasNext", "()Z");
     local_engine::SourceFromJavaIter::serialized_record_batch_iterator_next
         = GetMethodID(env, local_engine::SourceFromJavaIter::serialized_record_batch_iterator_class, "next", "()[B");
+
+
+    local_engine::SparkRowToCHColumn::spark_row_interator_class
+        = CreateGlobalClassReference(env, "Lio/glutenproject/execution/SparkRowIterator;");
+    local_engine::SparkRowToCHColumn::spark_row_interator_hasNext
+        = GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "hasNext", "()Z");
+    local_engine::SparkRowToCHColumn::spark_row_interator_next
+        = GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "next", "()[B");
+
+
     local_engine::JNIUtils::vm = vm;
     return JNI_VERSION_1_8;
 }
@@ -150,6 +161,7 @@ void JNI_OnUnload(JavaVM * vm, void * /*reserved*/)
     env->DeleteGlobalRef(split_result_class);
     env->DeleteGlobalRef(local_engine::ShuffleReader::input_stream_class);
     env->DeleteGlobalRef(local_engine::SourceFromJavaIter::serialized_record_batch_iterator_class);
+    env->DeleteGlobalRef(local_engine::SparkRowToCHColumn::spark_row_interator_class);
     env->DeleteGlobalRef(local_engine::NativeSplitter::iterator_class);
     env->DeleteGlobalRef(local_engine::WriteBufferFromJavaOutputStream::output_stream_class);
     if (local_engine::SerializedPlanParser::global_context)
@@ -763,7 +775,7 @@ void Java_io_glutenproject_vectorized_CHShuffleSplitterJniWrapper_close(JNIEnv *
 }
 
 // BlockNativeConverter
-jobject Java_io_glutenproject_vectorized_BlockNativeConverter_converColumarToRow(JNIEnv * env, jobject, jlong block_address)
+jobject Java_io_glutenproject_vectorized_BlockNativeConverter_convertColumnarToRow(JNIEnv * env, jobject, jlong block_address)
 {
     local_engine::CHColumnToSparkRow converter;
     DB::Block * block = reinterpret_cast<DB::Block *>(block_address);
@@ -789,6 +801,38 @@ void Java_io_glutenproject_vectorized_BlockNativeConverter_freeMemory(JNIEnv *, 
 {
     local_engine::CHColumnToSparkRow converter;
     converter.freeMem(reinterpret_cast<uint8_t *>(address), size);
+}
+
+jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCHColumn(
+    JNIEnv * env, jobject, jobject java_iter, jobjectArray names, jobjectArray types, jbooleanArray is_nullables)
+{
+    using namespace std;
+    int column_size = env->GetArrayLength(names);
+
+    vector<string> c_names;
+    vector<string> c_types;
+    vector<bool> c_isnullables;
+    jboolean * p_booleans = env->GetBooleanArrayElements(is_nullables, nullptr);
+    for (int i = 0; i < column_size; i++)
+    {
+        jstring name = (jstring)(env->GetObjectArrayElement(names, i));
+        jstring type = (jstring)(env->GetObjectArrayElement(types, i));
+        c_names.push_back(jstring2string(env, name));
+        c_types.push_back(jstring2string(env, type));
+        c_isnullables.push_back(p_booleans[i] == JNI_TRUE);
+
+        env->DeleteLocalRef(name);
+        env->DeleteLocalRef(type);
+    }
+    env->ReleaseBooleanArrayElements(is_nullables, p_booleans, JNI_ABORT);
+    local_engine::SparkRowToCHColumn converter;
+    return reinterpret_cast<jlong>(converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types, c_isnullables));
+}
+
+void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv * env, jobject, jlong block_address)
+{
+    local_engine::SparkRowToCHColumn converter;
+    converter.freeBlock(reinterpret_cast<DB::Block *>(block_address));
 }
 
 jlong Java_io_glutenproject_vectorized_BlockNativeWriter_nativeCreateInstance(JNIEnv *, jobject)

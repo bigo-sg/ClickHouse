@@ -5,11 +5,15 @@
 #include <Functions/FunctionFactory.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/HashJoin.h>
+#include <Parser/SparkRowToCHColumn.h>
+#include <Parser/CHColumnToSparkRow.h>
+#include <Storages/CustomStorageMergeTree.h>
+#include <Storages/CustomMergeTreeSink.h>
+#include <Interpreters/TreeRewriter.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/TreeRewriter.h>
 #include <Parser/CHColumnToSparkRow.h>
 #include <Parser/SerializedPlanParser.h>
-#include <Parser/SparkColumnToCHColumn.h>
 #include <Parsers/ASTIdentifier.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/Formats/IOutputFormat.h>
@@ -31,7 +35,6 @@
 #include <Common/PODArray_fwd.h>
 #include <Common/Stopwatch.h>
 #include "testConfig.h"
-
 
 #if defined(__SSE2__)
 #    include <emmintrin.h>
@@ -687,12 +690,12 @@ DB::ContextMutablePtr global_context;
         local_engine::LocalExecutor local_executor;
 
         local_executor.execute(std::move(query_plan));
-        local_engine::SparkColumnToCHColumn converter;
+        local_engine::SparkRowToCHColumn converter;
         while (local_executor.hasNext())
         {
             local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
             state.ResumeTiming();
-            auto block = converter.convertCHColumnToSparkRow(*spark_row_info, local_executor.getHeader());
+            auto block = converter.convertSparkRowInfoToCHColumn(*spark_row_info, local_executor.getHeader());
             state.PauseTiming();
         }
         state.ResumeTiming();
@@ -735,12 +738,12 @@ DB::ContextMutablePtr global_context;
         local_engine::LocalExecutor local_executor;
 
         local_executor.execute(std::move(query_plan));
-        local_engine::SparkColumnToCHColumn converter;
+        local_engine::SparkRowToCHColumn converter;
         while (local_executor.hasNext())
         {
             local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
             state.ResumeTiming();
-            auto block = converter.convertCHColumnToSparkRow(*spark_row_info, local_executor.getHeader());
+            auto block = converter.convertSparkRowInfoToCHColumn(*spark_row_info, local_executor.getHeader());
             state.PauseTiming();
         }
         state.ResumeTiming();
