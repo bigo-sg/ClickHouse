@@ -46,13 +46,20 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"divide", "divide"},
     {"modulus", "modulo"},
 
+    /// string functions
     {"like", "like"},
     {"not_like", "notLike"},
     {"starts_with", "startsWith"},
     {"ends_with", "endsWith"},
     {"contains", "countSubstrings"},
     {"substring", "substring"},
+    {"lower", "lower"},
+    {"upper", "upper"},
+    {"length", "length"},
+    {"ltrim", "trimLeft"},
+    {"rtrim", "trimRight"},
 
+    // in functions
     {"in", "in"},
 
     // aggregate functions

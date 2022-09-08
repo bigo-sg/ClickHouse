@@ -327,7 +327,7 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
     return Block(*std::move(internal_cols));
 }
 
-DataTypePtr inline wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type)
+static DataTypePtr wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type)
 {
     if (nullable == substrait::Type_Nullability_NULLABILITY_NULLABLE)
     {
