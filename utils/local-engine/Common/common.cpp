@@ -7,7 +7,6 @@
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Common/Config/ConfigProcessor.h>
 #include <Common/Logger.h>
-#include <Formats/registerFormats.h>
 #include <Poco/SimpleFileChannel.h>
 #include <Poco/Util/MapConfiguration.h>
 #include <loggers/Loggers.h>
@@ -107,7 +106,6 @@ void init()
             }
 
             registerAllFunctions();
-            registerFormats();
 
 #if USE_EMBEDDED_COMPILER
             /// 128 MB
