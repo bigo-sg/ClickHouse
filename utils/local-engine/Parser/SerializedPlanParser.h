@@ -76,7 +76,7 @@ class SerializedPlanParser
 public:
     explicit SerializedPlanParser(const ContextPtr & context);
     static void initFunctionEnv();
-    DB::QueryPlanPtr parse(std::string& plan);
+    DB::QueryPlanPtr parse(const std::string& plan);
     DB::QueryPlanPtr parse(std::unique_ptr<substrait::Plan> plan);
 
     DB::QueryPlanPtr parseReadRealWithLocalFile(const substrait::ReadRel& rel);
@@ -102,7 +102,7 @@ private:
     void collectJoinKeys(const substrait::Expression& condition, std::vector<std::pair<int32_t, int32_t>>& join_keys, int32_t right_key_start);
     DB::QueryPlanPtr parseJoin(substrait::JoinRel join, DB::QueryPlanPtr left, DB::QueryPlanPtr right);
     void reorderJoinOutput(DB::QueryPlan & plan, DB::Names cols);
-    std::string getFunctionName(std::string function_sig, const substrait::Expression_ScalarFunction & function);
+    std::string getFunctionName(const std::string & function_sig, const substrait::Expression_ScalarFunction & function);
     DB::ActionsDAGPtr parseFunction(const DataStream & input, const substrait::Expression &rel, std::string & result_name, std::vector<String> &required_columns, DB::ActionsDAGPtr actions_dag = nullptr,bool keep_result = false);
     const ActionsDAG::Node * parseFunctionWithDAG(const substrait::Expression &rel, std::string & result_name, std::vector<String> &required_columns, DB::ActionsDAGPtr actions_dag = nullptr, bool keep_result = false);
     DB::QueryPlanStepPtr parseAggregate(DB::QueryPlan & plan, const substrait::AggregateRel &rel, bool & is_final);
@@ -111,7 +111,7 @@ private:
     // remove nullable after isNotNull
     void removeNullable(std::vector<String> require_columns, ActionsDAGPtr actionsDag);
     void wrapNullable(std::vector<String> columns, ActionsDAGPtr actionsDag);
-    std::string getUniqueName(std::string name)
+    std::string getUniqueName(const std::string & name)
     {
         return name + "_" + std::to_string(name_no++);
     }

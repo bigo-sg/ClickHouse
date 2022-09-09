@@ -24,8 +24,8 @@ extern "C" {
 #endif
 
 extern void registerAllFunctions();
-extern void init();
-extern char * createExecutor(std::string plan_string);
+extern void init(const std::string &);
+extern char * createExecutor(const std::string &);
 
 namespace dbms
 {
@@ -106,11 +106,15 @@ void JNI_OnUnload(JavaVM * vm, void * reserved)
 }
 //static SharedContextHolder shared_context;
 
-void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeInitNative(JNIEnv *, jobject, jbyteArray)
+void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeInitNative(JNIEnv * env, jobject, jbyteArray plan)
 {
     try
     {
-        init();
+        jsize plan_size = env->GetArrayLength(plan);
+        jbyte * plan_address = env->GetByteArrayElements(plan, nullptr);
+        std::string plan_string;
+        plan_string.assign(reinterpret_cast<const char *>(plan_address), plan_size);
+        init(plan_string);
     }
     catch (const DB::Exception & e)
     {

@@ -809,7 +809,7 @@ NamesAndTypesList SerializedPlanParser::blockToNameAndTypeList(const Block & hea
 }
 
 
-std::string SerializedPlanParser::getFunctionName(std::string function_signature, const substrait::Expression_ScalarFunction & function)
+std::string SerializedPlanParser::getFunctionName(const std::string & function_signature, const substrait::Expression_ScalarFunction & function)
 {
     const auto & output_type = function.output_type();
     auto args = function.arguments();
@@ -1274,7 +1274,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
 }
 
 
-QueryPlanPtr SerializedPlanParser::parse(std::string & plan)
+QueryPlanPtr SerializedPlanParser::parse(const std::string & plan)
 {
     auto plan_ptr = std::make_unique<substrait::Plan>();
     plan_ptr->ParseFromString(plan);

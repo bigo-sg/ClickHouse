@@ -25,20 +25,63 @@ void registerAllFunctions()
     registerAggregateFunctions();
 }
 
-void init()
+static std::string getConfigFile(const std::string & plan)
+{
+    /// 1. Try to get config file from spark config
+    do
+    {
+        auto plan_ptr = std::make_unique<substrait::Plan>();
+        auto success = plan_ptr->ParseFromString(plan);
+        if (!success)
+            break;
+        
+        if (!plan_ptr->has_advanced_extensions() || !plan_ptr->advanced_extensions().has_enhancement())
+            break;
+        const auto & enhancement = plan_ptr->advanced_extensions().enhancement();
+
+        if (!enhancement.Is<substrait::Expression>())
+            break;
+        
+        substrait::Expression expression;
+        if (!enhancement.UnpackTo(&expression) || !expression.has_literal() || !expression.literal().has_map())
+            break;
+        
+        const auto & key_values = expression.literal().map().key_values();
+        for (const auto & key_value : key_values)
+        {
+             if (!key_value.has_key() || !key_value.has_value())
+                continue;
+            
+            const auto & key = key_value.key();
+            const auto & value = key_value.value();
+            if (!key.has_string() || !value.has_string())
+                continue;
+            
+            if (key.string() != "spark.gluten.sql.columnar.backend.ch.config.file" || value.string().empty())
+                continue;
+            
+            return value.string();
+        }
+    } while (false);
+
+    /// 2. Try to get config path from environment variable
+    const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
+    if (!config_path || !*config_path)
+        return "config.xml";
+    return config_path;
+}
+
+void init(const std::string & plan)
 {
     static std::once_flag init_flag;
     std::call_once(
         init_flag,
-        []()
+        [&plan]()
         {
             /// Load Config
             if (!local_engine::SerializedPlanParser::config)
             {
-                const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
-                if (!config_path || !*config_path)
-                    config_path = "config.xml";
-                
+                auto config_path = getConfigFile(plan);
                 if (fs::exists(config_path) && fs::is_regular_file(config_path)) 
                 {
                     DB::ConfigProcessor config_processor(config_path, false, true);
@@ -106,7 +149,7 @@ void init()
     );
 }
 
-char * createExecutor(std::string plan_string)
+char * createExecutor(const std::string & plan_string)
 {
     auto context = Context::createCopy(local_engine::SerializedPlanParser::global_context);
     local_engine::SerializedPlanParser parser(context);
