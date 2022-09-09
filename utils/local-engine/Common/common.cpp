@@ -32,10 +32,9 @@ void init()
         init_flag,
         []()
         {
-            /// Load config
+            /// Load Config
             if (!local_engine::SerializedPlanParser::config)
             {
-                /// Load Config
                 const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
                 if (!config_path || !*config_path)
                     config_path = "config.xml";
