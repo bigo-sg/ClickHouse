@@ -9,7 +9,6 @@
 #include <Common/Logger.h>
 #include <Poco/SimpleFileChannel.h>
 #include <Poco/Util/MapConfiguration.h>
-#include <loggers/Loggers.h>
 #include <jni.h>
 #include <filesystem>
 
@@ -26,16 +25,6 @@ void registerAllFunctions()
     registerAggregateFunctions();
 }
 
-
-static std::string createDirectory(const std::string & file)
-{
-    auto path = fs::path(file).parent_path();
-    if (path.empty())
-        return "";
-    fs::create_directories(path);
-    return path;
-};
-
 void init()
 {
     static std::once_flag init_flag;
@@ -47,7 +36,7 @@ void init()
             if (!local_engine::SerializedPlanParser::config)
             {
                 /// Load Config
-                const char * config_path = std::getenv("CLICKHOUSE_CONFIG_PATH");
+                const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
                 if (!config_path || !*config_path)
                     config_path = "config.xml";
                 
@@ -66,20 +55,17 @@ void init()
           
 
             /// Initialize Loggers
-            const auto & config = local_engine::SerializedPlanParser::config;
-            auto level = config->getString("logger.level", "information");
+            auto & config = local_engine::SerializedPlanParser::config;
+            auto level = config->getString("logger.level", "trace");
             if (config->has("logger.log"))
             {
-                auto log_path = config->getString("logger.log");
-                if (!log_path.empty())
-                    createDirectory(log_path);
-
-                local_engine::Logger::initFileLogger(log_path, level);
+                local_engine::Logger::initFileLogger(*config, "ClickHouseBackend");
             }
             else
             {
                 local_engine::Logger::initConsoleLogger(level);
             }
+            LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init logger.");
             
 
             /// Initialize settings
@@ -90,6 +76,7 @@ void init()
                 settings.loadSettingsFromConfig(prefix + "settings", *config);
             }
             settings.set("join_use_nulls", true);
+            LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init settings.");
 
             /// Initialize global context
             if (!local_engine::SerializedPlanParser::global_context)
@@ -103,14 +90,17 @@ void init()
 
                 auto path = config->getString("path", "/");
                 local_engine::SerializedPlanParser::global_context->setPath(path);
+                LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init global context.");
             }
 
             registerAllFunctions();
+            LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Register all functions.");
 
 #if USE_EMBEDDED_COMPILER
             /// 128 MB
             constexpr size_t compiled_expression_cache_size_default = 1024 * 1024 * 128;
             CompiledExpressionCacheFactory::instance().init(compiled_expression_cache_size_default, compiled_expression_cache_size_default);
+            LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init compiled expressions cache factory.");
 #endif
         }
 

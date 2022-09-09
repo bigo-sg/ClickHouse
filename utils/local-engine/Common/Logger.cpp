@@ -1,4 +1,6 @@
 #include "Logger.h"
+
+#include <loggers/Loggers.h>
 #include <Poco/ConsoleChannel.h>
 #include <Poco/AutoPtr.h>
 #include <Poco/AsyncChannel.h>
@@ -17,8 +19,8 @@ void local_engine::Logger::initConsoleLogger(const std::string & level)
     Poco::Logger::root().setLevel(level);
 }
 
-void local_engine::Logger::initFileLogger(const std::string & path, const std::string & level)
+void local_engine::Logger::initFileLogger(Poco::Util::AbstractConfiguration & config, const std::string & cmd_name)
 {
-    Poco::Logger::root().setChannel(Poco::AutoPtr<Poco::SimpleFileChannel>(new Poco::SimpleFileChannel(path)));
-    Poco::Logger::root().setLevel(level);
+    static Loggers loggers;
+    loggers.buildLoggers(config, Poco::Logger::root(), cmd_name);
 }
