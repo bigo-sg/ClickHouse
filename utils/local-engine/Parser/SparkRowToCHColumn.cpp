@@ -30,7 +30,7 @@ int64_t getStringColumnTotalSize(int ordinal, SparkRowInfo & spark_row_info)
 void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataTypePtr>& types, SparkRowReader & spark_row_reader)
 {
     int32_t num_fields = columns.size();
-    bool is_nullable = false;
+    [[maybe_unused]] bool is_nullable = false;
     for (int32_t i = 0; i < num_fields; i++)
     {
         WhichDataType which(columns[i]->getDataType());

@@ -815,8 +815,8 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
     jboolean * p_booleans = env->GetBooleanArrayElements(is_nullables, nullptr);
     for (int i = 0; i < column_size; i++)
     {
-        jstring name = (jstring)(env->GetObjectArrayElement(names, i));
-        jstring type = (jstring)(env->GetObjectArrayElement(types, i));
+        auto * name = static_cast<jstring>(env->GetObjectArrayElement(names, i));
+        auto * type = static_cast<jstring>(env->GetObjectArrayElement(types, i));
         c_names.push_back(jstring2string(env, name));
         c_types.push_back(jstring2string(env, type));
         c_isnullables.push_back(p_booleans[i] == JNI_TRUE);
@@ -829,7 +829,7 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
     return reinterpret_cast<jlong>(converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types, c_isnullables));
 }
 
-void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv * env, jobject, jlong block_address)
+void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv *  /*env*/, jobject, jlong block_address)
 {
     local_engine::SparkRowToCHColumn converter;
     converter.freeBlock(reinterpret_cast<DB::Block *>(block_address));
