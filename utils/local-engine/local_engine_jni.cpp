@@ -138,7 +138,6 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
     local_engine::SparkRowToCHColumn::spark_row_interator_next
         = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "next", "()[B");
 
-
     local_engine::JNIUtils::vm = vm;
     return JNI_VERSION_1_8;
 }
@@ -189,6 +188,7 @@ jlong Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeCreat
 {
     LOCAL_ENGINE_JNI_METHOD_START
     auto context = Coordination::Context::createCopy(local_engine::SerializedPlanParser::global_context);
+    
     local_engine::SerializedPlanParser parser(context);
     jsize iter_num = env->GetArrayLength(iter_arr);
     for (jsize i = 0; i < iter_num; i++)
