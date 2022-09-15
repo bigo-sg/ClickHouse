@@ -64,7 +64,7 @@ void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataT
         {
             columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int32_t));
         }
-        else if (which.isInt64())
+        else if (which.isInt64() || which.isDateTime64())
         {
             columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int64_t));
         }
