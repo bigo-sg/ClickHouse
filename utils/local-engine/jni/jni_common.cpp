@@ -5,7 +5,7 @@
 #include <exception>
 #include <jni/jni_error.h>
 
-namespace gluten
+namespace local_engine
 {
 jclass CreateGlobalExceptionClassReference(JNIEnv* env, const char* class_name)
 {

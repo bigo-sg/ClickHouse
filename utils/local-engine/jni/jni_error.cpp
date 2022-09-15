@@ -7,7 +7,7 @@
 #include "Common/Exception.h"
 #include <base/logger_useful.h>
 
-namespace gluten
+namespace local_engine
 {
 JniErrorsGlobalState & JniErrorsGlobalState::instance()
 {

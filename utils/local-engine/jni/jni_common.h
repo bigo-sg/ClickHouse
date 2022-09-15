@@ -1,7 +1,7 @@
 #pragma once
 #include <jni.h>
 
-namespace gluten
+namespace local_engine
 {
 jclass CreateGlobalExceptionClassReference(JNIEnv *env, const char *class_name);
 

@@ -8,7 +8,7 @@
 #include <jni/jni_common.h>
 #include <boost/stacktrace.hpp>
 #include <sstream>
-namespace gluten
+namespace local_engine
 {
 class JniErrorsGlobalState : boost::noncopyable
 {
@@ -43,26 +43,26 @@ private:
 };
 //
 
-#define GLUTEN_JNI_METHOD_START \
+#define LOCAL_ENGINE_JNI_METHOD_START \
     try {
 
-#define GLUTEN_JNI_METHOD_END(env, ret) \
+#define LOCAL_ENGINE_JNI_METHOD_END(env, ret) \
     }\
     catch(DB::Exception & e)\
     {\
-        gluten::JniErrorsGlobalState::instance().throwException(env, e);\
+        local_engine::JniErrorsGlobalState::instance().throwException(env, e);\
         return ret;\
     }\
     catch (std::exception & e)\
     {\
-        gluten::JniErrorsGlobalState::instance().throwException(env, e);\
+        local_engine::JniErrorsGlobalState::instance().throwException(env, e);\
         return ret;\
     }\
     catch (...)\
     {\
         std::ostringstream ostr;\
         ostr << boost::stacktrace::stacktrace();\
-        gluten::JniErrorsGlobalState::instance().throwRuntimeException(env, "Unknow Exception", ostr.str().c_str());\
+        local_engine::JniErrorsGlobalState::instance().throwRuntimeException(env, "Unknow Exception", ostr.str().c_str());\
         return ret;\
     }
 }
