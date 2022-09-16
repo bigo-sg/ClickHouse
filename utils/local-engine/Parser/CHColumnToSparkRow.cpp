@@ -10,12 +10,7 @@ namespace DB
 {
 namespace ErrorCodes
 {
-    extern const int LOGICAL_ERROR;
     extern const int UNKNOWN_TYPE;
-    extern const int ILLEGAL_TYPE_OF_ARGUMENT;
-    extern const int BAD_ARGUMENTS;
-    extern const int NO_SUCH_DATA_PART;
-    extern const int UNKNOWN_FUNCTION;
 }
 }
 
@@ -157,6 +152,10 @@ void writeValue(
     else if (which.isDate())
     {
         WRITE_VECTOR_COLUMN(UInt16, uint16_t, get64)
+    }
+    else if (which.isDate32())
+    {
+        WRITE_VECTOR_COLUMN(UInt32, uint32_t, get64)
     }
     else if (which.isString())
     {
