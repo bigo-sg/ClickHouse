@@ -151,7 +151,6 @@ SerializedPlanBuilder & SerializedPlanBuilder::readMergeTree(
 }
 
 
-
 std::unique_ptr<substrait::Plan> SerializedPlanBuilder::build()
 {
     return std::move(this->plan);
@@ -159,7 +158,7 @@ std::unique_ptr<substrait::Plan> SerializedPlanBuilder::build()
 SerializedPlanBuilder::SerializedPlanBuilder() : plan(std::make_unique<substrait::Plan>())
 {
 }
-SerializedPlanBuilder & SerializedPlanBuilder::aggregate(std::vector<int32_t> keys, std::vector<substrait::AggregateRel_Measure *> aggregates)
+SerializedPlanBuilder & SerializedPlanBuilder::aggregate(std::vector<int32_t>  /*keys*/, std::vector<substrait::AggregateRel_Measure *> aggregates)
 {
     substrait::Rel * rel = new substrait::Rel();
     auto * agg = rel->mutable_aggregate();
@@ -184,7 +183,6 @@ SerializedPlanBuilder & SerializedPlanBuilder::project(std::vector<substrait::Ex
     this->prev_rel = project;
     return *this;
 }
-
 
 substrait::Expression * selection(int32_t field_id)
 {

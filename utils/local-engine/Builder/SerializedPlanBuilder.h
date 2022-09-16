@@ -6,11 +6,9 @@
 
 namespace dbms
 {
-
-
 enum Function
 {
-    IS_NOT_NULL=0,
+    IS_NOT_NULL = 0,
     GREATER_THAN_OR_EQUAL,
     AND,
     LESS_THAN_OR_EQUAL,
@@ -27,7 +25,8 @@ class SerializedPlanBuilder
 {
 public:
     SerializedPlanBuilder();
-    SerializedPlanBuilder& registerSupportedFunctions() {
+    SerializedPlanBuilder & registerSupportedFunctions()
+    {
         this->registerFunction(IS_NOT_NULL, "is_not_null")
             .registerFunction(GREATER_THAN_OR_EQUAL, "gte")
             .registerFunction(AND, "and")
@@ -67,7 +66,8 @@ using Type = substrait::Type;
  * 2. column type
  * 3. nullability
  */
-class SerializedSchemaBuilder {
+class SerializedSchemaBuilder
+{
 public:
     SerializedSchemaBuilder();
     SchemaPtr build();
