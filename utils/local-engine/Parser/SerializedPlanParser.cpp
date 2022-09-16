@@ -1,4 +1,5 @@
-#include <base/logger_useful.h>
+#include "SerializedPlanParser.h"
+#include <memory>
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/registerAggregateFunctions.h>
 #include <Builder/BroadCastJoinBuilder.h>
@@ -41,7 +42,7 @@
 #include <Common/MergeTreeTool.h>
 #include <Common/StringUtils.h>
 
-#include "SerializedPlanParser.h"
+#include <google/protobuf/util/json_util.h>
 
 namespace DB
 {
@@ -197,19 +198,14 @@ QueryPlanPtr SerializedPlanParser::parseReadRealWithLocalFile(const substrait::R
     }
     auto header = parseNameStruct(rel.base_schema());
     PartitionValues partition_values = StringUtils::parsePartitionTablePath(files_info->files[0]);
-    if (partition_values.size() > 1)
+    
+    auto origin_header = header.cloneEmpty();
+    for (const auto & partition_value : partition_values)
     {
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "doesn't support multiple level partition.");
-    }
-    ProcessorPtr partition_transform;
-    if (!partition_values.empty())
-    {
-        auto origin_header = header.cloneEmpty();
-        PartitionValue partition_value = partition_values[0];
         header.erase(partition_value.first);
-        partition_transform
-            = std::make_shared<PartitionColumnFillingTransform>(header, origin_header, partition_value.first, partition_value.second);
     }
+    ProcessorPtr partition_transform = std::make_shared<PartitionColumnFillingTransform>(header, origin_header, partition_values);
+
     auto query_plan = std::make_unique<QueryPlan>();
     std::shared_ptr<IProcessor> source = std::make_shared<BatchParquetFileSource>(files_info, header, context);
     auto source_pipe = Pipe(source);
@@ -1281,7 +1277,18 @@ QueryPlanPtr SerializedPlanParser::parse(std::string & plan)
 {
     auto plan_ptr = std::make_unique<substrait::Plan>();
     plan_ptr->ParseFromString(plan);
-    LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "parse plan \n{}", plan_ptr->DebugString());
+
+    auto printPlan = [](const std::string & plan_raw){
+        substrait::Plan plan;
+        plan.ParseFromString(plan_raw);
+        std::string json_ret;
+        google::protobuf::util::JsonPrintOptions json_opt;
+        json_opt.add_whitespace = true;
+        google::protobuf::util::MessageToJsonString(plan, &json_ret, json_opt);
+        return json_ret;
+    };
+
+    LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "parse plan \n{}", printPlan(plan));
     return parse(std::move(plan_ptr));
 }
 void SerializedPlanParser::initFunctionEnv()

@@ -1,10 +1,15 @@
 #include "CHColumnToSparkRow.h"
+#include <cstdint>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnString.h>
 #include <Columns/IColumn.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <Core/Types.h>
 #include <DataTypes/DataTypesDecimal.h>
+#include "DataTypes/Serializations/ISerialization.h"
+#include "base/types.h"
+#include <Functions/FunctionHelpers.h>
+
 
 namespace DB
 {
@@ -106,12 +111,14 @@ void writeValue(
     std::vector<int64_t> & buffer_cursor)
 {
     ColumnPtr nested_col = col.column;
+
     const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
     if (nullable_column)
     {
         nested_col = nullable_column->getNestedColumnPtr();
     }
     nested_col = nested_col->convertToFullColumnIfConst();
+
     WhichDataType which(nested_col->getDataType());
     if (which.isUInt8())
     {
@@ -181,7 +188,7 @@ void writeValue(
     }
     else
     {
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {} convert from ch to spark" ,magic_enum::enum_name(nested_col->getDataType()));
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {} convert from ch to spark", col.type->getName());
     }
 }
 
