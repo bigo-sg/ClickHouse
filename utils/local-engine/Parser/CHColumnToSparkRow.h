@@ -53,15 +53,12 @@ public:
 class BackingBufferLengthCalculator
 {
 public:
-    // explicit BackingBufferLengthCalculator(const DB::ColumnWithTypeAndName & column_);
     explicit BackingBufferLengthCalculator(const DB::DataTypePtr & type_);
     virtual ~BackingBufferLengthCalculator() = default;
 
-    // virtual int64_t calculate(size_t row_idx) const;
     virtual int64_t calculate(const DB::Field & field) const;
 
 private:
-    // const DB::ColumnWithTypeAndName column;
     const DB::DataTypePtr type;
 };
 

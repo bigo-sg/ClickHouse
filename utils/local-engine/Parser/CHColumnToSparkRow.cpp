@@ -300,12 +300,6 @@ void CHColumnToSparkRow::freeMem(uint8_t * address, size_t size)
     free(address, size);
 }
 
-/*
-BackingBufferLengthCalculator::BackingBufferLengthCalculator(const DB::ColumnWithTypeAndName & column_) : column(column_)
-{
-}
-*/
-
 BackingBufferLengthCalculator::BackingBufferLengthCalculator(const DataTypePtr & type_) : type(type_)
 {
 }
@@ -393,82 +387,5 @@ int64_t BackingBufferLengthCalculator::calculate(const Field & field) const
     }
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type->getName());
 }
-
-/*
-int64_t BackingBufferLengthCalculator::calculate(size_t row_idx) const
-{
-    const auto type = removeNullable(column.type);
-    const DB::WhichDataType which(type);
-    if (which.isNothing() || which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isEnum() || which.isDateOrDate32()
-        || which.isDateTime() || which.isDateTime64())
-        return 0;
-
-    Field x = (*column.column)[row_idx];
-    if (x.isNull())
-        return 0;
-
-    if (which.isStringOrFixedString())
-        return x.get<DB::String>().size();
-
-    if (which.isArray())
-    {
-        /// Data Type Array cannot be wrapped with Nullable
-        const auto * column_array = checkAndGetColumn<DB::ColumnArray>(*column.column);
-        const auto & offsets = column_array->getOffsets();
-        const auto num_elems = offsets[row_idx] - offsets[row_idx-1];
-
-        int64_t res = 8 + calculateBitSetWidthInBytes(num_elems);
-        const auto * type_array = typeid_cast<const DB::DataTypeArray *>(type.get());
-        const DB::WhichDataType nested_which(removeNullable(type_array->getNestedType()));
-        if (nested_which.isUInt8() || nested_which.isInt8())
-        {
-            res += num_elems * 1;
-        }
-        else if (nested_which.isUInt16() || nested_which.isInt16())
-        {
-            res += num_elems * 2;
-        }
-        else if (nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32())
-        {
-            res += num_elems * 4;
-        }
-        else if (nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64())
-        {
-            res += num_elems * 8;
-        }
-        else
-        {
-            res += num_elems * 8;
-        }
-
-        const DB::ColumnWithTypeAndName nested_column(column_array->getDataPtr(), type_array->getNestedType(), "");
-        BackingBufferLengthCalculator calculator(nested_column);
-        for (size_t i=offsets[row_idx-1]; i<offsets[row_idx]; ++i)
-        {
-            res += calculator.calculate(i);
-        }
-    }
-
-    if (which.isMap())
-    {
-        auto & map = x.get<Map>();
-        int64_t res = 8 + calculateBitSetWidthInBytes(map.size());
-
-        /// Data Type Map cannot be wrapped with Nullable
-        const auto & column_map = checkAndGetColumn<DB::ColumnMap>(*column.column);
-        const auto & column_tuple = column_map->getNestedData();
-        const auto & column_key = column_tuple.getColumn(0);
-        const auto & column_val = column_tuple.getColumn(1);
-        const auto * type_map = typeid_cast<const DB::DataTypeMap*>(type.get());
-        const auto & type_key = type_map->getKeyType();
-        const auto & type_val = type_map->getValueType();
-
-        /// We can't reuse code of Array because in CH, Map(K, V) = Array(Tuple(K, V)
-        /// not Tuple(Array(K), Array(V))
-        BackingBufferLengthCalculator key_calculator({column_key, type_key, ""});
-        res += key_calculator.calculate()
-    }
-}
-*/
 
 }
