@@ -67,25 +67,16 @@ int64_t calculatedFixeSizePerRow(DB::Block & header, int64_t num_cols)
     return fixed_size + decimal_cols_size;
 }
 
-int64_t roundNumberOfBytesToNearestWord(int64_t numBytes)
+static int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes)
 {
-    int64_t remainder = numBytes & 0x07; // This is equivalent to `numBytes % 8`
-    if (remainder == 0)
-    {
-        return numBytes;
-    }
-    else
-    {
-        return numBytes + (8 - remainder);
-    }
+    int64_t remainder = num_bytes & 0x07; // This is equivalent to `numBytes % 8`
+    return num_bytes + ((8 - remainder) & 0x7);
 }
 
 int64_t getFieldOffset(int64_t nullBitsetWidthInBytes, int32_t index)
 {
     return nullBitsetWidthInBytes + 8L * index;
 }
-
-
 
 void bitSet(uint8_t * buffer_address, int32_t index)
 {
@@ -207,9 +198,17 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
         buffer_cursor.push_back(null_bitset_width_in_bytes + 8 * num_cols);
     }
     // Calculated the lengths_
-    for (auto i = 0; i < num_cols; i++)
+    for (auto col_idx = 0; col_idx < num_cols; ++col_idx)
     {
-        const auto & col = block.getByPosition(i);
+        const auto & col = block.getByPosition(col_idx);
+        BackingDataLengthCalculator calculator(col.type);
+        for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+        {
+            const auto field = (*col.column)[row_idx];
+            lengths[row_idx] += calculator.calculate(field);
+        }
+
+        /*
         if (isStringOrFixedString(removeNullable(col.type)))
         {
             size_t length;
@@ -219,6 +218,7 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
                 lengths[j] += roundNumberOfBytesToNearestWord(length);
             }
         }
+        */
     }
 }
 
@@ -295,6 +295,7 @@ std::unique_ptr<SparkRowInfo> local_engine::CHColumnToSparkRow::convertCHColumnT
     }
     return spark_row_info;
 }
+
 void CHColumnToSparkRow::freeMem(uint8_t * address, size_t size)
 {
     free(address, size);
@@ -314,6 +315,11 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         || which.isDateTime() || which.isDateTime64())
         return 0;
     
+    if (which.isStringOrFixedString())
+    {
+        const auto & str = field.get<String>();
+        return roundNumberOfBytesToNearestWord(str.size());
+    }
     
     if (which.isArray())
     {
@@ -325,16 +331,18 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
         const auto & nested_type = array_type->getNestedType();
         const WhichDataType nested_which(removeNullable(nested_type));
+        int64_t values_length = 0;
         if (nested_which.isUInt8() || nested_which.isInt8())
-            res += num_elems * 1;
+            values_length = num_elems;
         else if (nested_which.isUInt16() || nested_which.isInt16())
-            res += num_elems * 2;
+            values_length = num_elems * 2;
         else if (nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32())
-            res += num_elems * 4;
+            values_length = num_elems * 4;
         else if (nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64())
-            res += num_elems * 8;
+            values_length = num_elems * 8;
         else
-            res += num_elems * 8;
+            values_length = num_elems * 8;
+        res += roundNumberOfBytesToNearestWord(values_length);
 
         BackingDataLengthCalculator calculator(nested_type);
         for (size_t i=0; i<array.size(); ++i)
@@ -385,6 +393,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         }
         return res;
     }
+    
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type->getName());
 }
 

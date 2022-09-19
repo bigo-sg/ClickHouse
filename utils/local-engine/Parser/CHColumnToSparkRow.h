@@ -56,6 +56,7 @@ public:
     explicit BackingDataLengthCalculator(const DB::DataTypePtr & type_);
     virtual ~BackingDataLengthCalculator() = default;
 
+    /// return length is guranteed to round up to 8;
     virtual int64_t calculate(const DB::Field & field) const;
 
 private:
