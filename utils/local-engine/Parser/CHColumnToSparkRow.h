@@ -2,6 +2,7 @@
 #include <vector>
 #include <Core/Block.h>
 #include <Common/Allocator.h>
+#include <Core/Field.h>
 
 namespace local_engine
 {
@@ -48,4 +49,21 @@ public:
     std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(DB::Block & block);
     void freeMem(uint8_t * address, size_t size);
 };
+
+class BackingBufferLengthCalculator
+{
+public:
+    // explicit BackingBufferLengthCalculator(const DB::ColumnWithTypeAndName & column_);
+    explicit BackingBufferLengthCalculator(const DB::DataTypePtr & type_);
+    virtual ~BackingBufferLengthCalculator() = default;
+
+    // virtual int64_t calculate(size_t row_idx) const;
+    virtual int64_t calculate(const DB::Field & field) const;
+
+private:
+    // const DB::ColumnWithTypeAndName column;
+    const DB::DataTypePtr type;
+};
+
 }
+
