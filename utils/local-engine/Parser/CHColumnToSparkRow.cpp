@@ -39,13 +39,15 @@ namespace ErrorCodes
 namespace local_engine
 {
 using namespace DB;
+
 int64_t calculateBitSetWidthInBytes(int32_t num_fields)
 {
     return ((num_fields + 63) / 64) * 8;
 }
 
-int64_t calculatedFixeSizePerRow(DB::Block & header, int64_t num_cols)
+static int64_t calculatedFixeSizePerRow(int64_t num_cols)
 {
+    /*
     auto fields = header.getNamesAndTypesList();
     // Calculate the decimal col num when the precision >18
     int32_t count = 0;
@@ -65,6 +67,8 @@ int64_t calculatedFixeSizePerRow(DB::Block & header, int64_t num_cols)
     int64_t fixed_size = calculateBitSetWidthInBytes(num_cols) + num_cols * 8;
     int64_t decimal_cols_size = count * 16;
     return fixed_size + decimal_cols_size;
+    */
+    return calculateBitSetWidthInBytes(num_cols) + num_cols * 8;
 }
 
 static int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes)
