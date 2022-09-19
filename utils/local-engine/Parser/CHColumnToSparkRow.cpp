@@ -52,7 +52,7 @@ static int64_t calculatedFixeSizePerRow(int64_t num_cols)
 
 static int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes)
 {
-    int64_t remainder = num_bytes & 0x07; // This is equivalent to `numBytes % 8`
+    auto remainder = num_bytes & 0x07; // This is equivalent to `numBytes % 8`
     return num_bytes + ((8 - remainder) & 0x7);
 }
 
@@ -219,7 +219,7 @@ int64_t local_engine::SparkRowInfo::getNumCols() const
 }
 void local_engine::SparkRowInfo::setNumCols(int64_t num_cols_)
 {
-    num_cols = num_cols;
+    num_cols = num_cols_;
 }
 
 int64_t local_engine::SparkRowInfo::getNumRows() const
