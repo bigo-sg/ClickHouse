@@ -50,11 +50,11 @@ public:
     void freeMem(uint8_t * address, size_t size);
 };
 
-class BackingBufferLengthCalculator
+class BackingDataLengthCalculator
 {
 public:
-    explicit BackingBufferLengthCalculator(const DB::DataTypePtr & type_);
-    virtual ~BackingBufferLengthCalculator() = default;
+    explicit BackingDataLengthCalculator(const DB::DataTypePtr & type_);
+    virtual ~BackingDataLengthCalculator() = default;
 
     virtual int64_t calculate(const DB::Field & field) const;
 

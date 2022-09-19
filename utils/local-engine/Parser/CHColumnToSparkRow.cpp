@@ -300,11 +300,11 @@ void CHColumnToSparkRow::freeMem(uint8_t * address, size_t size)
     free(address, size);
 }
 
-BackingBufferLengthCalculator::BackingBufferLengthCalculator(const DataTypePtr & type_) : type(type_)
+BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_) : type(type_)
 {
 }
 
-int64_t BackingBufferLengthCalculator::calculate(const Field & field) const
+int64_t BackingDataLengthCalculator::calculate(const Field & field) const
 {
     if (field.isNull())
         return 0;
@@ -336,7 +336,7 @@ int64_t BackingBufferLengthCalculator::calculate(const Field & field) const
         else
             res += num_elems * 8;
 
-        BackingBufferLengthCalculator calculator(nested_type);
+        BackingDataLengthCalculator calculator(nested_type);
         for (size_t i=0; i<array.size(); ++i)
             res += calculator.calculate(array[i]);
         return res;
@@ -363,8 +363,8 @@ int64_t BackingBufferLengthCalculator::calculate(const Field & field) const
         const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
         const auto & type_key = type_map->getKeyType();
         const auto & type_val = type_map->getValueType();
-        BackingBufferLengthCalculator calculator_key(type_key);
-        BackingBufferLengthCalculator calculator_val(type_val);
+        BackingDataLengthCalculator calculator_key(type_key);
+        BackingDataLengthCalculator calculator_val(type_val);
         res += calculator_key.calculate(array_key);
         res += calculator_key.calculate(array_val);
         return res;
@@ -380,7 +380,7 @@ int64_t BackingBufferLengthCalculator::calculate(const Field & field) const
         int64_t res = calculateBitSetWidthInBytes(num_fields) + 8 * num_fields;
         for (size_t i=0; i<num_fields; ++i)
         {
-            BackingBufferLengthCalculator calculator(type_fields[i]);
+            BackingDataLengthCalculator calculator(type_fields[i]);
             res += calculator.calculate(tuple[i]);
         }
         return res;
