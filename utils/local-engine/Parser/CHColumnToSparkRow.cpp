@@ -36,6 +36,41 @@ namespace ErrorCodes
         } \
     }
 
+#define WRITE_DECIMAL_COLUMN(TYPE, PRIME_TYPE, GETTER) \
+    const auto * type_col = checkAndGetColumn<ColumnDecimal<TYPE>>(*nested_col); \
+    for (auto i = 0; i < num_rows; i++) \
+    { \
+        bool is_null = nullable_column && nullable_column->isNullAt(i); \
+        if (is_null) \
+        { \
+            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
+        } \
+        else \
+        { \
+            auto * pointer = reinterpret_cast<PRIME_TYPE *>(buffer_address + offsets[i] + field_offset); \
+            pointer[0] = type_col->GETTER(i);\
+        } \
+    }
+
+#define WRITE_COLUMN_WITH_BACKING_DATA(COL_TYPE) \
+    const auto * type_col = checkAndGetColumn<COL_TYPE>(*nested_col); \
+    for (auto i = 0; i < num_rows; i++) \
+    { \
+        bool is_null = nullable_column && nullable_column->isNullAt(i); \
+        if (is_null) \
+        { \
+            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
+        } \
+        else \
+        { \
+            StringRef value = type_col->getDataAt(i); \
+            memcpy(buffer_address + offsets[i] + buffer_cursor[i], value.data, value.size); \
+            int64_t offset_and_size = (buffer_cursor[i] << 32) | value.size; \
+            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, sizeof(int64_t)); \
+            buffer_cursor[i] += value.size; \
+        } \
+    }
+
 namespace local_engine
 {
 using namespace DB;
@@ -56,10 +91,6 @@ static int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes)
     return num_bytes + ((8 - remainder) & 0x7);
 }
 
-int64_t getFieldOffset(int64_t nullBitsetWidthInBytes, int32_t index)
-{
-    return nullBitsetWidthInBytes + 8L * index;
-}
 
 void bitSet(uint8_t * buffer_address, int32_t index)
 {
@@ -79,20 +110,19 @@ void setNullAt(uint8_t * buffer_address, int64_t row_offset, int64_t field_offse
 }
 
 void writeValue(
-    uint8_t * buffer_address,
+    unsigned char * buffer_address,
     int64_t field_offset,
     ColumnWithTypeAndName & col,
     int32_t col_index,
     int64_t num_rows,
-    std::vector<int64_t> & offsets,
+    const std::vector<int64_t> & offsets,
     std::vector<int64_t> & buffer_cursor)
 {
     ColumnPtr nested_col = col.column;
     const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
     if (nullable_column)
-    {
         nested_col = nullable_column->getNestedColumnPtr();
-    }
+
     nested_col = nested_col->convertToFullColumnIfConst();
     WhichDataType which(nested_col->getDataType());
     if (which.isUInt8())
@@ -137,29 +167,41 @@ void writeValue(
     }
     else if (which.isDate32())
     {
-        WRITE_VECTOR_COLUMN(UInt32, uint32_t, get64)
+        WRITE_VECTOR_COLUMN(UInt32, int32_t, getInt);
     }
     else if (which.isString())
     {
-        const auto * string_col = checkAndGetColumn<ColumnString>(*nested_col);
-        for (auto i = 0; i < num_rows; i++)
+        WRITE_COLUMN_WITH_BACKING_DATA(ColumnString);
+    }
+    else if (which.isDecimal())
+    {
+        if (which.isDecimal32())
         {
-            bool is_null = nullable_column && nullable_column->isNullAt(i);
-            if (is_null)
-            {
-                setNullAt(buffer_address, offsets[i], field_offset, col_index);
-            }
-            else
-            {
-                StringRef string_value = string_col->getDataAt(i);
-                // write the variable value
-                memcpy(buffer_address + offsets[i] + buffer_cursor[i], string_value.data, string_value.size);
-                // write the offset and size
-                int64_t offset_and_size = (buffer_cursor[i] << 32) | string_value.size;
-                memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, sizeof(int64_t));
-                buffer_cursor[i] += string_value.size;
-            }
+            WRITE_DECIMAL_COLUMN(Decimal32, int32_t, getInt);
         }
+        else if (which.isDecimal64())
+        {
+            WRITE_DECIMAL_COLUMN(Decimal64, int64_t, getInt);
+        }
+        else if (which.isDecimal128())
+        {
+            WRITE_COLUMN_WITH_BACKING_DATA(ColumnDecimal<Decimal128>);
+        }
+        else
+        {
+            WRITE_COLUMN_WITH_BACKING_DATA(ColumnDecimal<Decimal256>);
+        }
+    }
+    else if (which.isArray())
+    {
+    }
+    else if (which.isMap())
+    {
+
+    }
+    else if (which.isTuple())
+    {
+        
     }
     else
     {
@@ -175,6 +217,7 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
     , offsets(num_rows, 0)
     , lengths(num_rows, 0)
     , buffer_cursor(num_rows, 0)
+    , buffer_address(nullptr)
 {
     int64_t fixed_size_per_row = calculatedFixeSizePerRow(num_cols);
 
@@ -204,51 +247,65 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
         total_bytes += lengths[i];
 }
 
-int64_t local_engine::SparkRowInfo::getNullBitsetWidthInBytes() const
+
+int64_t SparkRowInfo::getFieldOffset(int32_t col_idx) const
+{
+    return null_bitset_width_in_bytes + 8L * col_idx;
+}
+
+int64_t SparkRowInfo::getNullBitsetWidthInBytes() const
 {
     return null_bitset_width_in_bytes;
 }
 
-void local_engine::SparkRowInfo::setNullBitsetWidthInBytes(int64_t null_bitset_width_in_bytes_)
+void SparkRowInfo::setNullBitsetWidthInBytes(int64_t null_bitset_width_in_bytes_)
 {
     null_bitset_width_in_bytes = null_bitset_width_in_bytes_;
 }
-int64_t local_engine::SparkRowInfo::getNumCols() const
+
+int64_t SparkRowInfo::getNumCols() const
 {
     return num_cols;
 }
-void local_engine::SparkRowInfo::setNumCols(int64_t num_cols_)
+
+void SparkRowInfo::setNumCols(int64_t num_cols_)
 {
     num_cols = num_cols_;
 }
 
-int64_t local_engine::SparkRowInfo::getNumRows() const
+int64_t SparkRowInfo::getNumRows() const
 {
     return num_rows;
 }
 
-void local_engine::SparkRowInfo::setNumRows(int64_t num_rows_)
+void SparkRowInfo::setNumRows(int64_t num_rows_)
 {
     num_rows = num_rows_;
 }
 
-unsigned char * local_engine::SparkRowInfo::getBufferAddress() const
+unsigned char * SparkRowInfo::getBufferAddress() const
 {
     return buffer_address;
 }
 
-void local_engine::SparkRowInfo::setBufferAddress(unsigned char * buffer_address_)
+void SparkRowInfo::setBufferAddress(unsigned char * buffer_address_)
 {
     buffer_address = buffer_address_;
 }
 
-const std::vector<int64_t> & local_engine::SparkRowInfo::getOffsets() const
+const std::vector<int64_t> & SparkRowInfo::getOffsets() const
 {
     return offsets;
 }
-const std::vector<int64_t> & local_engine::SparkRowInfo::getLengths() const
+
+const std::vector<int64_t> & SparkRowInfo::getLengths() const
 {
     return lengths;
+}
+
+std::vector<int64_t> & SparkRowInfo::getBufferCursor()
+{
+    return buffer_cursor;
 }
 
 int64_t SparkRowInfo::getTotalBytes() const
@@ -256,23 +313,23 @@ int64_t SparkRowInfo::getTotalBytes() const
     return total_bytes;
 }
 
-std::unique_ptr<SparkRowInfo> local_engine::CHColumnToSparkRow::convertCHColumnToSparkRow(Block & block)
+std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(Block & block)
 {
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    spark_row_info->buffer_address = reinterpret_cast<unsigned char *>(alloc(spark_row_info->total_bytes));
-    memset(spark_row_info->buffer_address, 0, sizeof(int8_t) * spark_row_info->total_bytes);
-    for (auto i = 0; i < spark_row_info->num_cols; i++)
+    spark_row_info->setBufferAddress(reinterpret_cast<unsigned char *>(alloc(spark_row_info->getTotalBytes())));
+    memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
+    for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
-        auto col = block.getByPosition(i);
-        int64_t field_offset = getFieldOffset(spark_row_info->null_bitset_width_in_bytes, i);
+        auto col = block.getByPosition(col_idx);
+        int64_t field_offset = spark_row_info->getFieldOffset(col_idx);
         writeValue(
-            spark_row_info->buffer_address,
+            spark_row_info->getBufferAddress(),
             field_offset,
             col,
-            i,
-            spark_row_info->num_rows,
-            spark_row_info->offsets,
-            spark_row_info->buffer_cursor);
+            col_idx,
+            spark_row_info->getNumRows(),
+            spark_row_info->getOffsets(),
+            spark_row_info->getBufferCursor());
     }
     return spark_row_info;
 }

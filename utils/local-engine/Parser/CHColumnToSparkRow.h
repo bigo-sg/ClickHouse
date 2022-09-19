@@ -18,16 +18,24 @@ class SparkRowInfo
 
 public:
     explicit SparkRowInfo(DB::Block & block);
+
+    int64_t getFieldOffset(int32_t col_idx) const;
+
     int64_t getNullBitsetWidthInBytes() const;
     void setNullBitsetWidthInBytes(int64_t null_bitset_width_in_bytes_);
+
     int64_t getNumCols() const;
     void setNumCols(int64_t num_cols_);
+
     int64_t getNumRows() const;
     void setNumRows(int64_t num_rows_);
+
     unsigned char * getBufferAddress() const;
     void setBufferAddress(unsigned char * buffer_address);
+
     const std::vector<int64_t> & getOffsets() const;
     const std::vector<int64_t> & getLengths() const;
+    std::vector<int64_t> & getBufferCursor();
     int64_t getTotalBytes() const;
 
 private:
@@ -39,7 +47,7 @@ private:
     std::vector<int64_t> offsets;
     std::vector<int64_t> lengths;
     std::vector<int64_t> buffer_cursor;
-    uint8_t * buffer_address;
+    unsigned char * buffer_address;
 };
 
 using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
