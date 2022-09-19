@@ -10,6 +10,7 @@
 #include <DataTypes/DataTypeDate32.h>
 #include <DataTypes/DataTypeSet.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/registerFunctions.h>
@@ -109,12 +110,14 @@ std::string typeName(const substrait::Type & type)
     {
         return "Date";
     }
+    /// TODO(@taiyang-li) support map type
 
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "unknown type {}", magic_enum::enum_name(type.kind_case()));
 }
 
 bool isTypeSame(const substrait::Type & type, DataTypePtr data_type)
 {
+    /// TODO(@taiyang-li) support map type
     static std::map<std::string, std::string> type_mapping
         = {{"I8", "Int8"},
            {"I16", "Int16"},
@@ -172,6 +175,7 @@ std::string getCastFunction(const substrait::Type & type)
     {
         ch_function_name = "toUInt8";
     }
+    /// TODO(@taiyang-li) support cast function of map type
     else
     {
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support cast type {}", type.DebugString());
@@ -383,6 +387,16 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & type)
     {
         internal_type = factory.get("Date32");
         internal_type = wrapNullableType(type.date().nullability(), internal_type);
+    }
+    else if (type.has_map())
+    {
+        const auto & key_type = type.map().key();
+        auto ch_key_type = parseType(key_type);
+
+        const auto & val_type = type.map().value();
+        auto ch_val_type = wrapNullableType(type.map().nullability(), parseType(val_type));
+
+        internal_type = std::make_shared<DB::DataTypeMap>(ch_key_type, ch_val_type);
     }
     else
     {
@@ -1032,9 +1046,8 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 case substrait::Expression_Literal::kList: {
                     SizeLimits limit;
                     if (literal.has_empty_list())
-                    {
                         throw Exception(ErrorCodes::BAD_ARGUMENTS, "empty list not support!");
-                    }
+
                     MutableColumnPtr values;
                     DataTypePtr type;
                     auto first_value = literal.list().values(0);
@@ -1137,6 +1150,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                     auto arg = ColumnSet::create(set->getTotalRowCount(), set);
                     return &action_dag->addColumn(ColumnWithTypeAndName(std::move(arg), std::make_shared<DataTypeSet>(), name));
                 }
+                /// TODO(@taiyang-li) support map type
                 case substrait::Expression_Literal::kNull: {
                     DataTypePtr nested_type;
                     if (literal.null().has_i8())

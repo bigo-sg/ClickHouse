@@ -1,6 +1,7 @@
 #include "DebugUtils.h"
 #include <DataTypes/DataTypeDate.h>
 #include <DataTypes/DataTypeDate32.h>
+#include <DataTypes/DataTypeMap.h>
 #include <Formats/FormatSettings.h>
 #include <Functions/FunctionHelpers.h>
 #include <IO/WriteBufferFromString.h>
@@ -80,6 +81,13 @@ void headBlock(const DB::Block & block, size_t count)
                 DB::WriteBufferFromString wb(date_string);
                 date_type->getSerialization(DB::ISerialization::Kind::DEFAULT)->serializeText(*nested_col, row, wb, {});
                 std::cerr << date_string.substr(0, 10) << "\t";
+            }
+            else if (which.isMap())
+            {
+                const auto * map_type = DB::checkAndGetDataType<DB::DataTypeMap>(nested_type.get());
+                String map_string;
+                DB::WriteBufferFromString wb(map_string);
+                map_type->getSerialization(DB::ISerialization::Kind::DEFAULT)->serializeText(*nested_col, row, wb, {});
             }
             else
             {

@@ -62,6 +62,7 @@ SchemaPtr SerializedSchemaBuilder::build()
             t->mutable_date()->set_nullability(
                 this->nullability_map[name] ? substrait::Type_Nullability_NULLABILITY_NULLABLE : substrait::Type_Nullability_NULLABILITY_REQUIRED);
         }
+        // TODO(@taiyang-li): support Map(K, V), this function is only needed in test cases
         else
         {
             throw std::runtime_error("doesn't support type " + type);
@@ -232,4 +233,19 @@ substrait::Expression* literalDate(int32_t value)
     literal->set_date(value);
     return rel;
 }
+
+substrait::Expression * literalMap(const std::vector<std::pair<substrait::Expression_Literal, substrait::Expression_Literal>> & keyValues)
+{
+    substrait::Expression * rel = new substrait::Expression();
+    auto * literal = rel->mutable_literal();
+    auto * map = literal->mutable_map();
+    for (const auto & [k, v] : keyValues)
+    {
+        auto *kv = map->add_key_values();
+        *kv->mutable_key() = k;
+        *kv->mutable_value() = v;
+    }
+    return rel;
+}
+
 }

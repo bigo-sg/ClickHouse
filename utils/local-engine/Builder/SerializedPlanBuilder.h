@@ -85,6 +85,8 @@ substrait::Expression * literal(double_t value);
 substrait::Expression * literal(int32_t value);
 substrait::Expression * literal(std::string value);
 substrait::Expression * literalDate(int32_t value);
+substrait::Expression * literalMap(const std::vector<std::pair<substrait::Expression_Literal, substrait::Expression_Literal>> & keyValues);
+
 
 substrait::Expression * selection(int32_t field_id);
 
