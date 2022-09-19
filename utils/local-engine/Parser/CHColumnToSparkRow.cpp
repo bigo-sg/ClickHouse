@@ -235,26 +235,31 @@ int64_t local_engine::SparkRowInfo::getNumCols() const
 {
     return num_cols;
 }
-void local_engine::SparkRowInfo::setNumCols(int64_t numCols)
+void local_engine::SparkRowInfo::setNumCols(int64_t num_cols_)
 {
-    num_cols = numCols;
+    num_cols = num_cols;
 }
+
 int64_t local_engine::SparkRowInfo::getNumRows() const
 {
     return num_rows;
 }
-void local_engine::SparkRowInfo::setNumRows(int64_t numRows)
+
+void local_engine::SparkRowInfo::setNumRows(int64_t num_rows_)
 {
-    num_rows = numRows;
+    num_rows = num_rows_;
 }
+
 unsigned char * local_engine::SparkRowInfo::getBufferAddress() const
 {
     return buffer_address;
 }
-void local_engine::SparkRowInfo::setBufferAddress(unsigned char * bufferAddress)
+
+void local_engine::SparkRowInfo::setBufferAddress(unsigned char * buffer_address_)
 {
-    buffer_address = bufferAddress;
+    buffer_address = buffer_address_;
 }
+
 const std::vector<int64_t> & local_engine::SparkRowInfo::getOffsets() const
 {
     return offsets;
@@ -263,10 +268,12 @@ const std::vector<int64_t> & local_engine::SparkRowInfo::getLengths() const
 {
     return lengths;
 }
+
 int64_t SparkRowInfo::getTotalBytes() const
 {
     return total_bytes;
 }
+
 std::unique_ptr<SparkRowInfo> local_engine::CHColumnToSparkRow::convertCHColumnToSparkRow(Block & block)
 {
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
@@ -319,6 +326,16 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
     {
         const auto & str = field.get<String>();
         return roundNumberOfBytesToNearestWord(str.size());
+    }
+
+    if (which.isDecimal())
+    {
+        if (which.isDecimal32() || which.isDecimal64())
+            return 0;
+        else if (which.isDecimal128())
+            return 16;
+        else
+            return 32;
     }
     
     if (which.isArray())

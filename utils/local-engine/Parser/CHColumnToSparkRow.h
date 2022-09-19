@@ -19,13 +19,13 @@ class SparkRowInfo
 public:
     explicit SparkRowInfo(DB::Block & block);
     int64_t getNullBitsetWidthInBytes() const;
-    void setNullBitsetWidthInBytes(int64_t nullBitsetWidthInBytes);
+    void setNullBitsetWidthInBytes(int64_t null_bitset_width_in_bytes_);
     int64_t getNumCols() const;
-    void setNumCols(int64_t numCols);
+    void setNumCols(int64_t num_cols_);
     int64_t getNumRows() const;
-    void setNumRows(int64_t numRows);
+    void setNumRows(int64_t num_rows_);
     unsigned char * getBufferAddress() const;
-    void setBufferAddress(unsigned char * bufferAddress);
+    void setBufferAddress(unsigned char * buffer_address);
     const std::vector<int64_t> & getOffsets() const;
     const std::vector<int64_t> & getLengths() const;
     int64_t getTotalBytes() const;
@@ -50,17 +50,21 @@ public:
     void freeMem(uint8_t * address, size_t size);
 };
 
+/// Return backing data length of values with variable-length type in bytes
 class BackingDataLengthCalculator
 {
 public:
+    static constexpr size_t DECIMAL_MAX_INT64_DIGITS = 18;
+
     explicit BackingDataLengthCalculator(const DB::DataTypePtr & type_);
     virtual ~BackingDataLengthCalculator() = default;
 
-    /// return length is guranteed to round up to 8;
+    /// return length is guranteed to round up to 8
     virtual int64_t calculate(const DB::Field & field) const;
 
 private:
     const DB::DataTypePtr type;
+
 };
 
 }
