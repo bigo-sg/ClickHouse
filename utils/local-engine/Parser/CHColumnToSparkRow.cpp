@@ -47,27 +47,6 @@ int64_t calculateBitSetWidthInBytes(int32_t num_fields)
 
 static int64_t calculatedFixeSizePerRow(int64_t num_cols)
 {
-    /*
-    auto fields = header.getNamesAndTypesList();
-    // Calculate the decimal col num when the precision >18
-    int32_t count = 0;
-    for (auto i = 0; i < num_cols; i++)
-    {
-        auto type = removeNullable(fields.getTypes()[i]);
-        DB::WhichDataType which(type);
-        if (which.isDecimal128())
-        {
-            const auto & dtype = typeid_cast<const DataTypeDecimal<Decimal128> *>(type.get());
-            int32_t precision = dtype->getPrecision();
-            if (precision > 18)
-                count++;
-        }
-    }
-
-    int64_t fixed_size = calculateBitSetWidthInBytes(num_cols) + num_cols * 8;
-    int64_t decimal_cols_size = count * 16;
-    return fixed_size + decimal_cols_size;
-    */
     return calculateBitSetWidthInBytes(num_cols) + num_cols * 8;
 }
 
@@ -189,19 +168,22 @@ void writeValue(
 }
 
 SparkRowInfo::SparkRowInfo(DB::Block & block)
+    : num_rows(block.rows())
+    , num_cols(block.columns())
+    , null_bitset_width_in_bytes(calculateBitSetWidthInBytes(num_cols))
+    , total_bytes(0)
+    , offsets(num_rows, 0)
+    , lengths(num_rows, 0)
+    , buffer_cursor(num_rows, 0)
 {
-    num_rows = block.rows();
-    num_cols = block.columns();
-    null_bitset_width_in_bytes = calculateBitSetWidthInBytes(num_cols);
-    int64_t fixed_size_per_row = calculatedFixeSizePerRow(block, num_cols);
-    // Initialize the offsets_ , lengths_, buffer_cursor_
+    int64_t fixed_size_per_row = calculatedFixeSizePerRow(num_cols);
+
+    /// Initialize lengths and buffer_cursor
     for (auto i = 0; i < num_rows; i++)
     {
-        lengths.push_back(fixed_size_per_row);
-        offsets.push_back(0);
-        buffer_cursor.push_back(null_bitset_width_in_bytes + 8 * num_cols);
+        lengths[i] = fixed_size_per_row;
+        buffer_cursor[i] = fixed_size_per_row;
     }
-    // Calculated the lengths_
     for (auto col_idx = 0; col_idx < num_cols; ++col_idx)
     {
         const auto & col = block.getByPosition(col_idx);
@@ -211,19 +193,15 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
             const auto field = (*col.column)[row_idx];
             lengths[row_idx] += calculator.calculate(field);
         }
-
-        /*
-        if (isStringOrFixedString(removeNullable(col.type)))
-        {
-            size_t length;
-            for (auto j = 0; j < num_rows; j++)
-            {
-                length = col.column->getDataAt(j).size;
-                lengths[j] += roundNumberOfBytesToNearestWord(length);
-            }
-        }
-        */
     }
+
+    /// Initialize offsets
+    for (auto i=1; i<num_rows; ++i)
+        offsets[i] = offsets[i - 1] + lengths[i - 1];
+    
+    /// Initialize total_bytes
+    for (auto i=0; i<num_rows; ++i)
+        total_bytes += lengths[i];
 }
 
 int64_t local_engine::SparkRowInfo::getNullBitsetWidthInBytes() const
@@ -281,24 +259,16 @@ int64_t SparkRowInfo::getTotalBytes() const
 std::unique_ptr<SparkRowInfo> local_engine::CHColumnToSparkRow::convertCHColumnToSparkRow(Block & block)
 {
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    // Calculated the offsets_  and total memory size based on lengths_
-    int64_t total_memory_size = spark_row_info->lengths[0];
-    for (auto i = 1; i < spark_row_info->num_rows; i++)
-    {
-        spark_row_info->offsets[i] = spark_row_info->offsets[i - 1] + spark_row_info->lengths[i - 1];
-        total_memory_size += spark_row_info->lengths[i];
-    }
-    spark_row_info->total_bytes = total_memory_size;
-    spark_row_info->buffer_address = reinterpret_cast<unsigned char *>(alloc(total_memory_size));
+    spark_row_info->buffer_address = reinterpret_cast<unsigned char *>(alloc(spark_row_info->total_bytes));
     memset(spark_row_info->buffer_address, 0, sizeof(int8_t) * spark_row_info->total_bytes);
     for (auto i = 0; i < spark_row_info->num_cols; i++)
     {
-        auto array = block.getByPosition(i);
+        auto col = block.getByPosition(i);
         int64_t field_offset = getFieldOffset(spark_row_info->null_bitset_width_in_bytes, i);
         writeValue(
             spark_row_info->buffer_address,
             field_offset,
-            array,
+            col,
             i,
             spark_row_info->num_rows,
             spark_row_info->offsets,

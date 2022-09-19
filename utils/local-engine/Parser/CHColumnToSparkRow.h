@@ -31,14 +31,15 @@ public:
     int64_t getTotalBytes() const;
 
 private:
-    int64_t total_bytes;
-    int64_t null_bitset_width_in_bytes;
-    int64_t num_cols;
     int64_t num_rows;
-    std::vector<int64_t> buffer_cursor;
-    uint8_t * buffer_address;
+    int64_t num_cols;
+    int64_t null_bitset_width_in_bytes;
+    int64_t total_bytes;
+
     std::vector<int64_t> offsets;
     std::vector<int64_t> lengths;
+    std::vector<int64_t> buffer_cursor;
+    uint8_t * buffer_address;
 };
 
 using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
