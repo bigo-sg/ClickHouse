@@ -202,7 +202,7 @@ QueryPlanPtr SerializedPlanParser::parseReadRealWithLocalFile(const substrait::R
     assert(rel.has_local_files());
     assert(rel.has_base_schema());
     auto header = parseNameStruct(rel.base_schema());
-    auto source = std::make_shared<SubstraitLocalFileSource>(context, header, rel.local_files());
+    auto source = std::make_shared<SubstraitFileSource>(context, header, rel.local_files());
     auto source_pipe = Pipe(source);
     auto source_step = std::make_unique<ReadFromStorageStep>(std::move(source_pipe), "substrait local files");
     source_step->setStepDescription("read local files");

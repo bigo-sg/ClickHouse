@@ -43,7 +43,7 @@ private:
     DB::Block to_read_header;
     DB::Block output_header;
 
-    std::unique_ptr<DB::ReadBuffer> read_buffer;
+    FormatFile::InputFormatPtr input_format;
     std::unique_ptr<DB::QueryPipeline> pipeline;
     std::unique_ptr<DB::PullingPipelineExecutor> reader;
 };
@@ -61,15 +61,15 @@ private:
     size_t block_size;
 };
 
-class SubstraitLocalFileSource : public DB::SourceWithProgress
+class SubstraitFileSource : public DB::SourceWithProgress
 {
 public:
-    SubstraitLocalFileSource(DB::ContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos);
-    ~SubstraitLocalFileSource() override = default;
+    SubstraitFileSourceContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos);
+    ~SubstraitFileSource() override = default;
 
     String getName() const override
     {
-        return "SubstraitLocalFileSource";
+        return "SubstraitFileSource";
     }
 protected:
     DB::Chunk generate() override;

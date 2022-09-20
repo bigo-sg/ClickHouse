@@ -15,11 +15,24 @@ namespace local_engine
 class FormatFile
 {
 public:
+    struct InputFormat
+    {
+    public:
+        explicit InputFormat(DB::InputFormatPtr input_, std::unique_ptr<DB::ReadBuffer> read_buffer_)
+            : input(input_), read_buffer(std::move(read_buffer_))
+        {
+        }
+        DB::InputFormatPtr input;
+    private:
+        std::unique_ptr<DB::ReadBuffer> read_buffer;
+    };
+    using InputFormatPtr = std::shared_ptr<InputFormat>;
+
     FormatFile(DB::ContextPtr context_, const String & uri_path_, ReadBufferBuilderPtr read_buffer_builder_);
     virtual ~FormatFile() = default;
 
     /// create a new input format for reading this file
-    virtual std::pair<DB::InputFormatPtr, std::unique_ptr<DB::ReadBuffer>> createInputFormat(const DB::Block & header) = 0;
+    virtual InputFormatPtr createInputFormat(const DB::Block & header) = 0;
 
     /// try to get rows from file metadata
     virtual std::optional<size_t> getTotalRows() { return {}; }

@@ -1,3 +1,4 @@
+#include <memory>
 #include <utility>
 #include <Formats/FormatSettings.h>
 #include <Processors/Formats/Impl/ArrowBufferedStreams.h>
@@ -18,11 +19,12 @@ ParquetFormatFile::ParquetFormatFile(DB::ContextPtr context_, const String & uri
     : FormatFile(context_, uri_path_, read_buffer_builder_)
 {}
 
-std::pair<DB::InputFormatPtr, std::unique_ptr<DB::ReadBuffer>> ParquetFormatFile::createInputFormat(const DB::Block & header)
+FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block & header)
 {
     auto read_buffer = read_buffer_builder->build(uri_path);
-    auto inputformat = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*read_buffer, header, DB::FormatSettings());
-    return std::make_pair(inputformat, std::move(read_buffer));
+    auto input_format = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*read_buffer, header, DB::FormatSettings());
+    auto res = std::make_shared<FormatFile::InputFormat>(input_format, std::move(read_buffer));
+    return input_format;
 }
 
 std::optional<size_t> ParquetFormatFile::getTotalRows()

@@ -4,7 +4,7 @@
 #include <Common/ErrorCodes.h>
 #include "IO/ReadSettings.h"
 #include <IO/ReadBufferFromAzureBlobStorage.h>
-#include <Storages/SubstraitSource/SubstraitLocalFileSource.h>
+#include <Storages/SubstraitSource/SubstraitFileSource.h>
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
 #include <IO/ReadBufferFromFile.h>
 #include <Interpreters/Context_fwd.h>

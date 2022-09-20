@@ -9,7 +9,7 @@
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
 #include <Processors/Chunk.h>
-#include <Storages/SubstraitSource/SubstraitLocalFileSource.h>
+#include <Storages/SubstraitSource/SubstraitFileSource.h>
 #include <base/types.h>
 #include <Poco/URI.h>
 #include <Common/Exception.h>
@@ -34,7 +34,7 @@ namespace ErrorCodes
 }
 namespace local_engine
 {
-SubstraitLocalFileSource::SubstraitLocalFileSource(DB::ContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
+SubstraitFileSource::SubstraitFileSource(DB::ContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
     : DB::SourceWithProgress(header_, false)
     , context(context_)
     , output_header(header_)
@@ -59,7 +59,7 @@ SubstraitLocalFileSource::SubstraitLocalFileSource(DB::ContextPtr context_, cons
 }
 
 
-DB::Chunk SubstraitLocalFileSource::generate()
+DB::Chunk SubstraitFileSource::generate()
 {
     while(current_file_index < files.size())
     {
@@ -78,7 +78,7 @@ DB::Chunk SubstraitLocalFileSource::generate()
     }
 }
 
-bool SubstraitLocalFileSource::tryPrepareReader()
+bool SubstraitFileSource::tryPrepareReader()
 {
     if (file_reader) [[likely]]
         return true;
@@ -235,9 +235,8 @@ NormalFileReader::NormalFileReader(FormatFilePtr file_, DB::ContextPtr context_,
     , to_read_header(to_read_header_)
     , output_header(output_header_)
 {
-    auto [ input_format, read_buffer_ ]= file->createInputFormat(to_read_header);
-    read_buffer = std::move(read_buffer_);
-    DB::Pipe pipe(input_format);
+    input_format = file->createInputFormat(to_read_header);
+    DB::Pipe pipe(input_format->input);
     pipeline = std::make_unique<DB::QueryPipeline>(std::move(pipe));
     reader = std::make_unique<DB::PullingPipelineExecutor>(*pipeline);
 }

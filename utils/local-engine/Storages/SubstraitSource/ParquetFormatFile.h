@@ -9,7 +9,7 @@ class ParquetFormatFile : public FormatFile
 public:
     explicit ParquetFormatFile(DB::ContextPtr context_, const String & uri_path_, ReadBufferBuilderPtr read_buffer_builder_);
     ~ParquetFormatFile() override = default;
-    std::pair<DB::InputFormatPtr, std::unique_ptr<DB::ReadBuffer>> createInputFormat(const DB::Block & header) override;
+    FormatFile::InputFormatPtr createInputFormat(const DB::Block & header) override;
     std::optional<size_t> getTotalRows() override;
 
 private:
