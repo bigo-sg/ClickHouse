@@ -170,7 +170,6 @@ DB::Field FileReaderWrapper::buildFieldFromString(const String & str_value, DB::
 
     auto nested_type = DB::removeNullable(type);
     DB::ReadBufferFromString read_buffer(str_value);
-    DB::WhichDataType which(nested_type);
     auto it = field_builders.find(magic_enum::enum_integer(nested_type->getTypeId()));
     if (it == field_builders.end())
         throw DB::Exception(DB::ErrorCodes::UNKNOWN_TYPE, "Unsupported data type {}", type->getFamilyName());
@@ -205,7 +204,6 @@ bool ConstColumnsFileReader::pull(DB::Chunk & chunk)
         to_read_rows = block_size;
         remained_rows -= block_size;
     }
-    remained_rows =  remained_rows < block_size ? 0 : remained_rows - block_size;
     DB::Columns res_columns;
     size_t columns_num = header.columns();
     res_columns.reserve(columns_num);

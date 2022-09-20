@@ -64,7 +64,7 @@ private:
 class SubstraitFileSource : public DB::SourceWithProgress
 {
 public:
-    SubstraitFileSourceContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos);
+    SubstraitFileSource(DB::ContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos);
     ~SubstraitFileSource() override = default;
 
     String getName() const override

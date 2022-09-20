@@ -24,7 +24,7 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
     auto read_buffer = read_buffer_builder->build(uri_path);
     auto input_format = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*read_buffer, header, DB::FormatSettings());
     auto res = std::make_shared<FormatFile::InputFormat>(input_format, std::move(read_buffer));
-    return input_format;
+    return res;
 }
 
 std::optional<size_t> ParquetFormatFile::getTotalRows()
