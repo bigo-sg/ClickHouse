@@ -4,6 +4,12 @@
 #include <Common/Allocator.h>
 #include <Core/Field.h>
 
+
+namespace DB
+{
+class DataTypeArray;
+};
+
 namespace local_engine
 {
 int64_t calculateBitSetWidthInBytes(int32_t num_fields);
@@ -68,12 +74,56 @@ public:
     explicit BackingDataLengthCalculator(const DB::DataTypePtr & type_);
     virtual ~BackingDataLengthCalculator() = default;
 
-    /// return length is guranteed to round up to 8
+    /// Return length is guranteed to round up to 8
     virtual int64_t calculate(const DB::Field & field) const;
+
+    static int64_t getArrayElementSize(const DB::DataTypePtr & nested_type);
+    static bool isFixedLengthDataType(const DB::DataTypePtr & nested_type);
 
 private:
     const DB::DataTypePtr type;
+};
 
+/// Writing variable-length typed values to backing data region of Spark Row
+class VariableLengthDataWriter
+{
+public:
+    VariableLengthDataWriter(
+        const DB::DataTypePtr & type_,
+        unsigned char * buffer_address_,
+        // int64_t field_offset_,
+        const std::vector<int64_t> & offsets_,
+        std::vector<int64_t> & buffer_cursor_);
+
+    virtual ~VariableLengthDataWriter() = default;
+
+    /// Return offset and size in backing data region
+    /// It's optional because fixed-length typed value should not be written to backing data region.
+    virtual std::optional<int64_t> write(size_t row_idx, const DB::Field & field);
+
+private:
+    int64_t writeUnalignedBytes(int64_t offset, int64_t & cursor, const void * src, size_t size);
+    static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
+
+    const DB::DataTypePtr type;
+    unsigned char * const buffer_address;
+    // const int64_t field_offset;
+    const std::vector<int64_t> & offsets;
+    std::vector<int64_t> & buffer_cursor;
+};
+
+class FixedLengthDataWriter
+{
+public:
+    FixedLengthDataWriter(const DB::DataTypePtr & type_, unsigned char * buffer_address_);
+    virtual ~FixedLengthDataWriter() = default;
+
+    virtual void write(const DB::Field & field, int64_t offset, bool is_array_elem);
+
+private:
+    const DB::DataTypePtr & type;
+    const DB::WhichDataType which;
+    unsigned char * const buffer_address;
 };
 
 }

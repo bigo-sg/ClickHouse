@@ -194,19 +194,16 @@ void writeValue(
     }
     else if (which.isArray())
     {
+        /// TODO 
     }
     else if (which.isMap())
     {
-
     }
     else if (which.isTuple())
     {
-        
     }
     else
-    {
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {} convert from ch to spark" ,magic_enum::enum_name(nested_col->getDataType()));
-    }
 }
 
 SparkRowInfo::SparkRowInfo(DB::Block & block)
@@ -315,6 +312,9 @@ int64_t SparkRowInfo::getTotalBytes() const
 
 std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(Block & block)
 {
+    if (!block.rows() || !block.columns())
+        return {};
+
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
     spark_row_info->setBufferAddress(reinterpret_cast<unsigned char *>(alloc(spark_row_info->getTotalBytes())));
     memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
@@ -349,8 +349,8 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         return 0;
 
     const WhichDataType which(removeNullable(type));
-    if (which.isNothing() || which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isEnum() || which.isDateOrDate32()
-        || which.isDateTime() || which.isDateTime64())
+    if (which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isDateOrDate32()
+        || which.isDateTime64() || which.isDecimal32() || which.isDecimal64())
         return 0;
     
     if (which.isStringOrFixedString())
@@ -359,15 +359,12 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         return roundNumberOfBytesToNearestWord(str.size());
     }
 
-    if (which.isDecimal())
-    {
-        if (which.isDecimal32() || which.isDecimal64())
-            return 0;
-        else if (which.isDecimal128())
-            return 16;
-        else
-            return 32;
-    }
+    if (which.isDecimal128())
+        return 16;
+    
+    /// TODO Spark Decimal is impossible mapping to CH Decimal256 
+    if (which.isDecimal256())
+        return 32;
     
     if (which.isArray())
     {
@@ -378,19 +375,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
 
         const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
         const auto & nested_type = array_type->getNestedType();
-        const WhichDataType nested_which(removeNullable(nested_type));
-        int64_t values_length = 0;
-        if (nested_which.isUInt8() || nested_which.isInt8())
-            values_length = num_elems;
-        else if (nested_which.isUInt16() || nested_which.isInt16())
-            values_length = num_elems * 2;
-        else if (nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32())
-            values_length = num_elems * 4;
-        else if (nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64())
-            values_length = num_elems * 8;
-        else
-            values_length = num_elems * 8;
-        res += roundNumberOfBytesToNearestWord(values_length);
+        res += roundNumberOfBytesToNearestWord(getArrayElementSize(nested_type) * num_elems);
 
         BackingDataLengthCalculator calculator(nested_type);
         for (size_t i=0; i<array.size(); ++i)
@@ -443,6 +428,251 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
     }
     
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type->getName());
+}
+
+int64_t BackingDataLengthCalculator::getArrayElementSize(const DataTypePtr & nested_type)
+{
+    const WhichDataType nested_which(removeNullable(nested_type));
+    if (nested_which.isUInt8() || nested_which.isInt8())
+        return 1;
+    else if (nested_which.isUInt16() || nested_which.isInt16() || nested_which.isDate())
+        return 2;
+    else if (
+        nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32() || nested_which.isDate32()
+        || nested_which.isDecimal32())
+        return 4;
+    else if (
+        nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64() || nested_which.isDateTime64()
+        || nested_which.isDecimal64())
+        return 8;
+    else
+        return 8;
+}
+
+bool BackingDataLengthCalculator::isFixedLengthDataType(const DB::DataTypePtr & nested_type)
+{
+    const WhichDataType nested_which(removeNullable(nested_type));
+    if (nested_which.isUInt8() || nested_which.isInt8())
+        return true;
+    else if (nested_which.isUInt16() || nested_which.isInt16() || nested_which.isDate())
+        return true;
+    else if (
+        nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32() || nested_which.isDate32()
+        || nested_which.isDecimal32())
+        return true;
+    else if (
+        nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64() || nested_which.isDateTime64()
+        || nested_which.isDecimal64())
+        return true;
+    else
+        return false;
+}
+
+
+VariableLengthDataWriter::VariableLengthDataWriter(
+    const DB::DataTypePtr & type_,
+    unsigned char * buffer_address_,
+    // int64_t field_offset_,
+    const std::vector<int64_t> & offsets_,
+    std::vector<int64_t> & buffer_cursor_)
+    : type(type_), buffer_address(buffer_address_), offsets(offsets_), buffer_cursor(buffer_cursor_)
+// field_offset(field_offset_),
+{
+    assert(type);
+    assert(buffer_address);
+    // assert(field_offset > 0);
+    assert(!offsets.empty());
+    assert(!buffer_cursor.empty());
+}
+
+std::optional<int64_t> VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
+{
+    if (field.isNull())
+        return std::nullopt;
+    
+    const WhichDataType which(removeNullable(type));
+    if (which.isNothing() || which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isEnum() || which.isDateOrDate32()
+        || which.isDateTime() || which.isDateTime64() || which.isDecimal32() || which.isDecimal64())
+        return std::nullopt;
+    
+    const auto & offset = offsets[row_idx];
+    auto & cursor = buffer_cursor[row_idx];
+
+    if (which.isStringOrFixedString())
+    {
+        const auto & str = field.get<String>();
+        return writeUnalignedBytes(offset, cursor, str.data(), str.size());
+    }
+
+    if (which.isDecimal128())
+    {
+        const auto & decimal = field.get<DecimalField<Decimal128>>();
+        const auto value = decimal.getValue();
+        return writeUnalignedBytes(offset, cursor, &value, sizeof(Decimal128));
+    }
+
+    if (which.isDecimal256())
+    {
+        const auto & decimal = field.get<DecimalField<Decimal256>>();
+        const auto value = decimal.getValue();
+        return writeUnalignedBytes(offset, cursor, &value, sizeof(Decimal256));
+    }
+
+    if (which.isArray())
+    {
+        /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing buffer
+        const auto & array = field.get<Array>();
+        const auto num_elems = array.size();
+
+        const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
+        const auto & nested_type = array_type->getNestedType();
+
+        /// Write numElements(8B)
+        const auto starting = cursor;
+        memcpy(buffer_address + offset + cursor, &num_elems, 8);
+        cursor += 8;
+        if (num_elems == 0)
+            return getOffsetAndSize(cursor, 8);
+
+        /// Skip null_bitmap(already reset to zero)
+        const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
+        cursor += len_null_bitmap;
+
+        /// Skip values(already reset to zero)
+        const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
+        const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
+        cursor += len_values;
+        if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
+        {
+            FixedLengthDataWriter writer(nested_type, buffer_address);
+            for (size_t i=0; i<num_elems; ++i)
+            {
+                const auto & elem = array[i];
+                if (elem.isNull())
+                {
+                    bitSet(buffer_address + offset + starting + 8 , i);
+                }
+                else
+                {
+                   writer.write(elem, starting + 8 + len_null_bitmap + i * elem_size, true);
+                }
+            }
+        }
+        else
+        {
+            VariableLengthDataWriter writer(nested_type, buffer_address, offsets, buffer_cursor);
+            for (size_t i=0; i<num_elems; ++i)
+            {
+                const auto & elem = array[i];
+                if (elem.isNull())
+                {
+                    bitSet(buffer_address + offset + starting + 8 , i);
+                }
+                else
+                {
+                    writer.write(row_idx, elem);
+                }
+            }
+        }
+    }
+    
+    if (which.isMap())
+    {
+        return {};
+    }
+
+    if (which.isTuple())
+    {
+        return {};
+    }
+    throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataWriter", type->getName());
+}
+
+int64_t VariableLengthDataWriter::getOffsetAndSize(int64_t cursor, int64_t size)
+{
+    return (cursor << 32) | size;
+}
+
+int64_t VariableLengthDataWriter::writeUnalignedBytes(int64_t offset, int64_t & cursor, const void * src, size_t size)
+{
+    memcpy(buffer_address + offset + cursor, src, size);
+    auto res = getOffsetAndSize(cursor, size);
+    cursor += roundNumberOfBytesToNearestWord(size);
+    return res;
+}
+
+
+FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_, unsigned char * buffer_address_)
+    : type(type_), which(removeNullable(type)), buffer_address(buffer_address_)
+{
+}
+
+void FixedLengthDataWriter::write(const DB::Field & field, int64_t offset, bool is_array_element)
+{
+    if (which.isUInt8())
+    {
+        const auto & value = field.get<UInt8>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 1 : 8);
+    }
+    else if (which.isUInt16() || which.isDate())
+    {
+        const auto & value = field.get<UInt16>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 2 : 8);
+    }
+    else if (which.isUInt32() || which.isDate32())
+    {
+        const auto & value = field.get<UInt32>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 4 : 8);
+    }
+    else if (which.isUInt64())
+    {
+        const auto & value = field.get<UInt64>();
+        memcpy(buffer_address + offset, &value, 8);
+    }
+    else if (which.isInt8())
+    {
+        const auto & value = field.get<Int8>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 1 : 8);
+    }
+    else if (which.isInt16())
+    {
+        const auto & value = field.get<Int16>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 2 : 8);
+    }
+    else if (which.isInt32())
+    {
+        const auto & value = field.get<Int32>();
+        memcpy(buffer_address + offset, &value, is_array_element ? 4 : 8);
+    }
+    else if (which.isInt64())
+    {
+        const auto & value = field.get<Int64>();
+        memcpy(buffer_address + offset, &value, 8);
+    }
+    else if (which.isFloat32())
+    {
+        const auto value = Float32(field.get<Float32>());
+        memcpy(buffer_address + offset, &value, is_array_element ? 4 : 8);
+    }
+    else if (which.isFloat64())
+    {
+        const auto value = Float32(field.get<Float64>());
+        memcpy(buffer_address + offset, &value, 8);
+    }
+    else if (which.isDecimal32())
+    {
+        const auto & value = field.get<Decimal32>();
+        auto decimal = value.getValue();
+        memcpy(buffer_address + offset, &decimal, is_array_element ? 4 : 8);
+    }
+    else if (which.isDecimal64() || which.isDateTime64())
+    {
+        const auto & value = field.get<Decimal64>();
+        auto decimal = value.getValue();
+        memcpy(buffer_address + offset, &decimal, 8);
+    }
+    else
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for FixedLengthWriter", type->getName());
 }
 
 }
