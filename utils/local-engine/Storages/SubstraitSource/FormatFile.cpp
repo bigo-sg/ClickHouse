@@ -23,12 +23,11 @@ namespace ErrorCodes
 }
 namespace local_engine
 {
-FormatFile::FormatFile(DB::ContextPtr context_, const String & uri_path_, ReadBufferBuilderPtr read_buffer_builder_)
-    : context(context_)
-    , uri_path(uri_path_)
-    , read_buffer_builder(read_buffer_builder_)
+FormatFile::FormatFile(
+    DB::ContextPtr context_, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_, ReadBufferBuilderPtr read_buffer_builder_)
+    : context(context_), file_info(file_info_), read_buffer_builder(read_buffer_builder_)
 {
-    PartitionValues part_vals = StringUtils::parsePartitionTablePath(uri_path);
+    PartitionValues part_vals = StringUtils::parsePartitionTablePath(file_info.uri_file());
     for (const auto & part : part_vals)
     {
         partition_keys.push_back(part.first);
@@ -40,7 +39,7 @@ FormatFilePtr FormatFileUtil::createFile(DB::ContextPtr context, ReadBufferBuild
 {
     if (file.has_parquet())
     {
-        return std::make_shared<ParquetFormatFile>(context, file.uri_file(), read_buffer_builder);
+        return std::make_shared<ParquetFormatFile>(context, file, read_buffer_builder);
     }
     else
     {

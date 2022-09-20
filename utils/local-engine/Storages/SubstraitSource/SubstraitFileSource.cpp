@@ -89,6 +89,12 @@ bool SubstraitFileSource::tryPrepareReader()
     auto current_file = files[current_file_index];
     current_file_index += 1;
 
+    if (!current_file->supportSplit() && current_file->getStartOffset())
+    {
+        /// For the files do not support split strategy, the task with not 0 offset will generate empty data
+        file_reader = std::make_unique<EmptyFileReader>(current_file);
+        return true;
+    }
     if (!to_read_header.columns())
     {
         auto total_rows = current_file->getTotalRows();

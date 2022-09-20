@@ -48,6 +48,14 @@ private:
     std::unique_ptr<DB::PullingPipelineExecutor> reader;
 };
 
+class EmptyFileReader : public FileReaderWrapper
+{
+public:
+    explicit EmptyFileReader(FormatFilePtr file_) : FileReaderWrapper(file_) {}
+    ~EmptyFileReader() override = default;
+    bool pull(DB::Chunk &) override { return false; }
+};
+
 class ConstColumnsFileReader : public FileReaderWrapper
 {
 public:

@@ -1,4 +1,5 @@
 #pragma once
+#include <substrait/plan.pb.h>
 #include <functional>
 #include <memory>
 #include <IO/ReadBuffer.h>
@@ -13,7 +14,7 @@ public:
     explicit ReadBufferBuilder(DB::ContextPtr context_) : context(context_) {}
     virtual ~ReadBufferBuilder() = default;
     /// build a new read buffer
-    virtual std::unique_ptr<DB::ReadBuffer> build(const String & uri_path) = 0;
+    virtual std::unique_ptr<DB::ReadBuffer> build(const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) = 0;
 protected:
     DB::ContextPtr context;
 };

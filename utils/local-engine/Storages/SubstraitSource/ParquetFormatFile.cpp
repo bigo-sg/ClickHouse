@@ -15,13 +15,13 @@ namespace ErrorCodes
 
 namespace local_engine
 {
-ParquetFormatFile::ParquetFormatFile(DB::ContextPtr context_, const String & uri_path_, ReadBufferBuilderPtr read_buffer_builder_)
-    : FormatFile(context_, uri_path_, read_buffer_builder_)
+ParquetFormatFile::ParquetFormatFile(DB::ContextPtr context_, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_, ReadBufferBuilderPtr read_buffer_builder_)
+    : FormatFile(context_, file_info_, read_buffer_builder_)
 {}
 
 FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block & header)
 {
-    auto read_buffer = read_buffer_builder->build(uri_path);
+    auto read_buffer = read_buffer_builder->build(file_info);
     auto input_format = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*read_buffer, header, DB::FormatSettings());
     auto res = std::make_shared<FormatFile::InputFormat>(input_format, std::move(read_buffer));
     return res;
@@ -48,7 +48,11 @@ void ParquetFormatFile::prepareReader()
     std::lock_guard lock(mutex);
     if (reader)
         return;
-    auto in = read_buffer_builder->build(uri_path);
+    /// it need to access the whole file
+    auto tmp_file_info = file_info;
+    tmp_file_info.set_start(0);
+    tmp_file_info.set_length(0);
+    auto in = read_buffer_builder->build(file_info);
     DB::FormatSettings format_settings;
     format_settings.seekable_read = true;
     std::atomic<int> is_stopped{0};
@@ -56,7 +60,7 @@ void ParquetFormatFile::prepareReader()
         asArrowFile(*in, format_settings, is_stopped), arrow::default_memory_pool(), &reader);
     if (!status.ok())
     {
-        throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Open file({}) failed. {}", uri_path, status.ToString());
+        throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Open file({}) failed. {}", file_info.uri_file(), status.ToString());
     }
 }
 }

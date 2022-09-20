@@ -37,9 +37,9 @@ public:
     explicit LocalFileReadBufferBuilder(DB::ContextPtr context_) : ReadBufferBuilder(context_) {}
     ~LocalFileReadBufferBuilder() override = default;
 
-    std::unique_ptr<DB::ReadBuffer> build(const String & uri_path) override
+    std::unique_ptr<DB::ReadBuffer> build(const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) override
     {
-        Poco::URI file_uri(uri_path);
+        Poco::URI file_uri(file_info.uri_file());
         std::unique_ptr<DB::ReadBuffer> read_buffer;
         const String & file_path = file_uri.getPath();
         struct stat file_stat;
@@ -60,9 +60,9 @@ public:
     explicit HDFSFileReadBufferBuilder(DB::ContextPtr context_) : ReadBufferBuilder(context_) {}
     ~HDFSFileReadBufferBuilder() override = default;
 
-    std::unique_ptr<DB::ReadBuffer> build(const String & uri_path) override
+    std::unique_ptr<DB::ReadBuffer> build(const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) override
     {
-        Poco::URI file_uri(uri_path);
+        Poco::URI file_uri(file_info.uri_file());
         std::unique_ptr<DB::ReadBuffer> read_buffer;
         /// Need to set "hdfs.libhdfs3_conf" in global settings
         read_buffer = std::make_unique<DB::ReadBufferFromHDFS>(
@@ -78,9 +78,9 @@ public:
     explicit S3FileReadBufferBuilder(DB::ContextPtr context_) : ReadBufferBuilder(context_) {}
     ~S3FileReadBufferBuilder() override = default;
 
-    std::unique_ptr<DB::ReadBuffer> build(const String & uri_path) override
+    std::unique_ptr<DB::ReadBuffer> build(const substrait::ReadRel::LocalFiles::FileOrFiles & file_info) override
     {
-        Poco::URI file_uri(uri_path);
+        Poco::URI file_uri(file_info.uri_file());
         auto client = getClient();
         std::unique_ptr<DB::ReadBuffer> readbuffer;
         readbuffer
@@ -132,9 +132,9 @@ public:
     explicit AzureBlobReadBuffer(DB::ContextPtr context_) : ReadBufferBuilder(context_) {}
     ~AzureBlobReadBuffer() override = default;
 
-    std::unique_ptr<DB::ReadBuffer> build(const String & uri_path)
+    std::unique_ptr<DB::ReadBuffer> build(const substrait::ReadRel::LocalFiles::FileOrFiles & file_info)
     {
-        Poco::URI file_uri(uri_path);
+        Poco::URI file_uri(file_info.uri_file());
         std::unique_ptr<DB::ReadBuffer> read_buffer;
         read_buffer = std::make_unique<DB::ReadBufferFromAzureBlobStorage>(getClient(), file_uri.getPath(), 5, 5, DBMS_DEFAULT_BUFFER_SIZE);
         return read_buffer;
