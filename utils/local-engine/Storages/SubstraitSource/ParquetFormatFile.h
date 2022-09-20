@@ -11,6 +11,7 @@ public:
     ~ParquetFormatFile() override = default;
     FormatFile::InputFormatPtr createInputFormat(const DB::Block & header) override;
     std::optional<size_t> getTotalRows() override;
+    bool supportSplit() override { return true; }
 
 private:
     std::mutex mutex;
@@ -18,6 +19,8 @@ private:
 
     std::unique_ptr<parquet::arrow::FileReader> reader;
     void prepareReader();
+
+    std::vector<int> collectRowGroupIndices();
 };
 
 }

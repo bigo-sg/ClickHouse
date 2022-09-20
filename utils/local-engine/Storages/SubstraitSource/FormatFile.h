@@ -35,7 +35,7 @@ public:
     /// create a new input format for reading this file
     virtual InputFormatPtr createInputFormat(const DB::Block & header) = 0;
 
-    /// Spart would split a large file into small segements and read in different tasks
+    /// Spark would split a large file into small segements and read in different tasks
     /// If this file doesn't support the split feacture, only the task with offset 0 will generate data.
     virtual bool supportSplit() { return false; }
 
