@@ -398,15 +398,19 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         {
             const auto & pair = map[i].get<DB::Tuple>();
             array_key.push_back(pair[0]);
-            array_key.push_back(pair[1]);
+            array_val.push_back(pair[1]);
         }
 
         const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
+
         const auto & type_key = type_map->getKeyType();
-        const auto & type_val = type_map->getValueType();
-        BackingDataLengthCalculator calculator_key(type_key);
-        BackingDataLengthCalculator calculator_val(type_val);
+        const auto type_array_key = std::make_shared<DataTypeArray>(type_key);
+        BackingDataLengthCalculator calculator_key(type_array_key);
         res += calculator_key.calculate(array_key);
+
+        const auto & type_val = type_map->getValueType();
+        const auto type_array_val = std::make_shared<DataTypeArray>(type_val);
+        BackingDataLengthCalculator calculator_val(type_array_val);
         res += calculator_key.calculate(array_val);
         return res;
     }
@@ -472,119 +476,174 @@ bool BackingDataLengthCalculator::isFixedLengthDataType(const DB::DataTypePtr & 
 VariableLengthDataWriter::VariableLengthDataWriter(
     const DB::DataTypePtr & type_,
     unsigned char * buffer_address_,
-    // int64_t field_offset_,
     const std::vector<int64_t> & offsets_,
     std::vector<int64_t> & buffer_cursor_)
     : type(type_), buffer_address(buffer_address_), offsets(offsets_), buffer_cursor(buffer_cursor_)
-// field_offset(field_offset_),
 {
     assert(type);
     assert(buffer_address);
-    // assert(field_offset > 0);
     assert(!offsets.empty());
     assert(!buffer_cursor.empty());
+    assert(offsets.size() == buffer_cursor.size());
+
+    if (BackingDataLengthCalculator::isFixedLengthDataType(type))
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataWriter doesn't support type {}", type->getName());
 }
 
-std::optional<int64_t> VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
+int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array)
 {
-    if (field.isNull())
-        return std::nullopt;
-    
-    const WhichDataType which(removeNullable(type));
-    if (which.isNothing() || which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isEnum() || which.isDateOrDate32()
-        || which.isDateTime() || which.isDateTime64() || which.isDecimal32() || which.isDecimal64())
-        return std::nullopt;
-    
+    /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing buffer
+    const auto & offset = offsets[row_idx];
+    auto & cursor = buffer_cursor[row_idx];
+    const auto num_elems = array.size();
+    const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
+    const auto & nested_type = array_type->getNestedType();
+
+    /// Write numElements(8B)
+    const auto starting = cursor;
+    memcpy(buffer_address + offset + cursor, &num_elems, 8);
+    cursor += 8;
+    if (num_elems == 0)
+        return getOffsetAndSize(starting, 8);
+
+    /// Skip null_bitmap(already reset to zero)
+    const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
+    cursor += len_null_bitmap;
+
+    /// Skip values(already reset to zero)
+    const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
+    const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
+    cursor += len_values;
+    if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
+    {
+        FixedLengthDataWriter writer(nested_type, buffer_address);
+        for (size_t i = 0; i < num_elems; ++i)
+        {
+            const auto & elem = array[i];
+            if (elem.isNull())
+            {
+                bitSet(buffer_address + offset + starting + 8, i);
+            }
+            else
+            {
+                writer.write(elem, starting + 8 + len_null_bitmap + i * elem_size, true);
+            }
+        }
+    }
+    else
+    {
+        VariableLengthDataWriter writer(nested_type, buffer_address, offsets, buffer_cursor);
+        for (size_t i = 0; i < num_elems; ++i)
+        {
+            const auto & elem = array[i];
+            if (elem.isNull())
+            {
+                bitSet(buffer_address + offset + starting + 8, i);
+            }
+            else
+            {
+                writer.write(row_idx, elem);
+            }
+        }
+    }
+    return getOffsetAndSize(cursor, cursor - starting);
+}
+
+int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
+{
+    /// 内存布局：Length of UnsafeArrayData of key(8B) | null_bitmap(字节数与map长度成正比) |  UnsafeArrayData of key | UnsafeArrayData of value 
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
 
+    const auto starting = cursor;
+
+    /// Skip length of UnsafeArrayData of key(8B)
+    cursor += 8;
+
+    /// Skip null_bitmap
+    const auto num_pairs = map.size();
+    if (num_pairs == 0)
+        return getOffsetAndSize(cursor, 8);
+
+    const auto len_null_bitmap = calculateBitSetWidthInBytes(num_pairs);
+    cursor += len_null_bitmap;
+
+    /// Construct array of keys and array of values from map
+    auto array_key = Array();
+    auto array_val = Array();
+    array_key.reserve(num_pairs);
+    array_val.reserve(num_pairs);
+    for (size_t i=0; i<num_pairs; ++i)
+    {
+        const auto & pair = map[i].get<DB::Tuple>();
+        array_key.push_back(pair[0]);
+        array_val.push_back(pair[1]);
+    }
+
+    const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
+
+    const auto & type_key = type_map->getKeyType();
+    const auto type_array_key = std::make_shared<DataTypeArray>(type_key);
+    VariableLengthDataWriter key_writer(type_array_key, buffer_address, offsets, buffer_cursor);
+    key_writer.write(row_idx, array_key);
+
+    const auto & type_val = type_map->getValueType();
+    const auto type_array_val = std::make_shared<DataTypeArray>(type_val);
+    VariableLengthDataWriter val_writer(type_array_key, buffer_address, offsets, buffer_cursor);
+    val_writer.write(row_idx, array_val);
+}
+
+int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & tuple)
+{
+}
+
+
+int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
+{
+    assert(row_idx < offsets.size());
+
+    if (field.isNull())
+        return 0;
+    
+    const WhichDataType which(removeNullable(type));
     if (which.isStringOrFixedString())
     {
         const auto & str = field.get<String>();
-        return writeUnalignedBytes(offset, cursor, str.data(), str.size());
+        return writeUnalignedBytes(row_idx, str.data(), str.size());
     }
 
     if (which.isDecimal128())
     {
         const auto & decimal = field.get<DecimalField<Decimal128>>();
         const auto value = decimal.getValue();
-        return writeUnalignedBytes(offset, cursor, &value, sizeof(Decimal128));
+        return writeUnalignedBytes(row_idx, &value, sizeof(Decimal128));
     }
 
     if (which.isDecimal256())
     {
         const auto & decimal = field.get<DecimalField<Decimal256>>();
         const auto value = decimal.getValue();
-        return writeUnalignedBytes(offset, cursor, &value, sizeof(Decimal256));
+        return writeUnalignedBytes(row_idx, &value, sizeof(Decimal256));
     }
 
     if (which.isArray())
     {
-        /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing buffer
         const auto & array = field.get<Array>();
-        const auto num_elems = array.size();
-
-        const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
-        const auto & nested_type = array_type->getNestedType();
-
-        /// Write numElements(8B)
-        const auto starting = cursor;
-        memcpy(buffer_address + offset + cursor, &num_elems, 8);
-        cursor += 8;
-        if (num_elems == 0)
-            return getOffsetAndSize(cursor, 8);
-
-        /// Skip null_bitmap(already reset to zero)
-        const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
-        cursor += len_null_bitmap;
-
-        /// Skip values(already reset to zero)
-        const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
-        const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
-        cursor += len_values;
-        if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
-        {
-            FixedLengthDataWriter writer(nested_type, buffer_address);
-            for (size_t i=0; i<num_elems; ++i)
-            {
-                const auto & elem = array[i];
-                if (elem.isNull())
-                {
-                    bitSet(buffer_address + offset + starting + 8 , i);
-                }
-                else
-                {
-                   writer.write(elem, starting + 8 + len_null_bitmap + i * elem_size, true);
-                }
-            }
-        }
-        else
-        {
-            VariableLengthDataWriter writer(nested_type, buffer_address, offsets, buffer_cursor);
-            for (size_t i=0; i<num_elems; ++i)
-            {
-                const auto & elem = array[i];
-                if (elem.isNull())
-                {
-                    bitSet(buffer_address + offset + starting + 8 , i);
-                }
-                else
-                {
-                    writer.write(row_idx, elem);
-                }
-            }
-        }
+        return writeArray(row_idx, array);
     }
     
     if (which.isMap())
     {
-        return {};
+        const auto & map = field.get<Map>();
+        return writeMap(row_idx, map);
     }
 
     if (which.isTuple())
     {
-        return {};
+        const auto & tuple = field.get<Tuple>();
+        return writeStruct(row_idx, tuple);
     }
+
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataWriter", type->getName());
 }
 
@@ -593,11 +652,21 @@ int64_t VariableLengthDataWriter::getOffsetAndSize(int64_t cursor, int64_t size)
     return (cursor << 32) | size;
 }
 
-int64_t VariableLengthDataWriter::writeUnalignedBytes(int64_t offset, int64_t & cursor, const void * src, size_t size)
+int64_t VariableLengthDataWriter::extractOffset(int64_t offset_and_size)
 {
-    memcpy(buffer_address + offset + cursor, src, size);
-    auto res = getOffsetAndSize(cursor, size);
-    cursor += roundNumberOfBytesToNearestWord(size);
+    return offset_and_size >> 32;
+}
+
+int64_t VariableLengthDataWriter::extractSize(int64_t offset_and_size)
+{
+    return offset_and_size & 0xffffffff;
+}
+
+int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const void * src, size_t size)
+{
+    memcpy(buffer_address + offsets[row_idx] + buffer_cursor[row_idx], src, size);
+    auto res = getOffsetAndSize(buffer_cursor[row_idx], size);
+    buffer_cursor[row_idx] += roundNumberOfBytesToNearestWord(size);
     return res;
 }
 
@@ -605,10 +674,16 @@ int64_t VariableLengthDataWriter::writeUnalignedBytes(int64_t offset, int64_t & 
 FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_, unsigned char * buffer_address_)
     : type(type_), which(removeNullable(type)), buffer_address(buffer_address_)
 {
+    if (!BackingDataLengthCalculator::isFixedLengthDataType(type))
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type->getName());
 }
 
 void FixedLengthDataWriter::write(const DB::Field & field, int64_t offset, bool is_array_element)
 {
+    /// Skip null value
+    if (field.isNull())
+        return;
+
     if (which.isUInt8())
     {
         const auto & value = field.get<UInt8>();
@@ -672,7 +747,7 @@ void FixedLengthDataWriter::write(const DB::Field & field, int64_t offset, bool 
         memcpy(buffer_address + offset, &decimal, 8);
     }
     else
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for FixedLengthWriter", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type->getName());
 }
 
 }

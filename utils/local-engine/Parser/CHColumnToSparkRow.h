@@ -91,7 +91,6 @@ public:
     VariableLengthDataWriter(
         const DB::DataTypePtr & type_,
         unsigned char * buffer_address_,
-        // int64_t field_offset_,
         const std::vector<int64_t> & offsets_,
         std::vector<int64_t> & buffer_cursor_);
 
@@ -99,11 +98,18 @@ public:
 
     /// Return offset and size in backing data region
     /// It's optional because fixed-length typed value should not be written to backing data region.
-    virtual std::optional<int64_t> write(size_t row_idx, const DB::Field & field);
+    virtual int64_t write(size_t row_idx, const DB::Field & field);
 
 private:
-    int64_t writeUnalignedBytes(int64_t offset, int64_t & cursor, const void * src, size_t size);
     static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
+    static int64_t extractOffset(int64_t offset_and_size);
+    static int64_t extractSize(int64_t offset_and_size);
+
+    int64_t writeUnalignedBytes(size_t row_idx, const void * src, size_t size);
+    int64_t writeArray(size_t row_idx, const DB::Array & array);
+    int64_t writeMap(size_t row_idx, const DB::Map & map);
+    int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple);
+
 
     const DB::DataTypePtr type;
     unsigned char * const buffer_address;
