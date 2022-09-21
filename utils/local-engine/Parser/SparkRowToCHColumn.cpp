@@ -96,10 +96,10 @@ void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataT
             columns[i]->insertData(data.data, data.size);
         }
         else
-        {
-            throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {} convert from spark row to ch columnar" ,
-                            magic_enum::enum_name(columns[i]->getDataType()));
-        }
+            throw Exception(
+                ErrorCodes::UNKNOWN_TYPE,
+                "Doesn't support type {} convert from spark row to ch columnar",
+                magic_enum::enum_name(columns[i]->getDataType()));
     }
 }
 

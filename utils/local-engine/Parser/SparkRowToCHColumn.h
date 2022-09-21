@@ -112,6 +112,7 @@ struct SparkRowToCHColumnHelper
             internal_type = factory.get("Date32");
             internal_type = wrapNullableType(isNullable, internal_type);
         }
+        /// TODO: Support for other types like decimal/map/struct/array
         else
         {
             throw Exception(0, "doesn't support spark type {}", type);
@@ -161,6 +162,11 @@ private:
 class SparkRowReader
 {
 public:
+    explicit SparkRowReader(int32_t numFields) : num_fields(numFields)
+    {
+        this->bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
+    }
+
     bool isSet(int index)
     {
         assert(index >= 0);
@@ -264,10 +270,6 @@ public:
         this->size_in_bytes = size_in_bytes_;
     }
 
-    explicit SparkRowReader(int32_t numFields) : num_fields(numFields)
-    {
-        this->bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
-    }
 
 private:
     int64_t getFieldOffset(int ordinal) const { return base_offset + bit_set_width_in_bytes + ordinal * 8L; }
