@@ -97,10 +97,12 @@ void writeValue(
     {
         WRITE_FIXED_LENGTH_COLUMN
     }
-    else
+    else if (BackingDataLengthCalculator::isVariableLengthDataType(col.type))
     {
         WRITE_VARIABLE_LENGTH_COLUMN
     }
+    else
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
 }
 
 SparkRowInfo::SparkRowInfo(DB::Block & block)
@@ -351,23 +353,18 @@ int64_t BackingDataLengthCalculator::getArrayElementSize(const DataTypePtr & nes
         return 8;
 }
 
-bool BackingDataLengthCalculator::isFixedLengthDataType(const DB::DataTypePtr & nested_type)
+bool BackingDataLengthCalculator::isFixedLengthDataType(const DB::DataTypePtr & type)
 {
-    const WhichDataType nested_which(removeNullable(nested_type));
-    if (nested_which.isUInt8() || nested_which.isInt8())
-        return true;
-    else if (nested_which.isUInt16() || nested_which.isInt16() || nested_which.isDate())
-        return true;
-    else if (
-        nested_which.isUInt32() || nested_which.isInt32() || nested_which.isFloat32() || nested_which.isDate32()
-        || nested_which.isDecimal32())
-        return true;
-    else if (
-        nested_which.isUInt64() || nested_which.isInt64() || nested_which.isFloat64() || nested_which.isDateTime64()
-        || nested_which.isDecimal64())
-        return true;
-    else
-        return false;
+    const WhichDataType which(removeNullable(type));
+    return which.isUInt8() || which.isInt8() || which.isUInt16() || which.isInt16() || which.isDate() || which.isUInt32() || which.isInt32()
+        || which.isFloat32() || which.isDate32() || which.isDecimal32() || which.isUInt64() || which.isInt64() || which.isFloat64()
+        || which.isDateTime64() || which.isDecimal64();
+}
+
+bool BackingDataLengthCalculator::isVariableLengthDataType(const DB::DataTypePtr & type)
+{
+    const WhichDataType which(removeNullable(type));
+    return which.isStringOrFixedString() || which.isDecimal128() || which.isArray() || which.isMap() || which.isTuple();
 }
 
 
@@ -384,7 +381,7 @@ VariableLengthDataWriter::VariableLengthDataWriter(
     assert(!buffer_cursor.empty());
     assert(offsets.size() == buffer_cursor.size());
 
-    if (BackingDataLengthCalculator::isFixedLengthDataType(type))
+    if (!BackingDataLengthCalculator::isVariableLengthDataType(type))
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataWriter doesn't support type {}", type->getName());
 }
 
@@ -554,13 +551,6 @@ int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
         const auto & decimal = field.get<DecimalField<Decimal128>>();
         const auto value = decimal.getValue();
         return writeUnalignedBytes(row_idx, &value, sizeof(Decimal128));
-    }
-
-    if (which.isDecimal256())
-    {
-        const auto & decimal = field.get<DecimalField<Decimal256>>();
-        const auto value = decimal.getValue();
-        return writeUnalignedBytes(row_idx, &value, sizeof(Decimal256));
     }
 
     if (which.isArray())

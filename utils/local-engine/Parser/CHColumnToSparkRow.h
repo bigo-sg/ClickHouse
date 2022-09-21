@@ -78,7 +78,12 @@ public:
     virtual int64_t calculate(const DB::Field & field) const;
 
     static int64_t getArrayElementSize(const DB::DataTypePtr & nested_type);
-    static bool isFixedLengthDataType(const DB::DataTypePtr & nested_type);
+
+    /// Is CH DataType can be converted to fixed-length data type in Spark? 
+    static bool isFixedLengthDataType(const DB::DataTypePtr & type);
+
+    /// Is CH DataType can be converted to variable-length data type in Spark?
+    static bool isVariableLengthDataType(const DB::DataTypePtr & type);
 
 private:
     const DB::DataTypePtr type;
