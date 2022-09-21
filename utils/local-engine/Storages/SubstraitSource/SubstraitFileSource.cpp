@@ -39,6 +39,11 @@ SubstraitFileSource::SubstraitFileSource(DB::ContextPtr context_, const DB::Bloc
     , context(context_)
     , output_header(header_)
 {
+    if (!output_header.columns())
+    {
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Empty columns to read. Maybe use count(col) instead of count(1)/count(*)");
+    }
+
     to_read_header = output_header;
     if (file_infos.items_size())
     {
