@@ -397,7 +397,7 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         pb_util::JsonOptions options;
         std::string json;
         pb_util::MessageToJsonString(*plan, &json, options);
-        LOG_INFO(&Poco::Logger::get("SerializedPlanParser"), "substrait plan:{}", json);
+        LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "substrait plan:{}", json);
     }
 
     if (plan->extensions_size() > 0)
