@@ -85,6 +85,8 @@ private:
 };
 
 /// Writing variable-length typed values to backing data region of Spark Row
+/// User who calls VariableLengthDataWriter is responsible to write offset_and_size
+/// returned by VariableLengthDataWriter::write to field value in Spark Row
 class VariableLengthDataWriter
 {
 public:

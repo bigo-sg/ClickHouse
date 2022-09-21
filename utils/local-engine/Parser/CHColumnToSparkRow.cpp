@@ -20,56 +20,6 @@ namespace ErrorCodes
 }
 }
 
-#define WRITE_VECTOR_COLUMN(TYPE, PRIME_TYPE, GETTER) \
-    const auto * type_col = checkAndGetColumn<ColumnVector<TYPE>>(*nested_col); \
-    for (auto i = 0; i < num_rows; i++) \
-    { \
-        bool is_null = nullable_column && nullable_column->isNullAt(i); \
-        if (is_null) \
-        { \
-            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        } \
-        else \
-        { \
-            auto * pointer = reinterpret_cast<PRIME_TYPE *>(buffer_address + offsets[i] + field_offset); \
-            pointer[0] = type_col->GETTER(i);\
-        } \
-    }
-
-#define WRITE_DECIMAL_COLUMN(TYPE, PRIME_TYPE, GETTER) \
-    const auto * type_col = checkAndGetColumn<ColumnDecimal<TYPE>>(*nested_col); \
-    for (auto i = 0; i < num_rows; i++) \
-    { \
-        bool is_null = nullable_column && nullable_column->isNullAt(i); \
-        if (is_null) \
-        { \
-            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        } \
-        else \
-        { \
-            auto * pointer = reinterpret_cast<PRIME_TYPE *>(buffer_address + offsets[i] + field_offset); \
-            pointer[0] = type_col->GETTER(i);\
-        } \
-    }
-
-#define WRITE_COLUMN_WITH_BACKING_DATA(COL_TYPE) \
-    const auto * type_col = checkAndGetColumn<COL_TYPE>(*nested_col); \
-    for (auto i = 0; i < num_rows; i++) \
-    { \
-        bool is_null = nullable_column && nullable_column->isNullAt(i); \
-        if (is_null) \
-        { \
-            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        } \
-        else \
-        { \
-            StringRef value = type_col->getDataAt(i); \
-            memcpy(buffer_address + offsets[i] + buffer_cursor[i], value.data, value.size); \
-            int64_t offset_and_size = (buffer_cursor[i] << 32) | value.size; \
-            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, sizeof(int64_t)); \
-            buffer_cursor[i] += value.size; \
-        } \
-    }
 
 namespace local_engine
 {
@@ -118,92 +68,39 @@ void writeValue(
     const std::vector<int64_t> & offsets,
     std::vector<int64_t> & buffer_cursor)
 {
-    ColumnPtr nested_col = col.column;
-    const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
-    if (nullable_column)
-        nested_col = nullable_column->getNestedColumnPtr();
+#define WRITE_FIXED_LENGTH_COLUMN \
+    FixedLengthDataWriter writer(col.type, buffer_address); \
+    for (auto i = 0; i < num_rows; i++) \
+    { \
+        const auto field = std::move((*col.column)[i]); \
+        if (field.isNull()) \
+            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
+        else \
+            writer.write(field, offsets[i] + field_offset, false); \
+    } \
 
-    nested_col = nested_col->convertToFullColumnIfConst();
-    WhichDataType which(nested_col->getDataType());
-    if (which.isUInt8())
+#define WRITE_VARIABLE_LENGTH_COLUMN \
+    VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor); \
+    for (auto i = 0; i < num_rows; i++) \
+    { \
+        const auto field = std::move((*col.column)[i]); \
+        if (field.isNull()) \
+            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
+        else \
+        { \
+            int64_t offset_and_size = writer.write(i, field); \
+            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
+        } \
+    } \
+
+    if (BackingDataLengthCalculator::isFixedLengthDataType(col.type))
     {
-        WRITE_VECTOR_COLUMN(UInt8, uint8_t, getInt)
-    }
-    else if (which.isInt8())
-    {
-        WRITE_VECTOR_COLUMN(Int8, int8_t, getInt)
-    }
-    else if (which.isInt16())
-    {
-        WRITE_VECTOR_COLUMN(Int16, int16_t, getInt)
-    }
-    else if (which.isUInt16())
-    {
-        WRITE_VECTOR_COLUMN(UInt16, uint16_t , get64)
-    }
-    else if (which.isInt32())
-    {
-        WRITE_VECTOR_COLUMN(Int32, int32_t, getInt)
-    }
-    else if (which.isInt64())
-    {
-        WRITE_VECTOR_COLUMN(Int64, int64_t, getInt)
-    }
-    else if (which.isUInt64())
-    {
-        WRITE_VECTOR_COLUMN(UInt64, int64_t, get64)
-    }
-    else if (which.isFloat32())
-    {
-        WRITE_VECTOR_COLUMN(Float32, float_t, getFloat32)
-    }
-    else if (which.isFloat64())
-    {
-        WRITE_VECTOR_COLUMN(Float64, double_t, getFloat64)
-    }
-    else if (which.isDate())
-    {
-        WRITE_VECTOR_COLUMN(UInt16, uint16_t, get64)
-    }
-    else if (which.isDate32())
-    {
-        WRITE_VECTOR_COLUMN(UInt32, int32_t, getInt);
-    }
-    else if (which.isString())
-    {
-        WRITE_COLUMN_WITH_BACKING_DATA(ColumnString);
-    }
-    else if (which.isDecimal())
-    {
-        if (which.isDecimal32())
-        {
-            WRITE_DECIMAL_COLUMN(Decimal32, int32_t, getInt);
-        }
-        else if (which.isDecimal64())
-        {
-            WRITE_DECIMAL_COLUMN(Decimal64, int64_t, getInt);
-        }
-        else if (which.isDecimal128())
-        {
-            WRITE_COLUMN_WITH_BACKING_DATA(ColumnDecimal<Decimal128>);
-        }
-        else
-        {
-            WRITE_COLUMN_WITH_BACKING_DATA(ColumnDecimal<Decimal256>);
-        }
-    }
-    else if (which.isArray())
-    {
-        /// TODO 
-    }
-    else if (which.isMap())
-    {
-    }
-    else if (which.isTuple())
-    {
+        WRITE_FIXED_LENGTH_COLUMN
     }
     else
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {} convert from ch to spark" ,magic_enum::enum_name(nested_col->getDataType()));
+    {
+        WRITE_VARIABLE_LENGTH_COLUMN
+    }
 }
 
 SparkRowInfo::SparkRowInfo(DB::Block & block)
