@@ -1,14 +1,9 @@
 #pragma once
 #include <vector>
 #include <Core/Block.h>
-#include <Common/Allocator.h>
 #include <Core/Field.h>
+#include <Common/Allocator.h>
 
-
-namespace DB
-{
-class DataTypeArray;
-};
 
 namespace local_engine
 {
@@ -79,7 +74,7 @@ public:
 
     static int64_t getArrayElementSize(const DB::DataTypePtr & nested_type);
 
-    /// Is CH DataType can be converted to fixed-length data type in Spark? 
+    /// Is CH DataType can be converted to fixed-length data type in Spark?
     static bool isFixedLengthDataType(const DB::DataTypePtr & type);
 
     /// Is CH DataType can be converted to variable-length data type in Spark?
@@ -140,4 +135,3 @@ private:
 };
 
 }
-

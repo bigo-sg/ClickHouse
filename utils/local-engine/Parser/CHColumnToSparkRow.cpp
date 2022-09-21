@@ -1,16 +1,16 @@
 #include "CHColumnToSparkRow.h"
-#include <Columns/ColumnNullable.h>
-#include <Columns/ColumnString.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnMap.h>
+#include <Columns/ColumnNullable.h>
+#include <Columns/ColumnString.h>
 #include <Columns/IColumn.h>
-#include <DataTypes/DataTypeNullable.h>
 #include <Core/Types.h>
-#include <DataTypes/DataTypesDecimal.h>
-#include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeMap.h>
+#include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypesDecimal.h>
 
 namespace DB
 {
@@ -52,17 +52,17 @@ void bitSet(uint8_t * buffer_address, int32_t index)
     memcpy(buffer_address + word_offset, &value, sizeof(int64_t));
 }
 
-void setNullAt(uint8_t * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
+static void setNullAt(uint8_t * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
 {
     bitSet(buffer_address + row_offset, col_index);
     // set the value to 0
     memset(buffer_address + row_offset + field_offset, 0, sizeof(int64_t));
 }
 
-void writeValue(
+static void writeValue(
     unsigned char * buffer_address,
     int64_t field_offset,
-    ColumnWithTypeAndName & col,
+    const ColumnWithTypeAndName & col,
     int32_t col_index,
     int64_t num_rows,
     const std::vector<int64_t> & offsets,
@@ -77,7 +77,7 @@ void writeValue(
             setNullAt(buffer_address, offsets[i], field_offset, col_index); \
         else \
             writer.write(field, offsets[i] + field_offset, false); \
-    } \
+    }
 
 #define WRITE_VARIABLE_LENGTH_COLUMN \
     VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor); \
@@ -91,7 +91,7 @@ void writeValue(
             int64_t offset_and_size = writer.write(i, field); \
             memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
         } \
-    } \
+    }
 
     if (BackingDataLengthCalculator::isFixedLengthDataType(col.type))
     {
@@ -135,11 +135,11 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
     }
 
     /// Initialize offsets
-    for (auto i=1; i<num_rows; ++i)
+    for (auto i = 1; i < num_rows; ++i)
         offsets[i] = offsets[i - 1] + lengths[i - 1];
-    
+
     /// Initialize total_bytes
-    for (auto i=0; i<num_rows; ++i)
+    for (auto i = 0; i < num_rows; ++i)
         total_bytes += lengths[i];
 }
 
@@ -219,7 +219,7 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(Bloc
     memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
-        auto col = block.getByPosition(col_idx);
+        const auto & col = block.getByPosition(col_idx);
         int64_t field_offset = spark_row_info->getFieldOffset(col_idx);
         writeValue(
             spark_row_info->getBufferAddress(),
@@ -240,6 +240,10 @@ void CHColumnToSparkRow::freeMem(uint8_t * address, size_t size)
 
 BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_) : type(type_)
 {
+    assert(type);
+
+    if (!isFixedLengthDataType(type) && !isVariableLengthDataType(type))
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataLengthCalculator", type->getName());
 }
 
 int64_t BackingDataLengthCalculator::calculate(const Field & field) const
@@ -248,10 +252,10 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         return 0;
 
     const WhichDataType which(removeNullable(type));
-    if (which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isDateOrDate32()
-        || which.isDateTime64() || which.isDecimal32() || which.isDecimal64())
+    if (which.isNativeInt() || which.isNativeUInt() || which.isFloat() || which.isDateOrDate32() || which.isDateTime64()
+        || which.isDecimal32() || which.isDecimal64())
         return 0;
-    
+
     if (which.isStringOrFixedString())
     {
         const auto & str = field.get<String>();
@@ -260,11 +264,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
 
     if (which.isDecimal128())
         return 16;
-    
-    /// TODO Spark Decimal is impossible mapping to CH Decimal256 
-    if (which.isDecimal256())
-        return 32;
-    
+
     if (which.isArray())
     {
         /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing buffer
@@ -277,14 +277,14 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         res += roundNumberOfBytesToNearestWord(getArrayElementSize(nested_type) * num_elems);
 
         BackingDataLengthCalculator calculator(nested_type);
-        for (size_t i=0; i<array.size(); ++i)
+        for (size_t i = 0; i < array.size(); ++i)
             res += calculator.calculate(array[i]);
         return res;
     }
-    
+
     if (which.isMap())
     {
-        /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value 
+        /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value
         int64_t res = 8;
 
         /// Construct Array of keys and values from Map
@@ -294,7 +294,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         auto array_val = Array();
         array_key.reserve(num_keys);
         array_val.reserve(num_keys);
-        for (size_t i=0; i<num_keys; ++i)
+        for (size_t i = 0; i < num_keys; ++i)
         {
             const auto & pair = map[i].get<DB::Tuple>();
             array_key.push_back(pair[0]);
@@ -323,14 +323,14 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         const auto & type_fields = type_tuple->getElements();
         const auto num_fields = type_fields.size();
         int64_t res = calculateBitSetWidthInBytes(num_fields) + 8 * num_fields;
-        for (size_t i=0; i<num_fields; ++i)
+        for (size_t i = 0; i < num_fields; ++i)
         {
             BackingDataLengthCalculator calculator(type_fields[i]);
             res += calculator.calculate(tuple[i]);
         }
         return res;
     }
-    
+
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type->getName());
 }
 
@@ -387,7 +387,7 @@ VariableLengthDataWriter::VariableLengthDataWriter(
 
 int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array)
 {
-    /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data 
+    /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
     const auto num_elems = array.size();
@@ -425,7 +425,7 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
     }
     else
     {
-        /// If nested type is not fixed-length data type, update null_bitmap in place 
+        /// If nested type is not fixed-length data type, update null_bitmap in place
         /// And append values in backing data recursively
         VariableLengthDataWriter writer(nested_type, buffer_address, offsets, buffer_cursor);
         for (size_t i = 0; i < num_elems; ++i)
@@ -442,14 +442,14 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
 
 int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
 {
-    /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value 
+    /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
 
     /// Skip length of UnsafeArrayData of key(8B)
     const auto start = cursor;
     cursor += 8;
-    
+
     /// If Map is empty, return in advance
     const auto num_pairs = map.size();
     if (num_pairs == 0)
@@ -460,7 +460,7 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
     auto array_val = Array();
     array_key.reserve(num_pairs);
     array_val.reserve(num_pairs);
-    for (size_t i=0; i<num_pairs; ++i)
+    for (size_t i = 0; i < num_pairs; ++i)
     {
         const auto & pair = map[i].get<DB::Tuple>();
         array_key.push_back(pair[0]);
@@ -488,7 +488,7 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
 
 int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & tuple)
 {
-    /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data 
+    /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
     const auto start = cursor;
@@ -532,13 +532,13 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
     return getOffsetAndSize(start, cursor - start);
 }
 
-int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
+int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field & field)
 {
     assert(row_idx < offsets.size());
 
     if (field.isNull())
         return 0;
-    
+
     const WhichDataType which(removeNullable(type));
     if (which.isStringOrFixedString())
     {
@@ -558,7 +558,7 @@ int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
         const auto & array = field.get<Array>();
         return writeArray(row_idx, array);
     }
-    
+
     if (which.isMap())
     {
         const auto & map = field.get<Map>();
