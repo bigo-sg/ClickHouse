@@ -385,11 +385,12 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
     
     if (which.isMap())
     {
-        /// 内存布局：numKeys(8B) | null_bitmap(字节数与map长度成正比) |  UnsafeArrayData of key | UnsafeArrayData of value 
+        /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value 
+        int64_t res = 8;
+
+        /// Construct Array of keys and values from Map
         const auto & map = field.get<Map>(); /// Map can not be wrapped with Nullable
         const auto num_keys = map.size();
-        int64_t res = 8 + calculateBitSetWidthInBytes(num_keys);
-        
         auto array_key = Array();
         auto array_val = Array();
         array_key.reserve(num_keys);
@@ -492,7 +493,7 @@ VariableLengthDataWriter::VariableLengthDataWriter(
 
 int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array)
 {
-    /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing buffer
+    /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data 
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
     const auto num_elems = array.size();
@@ -500,11 +501,11 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
     const auto & nested_type = array_type->getNestedType();
 
     /// Write numElements(8B)
-    const auto starting = cursor;
+    const auto start = cursor;
     memcpy(buffer_address + offset + cursor, &num_elems, 8);
     cursor += 8;
     if (num_elems == 0)
-        return getOffsetAndSize(starting, 8);
+        return getOffsetAndSize(start, 8);
 
     /// Skip null_bitmap(already reset to zero)
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
@@ -514,59 +515,51 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
     const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
     const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
     cursor += len_values;
+
     if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
     {
+        /// If nested type is fixed-length data type, update null_bitmap and values in place
         FixedLengthDataWriter writer(nested_type, buffer_address);
         for (size_t i = 0; i < num_elems; ++i)
         {
             const auto & elem = array[i];
             if (elem.isNull())
-            {
-                bitSet(buffer_address + offset + starting + 8, i);
-            }
+                bitSet(buffer_address + offset + start + 8, i);
             else
-            {
-                writer.write(elem, starting + 8 + len_null_bitmap + i * elem_size, true);
-            }
+                writer.write(elem, start + 8 + len_null_bitmap + i * elem_size, true);
         }
     }
     else
     {
+        /// If nested type is not fixed-length data type, update null_bitmap in place 
+        /// And append values in backing data recursively
         VariableLengthDataWriter writer(nested_type, buffer_address, offsets, buffer_cursor);
         for (size_t i = 0; i < num_elems; ++i)
         {
             const auto & elem = array[i];
             if (elem.isNull())
-            {
-                bitSet(buffer_address + offset + starting + 8, i);
-            }
+                bitSet(buffer_address + offset + start + 8, i);
             else
-            {
                 writer.write(row_idx, elem);
-            }
         }
     }
-    return getOffsetAndSize(cursor, cursor - starting);
+    return getOffsetAndSize(cursor, cursor - start);
 }
 
 int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
 {
-    /// 内存布局：Length of UnsafeArrayData of key(8B) | null_bitmap(字节数与map长度成正比) |  UnsafeArrayData of key | UnsafeArrayData of value 
+    /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value 
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
 
-    const auto starting = cursor;
-
     /// Skip length of UnsafeArrayData of key(8B)
+    const auto start = cursor;
     cursor += 8;
-
-    /// Skip null_bitmap
+    
+    /// If Map is empty, return in advance
     const auto num_pairs = map.size();
     if (num_pairs == 0)
-        return getOffsetAndSize(cursor, 8);
-
-    const auto len_null_bitmap = calculateBitSetWidthInBytes(num_pairs);
-    cursor += len_null_bitmap;
+        return getOffsetAndSize(start, 8);
 
     /// Construct array of keys and array of values from map
     auto array_key = Array();
@@ -582,21 +575,68 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
 
     const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
 
+    /// Append UnsafeArrayData of key
     const auto & type_key = type_map->getKeyType();
     const auto type_array_key = std::make_shared<DataTypeArray>(type_key);
     VariableLengthDataWriter key_writer(type_array_key, buffer_address, offsets, buffer_cursor);
-    key_writer.write(row_idx, array_key);
+    const auto array_key_size = extractSize(key_writer.write(row_idx, array_key));
 
+    /// Fill length of UnsafeArrayData of key
+    memcpy(buffer_address + offset + start, &array_key_size, 8);
+
+    /// Append UnsafeArrayData of value
     const auto & type_val = type_map->getValueType();
     const auto type_array_val = std::make_shared<DataTypeArray>(type_val);
     VariableLengthDataWriter val_writer(type_array_key, buffer_address, offsets, buffer_cursor);
     val_writer.write(row_idx, array_val);
+    return getOffsetAndSize(start, cursor - start);
 }
 
 int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & tuple)
 {
-}
+    /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data 
+    const auto & offset = offsets[row_idx];
+    auto & cursor = buffer_cursor[row_idx];
+    const auto start = cursor;
 
+    /// Skip null_bitmap
+    const auto * type_tuple = typeid_cast<const DataTypeTuple *>(type.get());
+    const auto & type_fields = type_tuple->getElements();
+    const auto num_fields = type_fields.size();
+    if (num_fields == 0)
+        return getOffsetAndSize(start, 0);
+    const auto len_null_bitmap = calculateBitSetWidthInBytes(num_fields);
+    cursor += len_null_bitmap;
+
+    /// Skip values
+    cursor += num_fields * 8;
+
+    /// If field type is fixed-length, fill field value in values region
+    /// else append it to backing data region, and update offset_and_size in values region
+    for (size_t i = 0; i < num_fields; ++i)
+    {
+        const auto & field_value = tuple[i];
+        const auto & field_type = type_fields[i];
+        if (field_value.isNull())
+        {
+            bitSet(buffer_address + offset + start, i);
+            continue;
+        }
+
+        if (BackingDataLengthCalculator::isFixedLengthDataType(field_type))
+        {
+            FixedLengthDataWriter writer(field_type, buffer_address);
+            writer.write(field_value, start + len_null_bitmap + i * 8, false);
+        }
+        else
+        {
+            VariableLengthDataWriter writer(field_type, buffer_address, offsets, buffer_cursor);
+            const auto offset_and_size = writer.write(row_idx, field_value);
+            memcpy(buffer_address + offset + start + len_null_bitmap + 8 * i, &offset_and_size, 8);
+        }
+    }
+    return getOffsetAndSize(start, cursor - start);
+}
 
 int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field &field)
 {
