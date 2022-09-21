@@ -23,87 +23,11 @@ jclass SparkRowToCHColumn::spark_row_interator_class = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_hasNext = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_next = nullptr;
 
-int64_t getStringColumnTotalSize(int ordinal, SparkRowInfo & spark_row_info)
-{
-    SparkRowReader reader(spark_row_info.getNumCols());
-    int64_t size = 0;
-    for (int64_t i = 0; i < spark_row_info.getNumRows(); i++)
-    {
-        reader.pointTo(
-            reinterpret_cast<int64_t>(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i]), spark_row_info.getLengths()[i]);
-        size += (reader.getStringSize(ordinal) + 1);
-    }
-    return size;
-}
-
-void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataTypePtr>& types, SparkRowReader & spark_row_reader)
+void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowReader & spark_row_reader)
 {
     int32_t num_fields = columns.size();
-    bool is_nullable = false;
     for (int32_t i = 0; i < num_fields; i++)
-    {
-        WhichDataType which(columns[i]->getDataType());
-        if (which.isNullable())
-        {
-            const auto * nullable = checkAndGetDataType<DataTypeNullable>(types[i].get());
-            which = WhichDataType(nullable->getNestedType());
-            is_nullable = true;
-        }
-
-        if (spark_row_reader.isNullAt(i)) {
-            assert(is_nullable);
-            ColumnNullable & column = assert_cast<ColumnNullable &>(*columns[i]);
-            column.insertData(nullptr, 0);
-            continue;
-        }
-
-        if (which.isUInt8())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(uint8_t));
-        }
-        else if (which.isInt8())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int8_t));
-        }
-        else if (which.isInt16())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int16_t));
-        }
-        else if (which.isInt32())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int32_t));
-        }
-        else if (which.isInt64())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int64_t));
-        }
-        else if (which.isFloat32())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(float_t));
-        }
-        else if (which.isFloat64())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(double_t));
-        }
-        else if (which.isDate() || which.isUInt16())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(uint16_t));
-        }
-        else if (which.isDate32() || which.isUInt32())
-        {
-            columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(uint32_t));
-        }
-        else if (which.isString())
-        {
-            StringRef data = spark_row_reader.getString(i);
-            columns[i]->insertData(data.data, data.size);
-        }
-        else
-            throw Exception(
-                ErrorCodes::UNKNOWN_TYPE,
-                "Doesn't support type {} convert from spark row to ch columnar",
-                magic_enum::enum_name(columns[i]->getDataType()));
-    }
+        columns[i]->insert(spark_row_reader.get(i));
 }
 
 std::unique_ptr<Block>
@@ -121,12 +45,11 @@ SparkRowToCHColumn::convertSparkRowInfoToCHColumn(local_engine::SparkRowInfo & s
         mutable_columns.push_back(std::move(read_column));
         types.push_back(header_column.type);
     }
-    SparkRowReader row_reader(header.columns());
+    SparkRowReader row_reader(header.columns(), types);
     for (int64_t i = 0; i < spark_row_info.getNumRows(); i++)
     {
-        row_reader.pointTo(
-            reinterpret_cast<int64_t>(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i]), spark_row_info.getLengths()[i]);
-        writeRowToColumns(mutable_columns, types, row_reader);
+        row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
+        writeRowToColumns(mutable_columns, row_reader);
     }
     auto block = std::make_unique<Block>(*std::move(columns_list));
     for (size_t column_i = 0, columns = mutable_columns.size(); column_i < columns; ++column_i)
@@ -139,11 +62,11 @@ SparkRowToCHColumn::convertSparkRowInfoToCHColumn(local_engine::SparkRowInfo & s
     return block;
 }
 
-void SparkRowToCHColumn::appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, int64_t address, int32_t size)
+void SparkRowToCHColumn::appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer, int32_t length)
 {
-    SparkRowReader row_reader(helper.header->columns());
-    row_reader.pointTo(address, size);
-    writeRowToColumns(*helper.cols, *helper.typePtrs, row_reader);
+    SparkRowReader row_reader(helper.header->columns(), *helper.data_types);
+    row_reader.pointTo(buffer, length);
+    writeRowToColumns(*helper.cols, row_reader);
 }
 
 Block * SparkRowToCHColumn::getWrittenBlock(SparkRowToCHColumnHelper & helper)

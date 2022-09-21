@@ -52,7 +52,7 @@ void bitSet(char * bitmap, int32_t index)
     memcpy(bitmap + word_offset, &value, sizeof(int64_t));
 }
 
-bool isBitSet(char * bitmap, int32_t index)
+bool isBitSet(const char * bitmap, int32_t index)
 {
     assert(index >= 0);
     int64_t mask = 1 << (index & 63);

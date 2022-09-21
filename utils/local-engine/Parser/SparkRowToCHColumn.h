@@ -10,6 +10,14 @@
 #include <base/StringRef.h>
 #include <Common/JNIUtils.h>
 
+namespace DB
+{
+namespace ErrorCodes
+{
+    extern const int UNKNOWN_TYPE;
+}
+}
+
 namespace local_engine
 {
 using namespace DB;
@@ -22,8 +30,8 @@ struct SparkRowToCHColumnHelper
     {
         internal_cols = std::make_unique<std::vector<ColumnWithTypeAndName>>();
         internal_cols->reserve(names.size());
-        typePtrs = std::make_unique<std::vector<DataTypePtr>>();
-        typePtrs->reserve(names.size());
+        data_types = std::make_unique<std::vector<DataTypePtr>>();
+        data_types->reserve(names.size());
         for (size_t i = 0; i < names.size(); ++i)
         {
             const auto & name = names[i];
@@ -31,7 +39,7 @@ struct SparkRowToCHColumnHelper
             const bool is_nullable = isNullables[i];
             auto data_type = parseType(type, is_nullable);
             internal_cols->push_back(ColumnWithTypeAndName(data_type, name));
-            typePtrs->push_back(data_type);
+            data_types->push_back(data_type);
         }
         header = std::make_shared<Block>(*std::move(internal_cols));
         resetWrittenColumns();
@@ -39,15 +47,15 @@ struct SparkRowToCHColumnHelper
 
     unique_ptr<vector<ColumnWithTypeAndName>> internal_cols; //for headers
     unique_ptr<vector<MutableColumnPtr>> cols;
-    unique_ptr<vector<DataTypePtr>> typePtrs;
+    unique_ptr<vector<DataTypePtr>> data_types;
     shared_ptr<Block> header;
 
     void resetWrittenColumns()
     {
         cols = make_unique<vector<MutableColumnPtr>>();
-        for (size_t i = 0; i < internal_cols->size(); i++)
+        for (auto & i : *internal_cols)
         {
-            cols->push_back(internal_cols->at(i).type->createColumn());
+            cols->push_back(i.type->createColumn());
         }
     }
 
@@ -64,7 +72,7 @@ struct SparkRowToCHColumnHelper
     }
 
     //parse Spark type name to CH DataType
-    DataTypePtr parseType(const string& type, const bool isNullable)
+    static DataTypePtr parseType(const string& type, const bool isNullable)
     {
         DataTypePtr internal_type = nullptr;
         auto & factory = DataTypeFactory::instance();
@@ -130,12 +138,12 @@ public:
     static jmethodID spark_row_interator_next;
 
     // case 1: rows are batched (this is often directly converted from Block)
-    std::unique_ptr<Block> convertSparkRowInfoToCHColumn(SparkRowInfo & spark_row_info, Block & header);
+    static std::unique_ptr<Block> convertSparkRowInfoToCHColumn(SparkRowInfo & spark_row_info, Block & header);
 
     // case 2: provided with a sequence of spark UnsafeRow, convert them to a Block
-    Block* convertSparkRowItrToCHColumn(jobject java_iter, vector<string>& names, vector<string>& types, vector<bool>& isNullables)
+    static Block* convertSparkRowItrToCHColumn(jobject java_iter, vector<string>& names, vector<string>& types, vector<bool>& is_nullables)
     {
-        SparkRowToCHColumnHelper helper(names, types, isNullables);
+        SparkRowToCHColumnHelper helper(names, types, is_nullables);
 
         int attached;
         JNIEnv * env = JNIUtils::getENV(&attached);
@@ -145,39 +153,69 @@ public:
             jsize len = env->GetArrayLength(row_data);
             char * c_arr = new char[len];
             env->GetByteArrayRegion(row_data, 0, len, reinterpret_cast<jbyte*>(c_arr));
-            appendSparkRowToCHColumn(helper, reinterpret_cast<int64_t>(c_arr), len);
+            appendSparkRowToCHColumn(helper, c_arr, len);
             delete[] c_arr;
         }
         return getWrittenBlock(helper);
     }
 
-    void freeBlock(Block* block) {
-        delete block;
-    }
+    static void freeBlock(Block * block) { delete block; }
 
 private:
-    void appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, int64_t address, int32_t size);
-    Block* getWrittenBlock(SparkRowToCHColumnHelper & helper);
+    static void appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer , int32_t length);
+    static Block * getWrittenBlock(SparkRowToCHColumnHelper & helper);
 };
 
+class VariableLengthDataReader
+{
+public:
+    explicit VariableLengthDataReader(const DataTypePtr& type_);
+    virtual ~VariableLengthDataReader() = default;
+
+    virtual Field read(char * buffer, size_t length);
+private:
+
+    virtual Field readDecimal(char * buffer, size_t length);
+    virtual Field readString(char * buffer, size_t length);
+    virtual Field readArray(char * buffer, size_t length);
+    virtual Field readMap(char * buffer, size_t length);
+    virtual Field readStruct(char * buffer, size_t length);
+
+    const DataTypePtr & type;
+    const WhichDataType which;
+};
+
+class FixedLengthDataReader
+{
+public:
+    explicit FixedLengthDataReader(const DB::DataTypePtr & type_);
+    virtual ~FixedLengthDataReader() = default;
+
+    virtual Field read(char * buffer);
+
+private:
+    const DB::DataTypePtr & type;
+    const DB::WhichDataType which;
+    
+};
 class SparkRowReader
 {
 public:
-    explicit SparkRowReader(int32_t numFields) : num_fields(numFields)
+    explicit SparkRowReader(int32_t num_fields_, const DataTypes & field_types_)
+        : num_fields(num_fields_), field_types(field_types_), bit_set_width_in_bytes(calculateBitSetWidthInBytes(num_fields))
     {
-        this->bit_set_width_in_bytes = local_engine::calculateBitSetWidthInBytes(numFields);
     }
 
     bool isSet(int index)
     {
         assert(index >= 0);
         int64_t mask = 1 << (index & 63);
-        int64_t word_offset = base_offset + static_cast<int64_t>(index >> 6) * 8L;
+        char * word_offset = buffer + static_cast<int64_t>(index >> 6) * 8L;
         int64_t word = *reinterpret_cast<int64_t *>(word_offset);
         return (word & mask) != 0;
     }
 
-    inline void assertIndexIsValid(int index) const
+    static inline void assertIndexIsValid([[maybe_unused]] int index) 
     {
         assert(index >= 0);
         assert(index < num_fields);
@@ -256,7 +294,7 @@ public:
         int64_t offset_and_size = getLong(ordinal);
         int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
         int32_t size = static_cast<int32_t>(offset_and_size);
-        return StringRef(reinterpret_cast<char *>(this->base_offset + offset), size);
+        return StringRef(reinterpret_cast<char *>(this->buffer + offset), size);
     }
 
     int32_t getStringSize(int ordinal)
@@ -265,111 +303,49 @@ public:
         return static_cast<int32_t>(getLong(ordinal));
     }
 
-    Field getDecimal(int ordinal, uint32_t precision, uint32_t  /*scale*/)
+    void pointTo(char *buffer_, int32_t length_)
+    {
+        this->buffer = buffer_;
+        this->length = length_;
+    }
+
+    Field get(int ordinal)
     {
         if (isNullAt(ordinal))
-            return {};
-        
-        if (precision <= DataTypeDecimal<Decimal64>::maxPrecision())
+            return std::move(Null{});
+
+        const auto & field_type = field_types[ordinal];
+        if (BackingDataLengthCalculator::isFixedLengthDataType(field_type))
         {
-            const auto value = getLong(ordinal);
-            if (precision <= DataTypeDecimal<Decimal32>::maxPrecision())
-                return DecimalField<Decimal32>(value);
-            else   
-                return DecimalField<Decimal64>(value);
+            FixedLengthDataReader reader(field_type);
+            return std::move(reader.read(getFieldOffset(ordinal)));
+        }
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(field_type))
+        {
+            int64_t offset_and_size = 0;
+            memcpy(&offset_and_size, buffer + bit_set_width_in_bytes + ordinal * 8, 8);
+            const int64_t offset = BackingDataLengthCalculator::extractOffset(offset_and_size);
+            const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
+
+            VariableLengthDataReader reader(field_type);
+            return std::move(reader.read(buffer + offset, size));
         }
         else
-        {
-            const auto bytes = getString(ordinal);
-            assert(bytes.size == 16);
-
-            Decimal128 value;
-            memcpy(&value, bytes.data, bytes.size);
-            return DecimalField<Decimal128>(value);
-        }
-    }
-
-    Field getArray(int ordinal)
-    {
-        if (isNullAt(ordinal))
-            return {};
-        
-        int64_t offset_and_size = getLong(ordinal);
-        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
-        int32_t size = static_cast<int32_t>(offset_and_size);
-        return Array();
-    }
-
-    Field getMap(int ordinal)
-    {
-        if (isNullAt(ordinal))
-            return {};
-
-        int64_t offset_and_size = getLong(ordinal);
-        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
-        int32_t size = static_cast<int32_t>(offset_and_size);
-        return Map();
-    }
-
-    Field getTuple(int ordinal)
-    {
-        if (isNullAt(ordinal))
-            return {};
-
-        int64_t offset_and_size = getLong(ordinal);
-        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
-        int32_t size = static_cast<int32_t>(offset_and_size);
-        return Tuple();
-    }
-
-    void pointTo(int64_t base_offset_, int32_t size_in_bytes_)
-    {
-        this->base_offset = base_offset_;
-        this->size_in_bytes = size_in_bytes_;
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "SparkRowReader doesn't support type {}", field_type->getName());
     }
 
 
 private:
-    int64_t getFieldOffset(int ordinal) const { return base_offset + bit_set_width_in_bytes + ordinal * 8L; }
+    char * getFieldOffset(int ordinal) const { return buffer + bit_set_width_in_bytes + ordinal * 8L; }
 
-    int64_t base_offset;
     int32_t num_fields;
-    int32_t size_in_bytes;
+    const DataTypes field_types;
+
+    char * buffer;
+    int32_t length;
     int32_t bit_set_width_in_bytes;
 };
 
-class VariableLengthDataReader
-{
-public:
-    explicit VariableLengthDataReader(const DataTypePtr& type_);
-    virtual ~VariableLengthDataReader() = default;
-
-    virtual Field read(char * buffer, size_t length);
-private:
-
-    virtual Field readDecimal(char * buffer, size_t length);
-    virtual Field readString(char * buffer, size_t length);
-    virtual Field readArray(char * buffer, size_t length);
-    virtual Field readMap(char * buffer, size_t length);
-    virtual Field readStruct(char * buffer, size_t length);
-
-    const DataTypePtr & type;
-    const WhichDataType which;
-};
-
-class FixedLengthDataReader
-{
-public:
-    explicit FixedLengthDataReader(const DB::DataTypePtr & type_);
-    virtual ~FixedLengthDataReader() = default;
-
-    virtual Field read(char * buffer);
-
-private:
-    const DB::DataTypePtr & type;
-    const DB::WhichDataType which;
-    
-};
 
 
 }

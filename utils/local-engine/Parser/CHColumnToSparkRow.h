@@ -10,7 +10,7 @@ namespace local_engine
 int64_t calculateBitSetWidthInBytes(int32_t num_fields);
 int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes);
 void bitSet(char * bitmap, int32_t index);
-bool isBitSet(char * bitmap, int32_t index);
+bool isBitSet(const char * bitmap, int32_t index);
 
 class CHColumnToSparkRow;
 class SparkRowToCHColumn;

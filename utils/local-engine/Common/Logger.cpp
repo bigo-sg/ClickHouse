@@ -10,9 +10,9 @@ using Poco::AsyncChannel;
 
 void local_engine::Logger::initConsoleLogger()
 {
-    AutoPtr<ConsoleChannel> pCons(new ConsoleChannel);
-    AutoPtr<AsyncChannel> pAsync(new AsyncChannel(pCons));
-    Poco::Logger::root().setChannel(pAsync);
+    AutoPtr<ConsoleChannel> p_cons(new ConsoleChannel);
+    AutoPtr<AsyncChannel> p_async(new AsyncChannel(p_cons));
+    Poco::Logger::root().setChannel(p_async);
     Poco::Logger::root().setLevel("error");
     Poco::Logger::root().debug("init logger success");
 }

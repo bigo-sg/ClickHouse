@@ -1178,7 +1178,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 {
                     values->insert(getter(v.literal()));
                 }
-                return values;
+                return std::move(values);
             };
             if (first_value.has_boolean())
             {

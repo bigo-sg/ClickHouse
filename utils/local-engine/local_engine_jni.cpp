@@ -42,7 +42,7 @@ std::vector<std::string> stringSplit(const std::string & str, char delim)
     }
 }
 
-DB::ColumnWithTypeAndName inline getColumnFromColumnVector(JNIEnv * /*env*/, jobject obj, jlong block_address, jint column_position)
+DB::ColumnWithTypeAndName inline getColumnFromColumnVector(JNIEnv * /*env*/, jobject  /*obj*/, jlong block_address, jint column_position)
 {
     DB::Block * block = reinterpret_cast<DB::Block *>(block_address);
     return block->getByPosition(column_position);
@@ -683,13 +683,13 @@ jobject Java_io_glutenproject_vectorized_CHShuffleSplitterJniWrapper_stop(JNIEnv
     local_engine::SplitterHolder * splitter = reinterpret_cast<local_engine::SplitterHolder *>(splitterId);
     auto result = splitter->splitter->stop();
     const auto & partition_lengths = result.partition_length;
-    auto partition_length_arr = env->NewLongArray(partition_lengths.size());
-    auto src = reinterpret_cast<const jlong *>(partition_lengths.data());
+    auto *partition_length_arr = env->NewLongArray(partition_lengths.size());
+    const auto *src = reinterpret_cast<const jlong *>(partition_lengths.data());
     env->SetLongArrayRegion(partition_length_arr, 0, partition_lengths.size(), src);
 
     const auto & raw_partition_lengths = result.raw_partition_length;
-    auto raw_partition_length_arr = env->NewLongArray(raw_partition_lengths.size());
-    auto raw_src = reinterpret_cast<const jlong *>(raw_partition_lengths.data());
+    auto *raw_partition_length_arr = env->NewLongArray(raw_partition_lengths.size());
+    const auto *raw_src = reinterpret_cast<const jlong *>(raw_partition_lengths.data());
     env->SetLongArrayRegion(raw_partition_length_arr, 0, raw_partition_lengths.size(), raw_src);
 
     jobject split_result = env->NewObject(
