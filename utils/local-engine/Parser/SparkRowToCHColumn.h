@@ -351,7 +351,7 @@ private:
     virtual Field readString(char * buffer, size_t length);
     virtual Field readArray(char * buffer, size_t length);
     virtual Field readMap(char * buffer, size_t length);
-    virtual Field readTuple(char * buffer, size_t length);
+    virtual Field readStruct(char * buffer, size_t length);
 
     const DataTypePtr & type;
     const WhichDataType which;

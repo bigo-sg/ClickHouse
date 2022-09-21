@@ -9,6 +9,8 @@ namespace local_engine
 {
 int64_t calculateBitSetWidthInBytes(int32_t num_fields);
 int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes);
+void bitSet(char * bitmap, int32_t index);
+bool isBitSet(char * bitmap, int32_t index);
 
 class CHColumnToSparkRow;
 class SparkRowToCHColumn;
@@ -32,8 +34,8 @@ public:
     int64_t getNumRows() const;
     void setNumRows(int64_t num_rows_);
 
-    unsigned char * getBufferAddress() const;
-    void setBufferAddress(unsigned char * buffer_address);
+    char * getBufferAddress() const;
+    void setBufferAddress(char * buffer_address);
 
     const std::vector<int64_t> & getOffsets() const;
     const std::vector<int64_t> & getLengths() const;
@@ -49,7 +51,7 @@ private:
     std::vector<int64_t> offsets;
     std::vector<int64_t> lengths;
     std::vector<int64_t> buffer_cursor;
-    unsigned char * buffer_address;
+    char * buffer_address;
 };
 
 using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
@@ -58,7 +60,7 @@ class CHColumnToSparkRow : private Allocator<false>
 {
 public:
     std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(DB::Block & block);
-    void freeMem(uint8_t * address, size_t size);
+    void freeMem(char * address, size_t size);
 };
 
 /// Return backing data length of values with variable-length type in bytes
@@ -97,28 +99,31 @@ class VariableLengthDataWriter
 public:
     VariableLengthDataWriter(
         const DB::DataTypePtr & type_,
-        unsigned char * buffer_address_,
+        char * buffer_address_,
         const std::vector<int64_t> & offsets_,
         std::vector<int64_t> & buffer_cursor_);
 
     virtual ~VariableLengthDataWriter() = default;
 
-    /// Return offset and size in backing data region
-    /// It's optional because fixed-length typed value should not be written to backing data region.
-    virtual int64_t write(size_t row_idx, const DB::Field & field);
+    /// Write value of variable-length to backing data region of structure(row or array) and return offset and size in backing data region
+    /// It's caller's duty to make sure that row fields or array elements are written in order
+    /// parent_offset: the starting offset of current structure in which we are updating it's backing data region
+    virtual int64_t write(size_t row_idx, const DB::Field & field, int64_t parent_offset);
 
 private:
 
-    int64_t writeUnalignedBytes(size_t row_idx, const void * src, size_t size);
-    int64_t writeArray(size_t row_idx, const DB::Array & array);
-    int64_t writeMap(size_t row_idx, const DB::Map & map);
-    int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple);
-
+    int64_t writeUnalignedBytes(size_t row_idx, const void * src, size_t size, int64_t parent_offset);
+    int64_t writeArray(size_t row_idx, const DB::Array & array, int64_t parent_offset);
+    int64_t writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset);
+    int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple, int64_t parent_offset);
 
     const DB::DataTypePtr type;
-    unsigned char * const buffer_address;
-    // const int64_t field_offset;
+
+    /// Global buffer of spark rows
+    char * const buffer_address;
+    /// Offsets of each spark row
     const std::vector<int64_t> & offsets;
+    /// Cursors of backing data in each spark row, relative to offsets
     std::vector<int64_t> & buffer_cursor;
 };
 
@@ -128,7 +133,9 @@ public:
     explicit FixedLengthDataWriter(const DB::DataTypePtr & type_);
     virtual ~FixedLengthDataWriter() = default;
 
-    virtual void write(const DB::Field & field, unsigned char * buffer);
+    /// Write value of fixed-length to values region of structure(struct or array)
+    /// It's caller's duty to make sure that struct fields or array elements are written in order
+    virtual void write(const DB::Field & field, char * buffer);
 
 private:
     const DB::DataTypePtr & type;

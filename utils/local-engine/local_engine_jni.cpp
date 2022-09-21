@@ -745,7 +745,7 @@ void Java_io_glutenproject_vectorized_BlockNativeConverter_freeMemory(JNIEnv * e
 {
     LOCAL_ENGINE_JNI_METHOD_START
     local_engine::CHColumnToSparkRow converter;
-    converter.freeMem(reinterpret_cast<uint8_t *>(address), size);
+    converter.freeMem(reinterpret_cast<char *>(address), size);
     LOCAL_ENGINE_JNI_METHOD_END(env,)
 }
 

@@ -3,6 +3,8 @@
 #include <Columns/ColumnVector.h>
 #include <Columns/ColumnNullable.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeMap.h>
+#include <DataTypes/DataTypeTuple.h>
 #include <Functions/FunctionHelpers.h>
 
 namespace DB
@@ -165,19 +167,19 @@ VariableLengthDataReader::VariableLengthDataReader(const DataTypePtr & type_) : 
 Field VariableLengthDataReader::read(char *buffer, size_t length)
 {
     if (which.isStringOrFixedString() )
-        return readString(buffer, length);
+        return std::move(readString(buffer, length));
     
     if (which.isDecimal128())
-        return readDecimal(buffer, length);
+        return std::move(readDecimal(buffer, length));
     
     if (which.isArray())
-        return readArray(buffer, length);
+        return std::move(readArray(buffer, length));
     
     if (which.isMap())
-        return readMap(buffer, length);
+        return std::move(readMap(buffer, length));
     
     if (which.isTuple())
-        return readTuple(buffer, length);
+        return std::move(readStruct(buffer, length));
 
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
@@ -193,66 +195,153 @@ Field VariableLengthDataReader::readDecimal(char * buffer, size_t length)
 
 Field VariableLengthDataReader::readString(char * buffer, size_t length)
 {
-    return {std::move(String(buffer, length))};
+    String str(buffer, length);
+    return std::move(Field(std::move(str)));
 }
 
 Field VariableLengthDataReader::readArray(char * buffer, [[maybe_unused]] size_t length)
 {
     /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data
-    char * pos = buffer;
-
     /// Read numElements
     int64_t num_elems = 0;
-    memcpy(&num_elems, pos, 8);
+    memcpy(&num_elems, buffer, 8);
     if (num_elems == 0)
         return Array();
-    pos += 8;
 
     /// Skip null_bitmap
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
-    pos += len_null_bitmap;
 
     /// Read values
     const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
     const auto & nested_type = array_type->getNestedType();
     const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
     const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
-
     Array array;
     array.reserve(num_elems);
 
-    std::unique_ptr<FixedLengthDataReader> reader;
     if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
-        reader = std::make_unique<FixedLengthDataReader>(nested_type);
+    {
+        FixedLengthDataReader reader(nested_type);
+        for (int64_t i = 0; i < num_elems; ++i)
+        {
+            if (isBitSet(buffer + 8, i))
+            {
+                array.emplace_back(std::move(Null{}));
+            }
+            else
+            {
+                const auto elem = reader.read(buffer + 8 + len_null_bitmap + i * elem_size);
+                array.emplace_back(elem);
+            }
+        }
+    }
     else if (BackingDataLengthCalculator::isVariableLengthDataType(nested_type))
-        reader = std::make_unique<FixedLengthDataReader>(std::make_shared<DataTypeInt64>());
+    {
+        VariableLengthDataReader reader(nested_type);
+        for (int64_t i = 0; i < num_elems; ++i)
+        {
+            if (isBitSet(buffer + 8, i))
+            {
+                array.emplace_back(std::move(Null{}));
+            }
+            else
+            {
+                int64_t offset_and_size = 0;
+                memcpy(&offset_and_size, buffer + 8 + len_null_bitmap + i * 8, 8);
+                const int64_t offset = BackingDataLengthCalculator::extractOffset(offset_and_size);
+                const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
+
+                const auto elem = reader.read(buffer + offset, size);
+                array.emplace_back(elem);
+            }
+        }
+    }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", nested_type->getName());
-
-    for (int64_t i=0; i<num_elems; ++i)
-    {
-        auto field = reader->read(buffer + 8 + len_null_bitmap + elem_size * i);
-        array.emplace_back(std::move(field));
-    }
-    pos += len_values;
-
-    /// Read backing data
-    for (int64_t i=0; i<num_elems; ++i)
-    {
-        const auto & offset_and_size = array[i].get<Int64>();
-        const auto offset = BackingDataLengthCalculator::extractOffset(offset_and_size);
-        const auto size = BackingDataLengthCalculator::extractOffset(offset_and_size);
-    }
+    
+    return std::move(array);
 }
 
 Field VariableLengthDataReader::readMap(char * buffer, size_t length)
 {
+    /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value
+    /// Read Length of UnsafeArrayData of key
+    int64_t key_array_size = 0;
+    memcpy(&key_array_size, buffer, 8);
+    if (key_array_size == 0)
+        return std::move(Map());
 
+    /// Read UnsafeArrayData of keys
+    const auto * map_type = typeid_cast<const DataTypeMap *>(type.get());
+    const auto & key_type = map_type->getKeyType();
+    const auto key_array_type = std::make_shared<DataTypeArray>(key_type);
+    VariableLengthDataReader key_reader(key_array_type);
+    auto key_field = key_reader.read(buffer + 8, key_array_size);
+    auto & key_array = key_field.safeGet<Array>();
+
+    /// Read UnsafeArrayData of values
+    const auto & val_type = map_type->getValueType();
+    const auto val_array_type = std::make_shared<DataTypeArray>(val_type);
+    VariableLengthDataReader val_reader(val_array_type);
+    auto val_field = val_reader.read(buffer + 8 + key_array_size, length - 8 - key_array_size);
+    auto & val_array = val_field.safeGet<Array>();
+
+    /// Construct map in CH way [(k1, v1), (k2, v2), ...]
+    if (key_array.size() != val_array.size())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Key size {} not equal to value size {} in map", key_array.size(), val_array.size());
+    Map map(key_array.size());
+    for (size_t i = 0; i < key_array.size(); ++i)
+    {
+        Tuple tuple(2);
+        tuple[0] = std::move(key_array[i]);
+        tuple[1] = std::move(val_array[i]);
+        
+        map[i] = std::move(tuple);
+    }
+    return std::move(map);
 }
 
-Field VariableLengthDataReader::readTuple(char * buffer, size_t length)
-{
 
+Field VariableLengthDataReader::readStruct(char * buffer, size_t  /*length*/)
+{
+    /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data
+    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type.get());
+    const auto & field_types = tuple_type->getElements();
+    const auto num_fields = field_types.size();
+    if (num_fields == 0)
+        return std::move(Tuple());
+    
+    const auto len_null_bitmap = calculateBitSetWidthInBytes(num_fields);
+    
+    Tuple tuple(num_fields);
+    for (size_t i=0; i<num_fields; ++i)
+    {
+        const auto & field_type = field_types[i];
+        if (isBitSet(buffer, i))
+        {
+            tuple[i] = std::move(Null{});
+            continue;
+        }
+
+        if (BackingDataLengthCalculator::isFixedLengthDataType(field_type))
+        {
+            FixedLengthDataReader reader(field_type);
+            tuple[i] = std::move(reader.read(buffer + len_null_bitmap + i * 8));
+        }
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(field_type))
+        {
+            int64_t offset_and_size = 0;
+            memcpy(&offset_and_size, buffer + len_null_bitmap + i * 8, 8);
+            const int64_t offset = BackingDataLengthCalculator::extractOffset(offset_and_size);
+            const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
+
+            VariableLengthDataReader reader(field_type);
+            tuple[i] = std::move(reader.read(buffer + offset, size));
+        }
+        else
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", field_type->getName());
+    }
+    return std::move(tuple);
 }
 
 FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_) : type(type_), which(type)

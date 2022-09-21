@@ -160,7 +160,7 @@ private:
 
 struct SparkBuffer
 {
-    uint8_t * address;
+    char * address;
     size_t size;
 };
 

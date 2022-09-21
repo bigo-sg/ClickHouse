@@ -42,7 +42,7 @@ int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes)
 }
 
 
-void bitSet(uint8_t * bitmap, int32_t index)
+void bitSet(char * bitmap, int32_t index)
 {
     int64_t mask = 1L << (index & 0x3f); // mod 64 and shift
     int64_t word_offset = (index >> 6) * 8;
@@ -52,7 +52,7 @@ void bitSet(uint8_t * bitmap, int32_t index)
     memcpy(bitmap + word_offset, &value, sizeof(int64_t));
 }
 
-bool isBitSet(const uint8_t * bitmap, int32_t index)
+bool isBitSet(char * bitmap, int32_t index)
 {
     assert(index >= 0);
     int64_t mask = 1 << (index & 63);
@@ -62,7 +62,7 @@ bool isBitSet(const uint8_t * bitmap, int32_t index)
 }
 
 
-static void setNullAt(uint8_t * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
+static void setNullAt(char * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
 {
     bitSet(buffer_address + row_offset, col_index);
     // set the value to 0
@@ -70,7 +70,7 @@ static void setNullAt(uint8_t * buffer_address, int64_t row_offset, int64_t fiel
 }
 
 static void writeValue(
-    unsigned char * buffer_address,
+    char * buffer_address,
     int64_t field_offset,
     const ColumnWithTypeAndName & col,
     int32_t col_index,
@@ -98,7 +98,7 @@ static void writeValue(
             setNullAt(buffer_address, offsets[i], field_offset, col_index); \
         else \
         { \
-            int64_t offset_and_size = writer.write(i, field); \
+            int64_t offset_and_size = writer.write(i, field, 0); \
             memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
         } \
     }
@@ -189,12 +189,12 @@ void SparkRowInfo::setNumRows(int64_t num_rows_)
     num_rows = num_rows_;
 }
 
-unsigned char * SparkRowInfo::getBufferAddress() const
+char * SparkRowInfo::getBufferAddress() const
 {
     return buffer_address;
 }
 
-void SparkRowInfo::setBufferAddress(unsigned char * buffer_address_)
+void SparkRowInfo::setBufferAddress(char * buffer_address_)
 {
     buffer_address = buffer_address_;
 }
@@ -225,7 +225,7 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(Bloc
         return {};
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    spark_row_info->setBufferAddress(reinterpret_cast<unsigned char *>(alloc(spark_row_info->getTotalBytes())));
+    spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes())));
     memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
@@ -243,7 +243,7 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(Bloc
     return spark_row_info;
 }
 
-void CHColumnToSparkRow::freeMem(uint8_t * address, size_t size)
+void CHColumnToSparkRow::freeMem(char * address, size_t size)
 {
     free(address, size);
 }
@@ -380,7 +380,7 @@ bool BackingDataLengthCalculator::isVariableLengthDataType(const DB::DataTypePtr
 
 VariableLengthDataWriter::VariableLengthDataWriter(
     const DB::DataTypePtr & type_,
-    unsigned char * buffer_address_,
+    char * buffer_address_,
     const std::vector<int64_t> & offsets_,
     std::vector<int64_t> & buffer_cursor_)
     : type(type_), buffer_address(buffer_address_), offsets(offsets_), buffer_cursor(buffer_cursor_)
@@ -395,7 +395,7 @@ VariableLengthDataWriter::VariableLengthDataWriter(
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataWriter doesn't support type {}", type->getName());
 }
 
-int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array)
+int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array, int64_t parent_offset)
 {
     /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data
     const auto & offset = offsets[row_idx];
@@ -409,7 +409,7 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
     memcpy(buffer_address + offset + cursor, &num_elems, 8);
     cursor += 8;
     if (num_elems == 0)
-        return BackingDataLengthCalculator::getOffsetAndSize(start, 8);
+        return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, 8);
 
     /// Skip null_bitmap(already reset to zero)
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
@@ -444,13 +444,13 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
             if (elem.isNull())
                 bitSet(buffer_address + offset + start + 8, i);
             else
-                writer.write(row_idx, elem);
+                writer.write(row_idx, elem, start);
         }
     }
-    return BackingDataLengthCalculator::getOffsetAndSize(cursor, cursor - start);
+    return BackingDataLengthCalculator::getOffsetAndSize(cursor - parent_offset, cursor - start);
 }
 
-int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
+int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset)
 {
     /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value
     const auto & offset = offsets[row_idx];
@@ -463,40 +463,40 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map)
     /// If Map is empty, return in advance
     const auto num_pairs = map.size();
     if (num_pairs == 0)
-        return BackingDataLengthCalculator::getOffsetAndSize(start, 8);
+        return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, 8);
 
     /// Construct array of keys and array of values from map
-    auto array_key = Array();
-    auto array_val = Array();
-    array_key.reserve(num_pairs);
-    array_val.reserve(num_pairs);
+    auto key_array = Array();
+    auto val_array = Array();
+    key_array.reserve(num_pairs);
+    val_array.reserve(num_pairs);
     for (size_t i = 0; i < num_pairs; ++i)
     {
         const auto & pair = map[i].get<DB::Tuple>();
-        array_key.push_back(pair[0]);
-        array_val.push_back(pair[1]);
+        key_array.push_back(pair[0]);
+        val_array.push_back(pair[1]);
     }
 
-    const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
+    const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type.get());
 
     /// Append UnsafeArrayData of key
-    const auto & type_key = type_map->getKeyType();
-    const auto type_array_key = std::make_shared<DataTypeArray>(type_key);
-    VariableLengthDataWriter key_writer(type_array_key, buffer_address, offsets, buffer_cursor);
-    const auto array_key_size = BackingDataLengthCalculator::extractSize(key_writer.write(row_idx, array_key));
+    const auto & key_type = map_type->getKeyType();
+    const auto key_array_type = std::make_shared<DataTypeArray>(key_type);
+    VariableLengthDataWriter key_writer(key_array_type, buffer_address, offsets, buffer_cursor);
+    const auto key_array_size = BackingDataLengthCalculator::extractSize(key_writer.write(row_idx, key_array, start + 8));
 
     /// Fill length of UnsafeArrayData of key
-    memcpy(buffer_address + offset + start, &array_key_size, 8);
+    memcpy(buffer_address + offset + start, &key_array_size, 8);
 
     /// Append UnsafeArrayData of value
-    const auto & type_val = type_map->getValueType();
-    const auto type_array_val = std::make_shared<DataTypeArray>(type_val);
-    VariableLengthDataWriter val_writer(type_array_key, buffer_address, offsets, buffer_cursor);
-    val_writer.write(row_idx, array_val);
-    return BackingDataLengthCalculator::getOffsetAndSize(start, cursor - start);
+    const auto & val_type = map_type->getValueType();
+    const auto val_array_type = std::make_shared<DataTypeArray>(val_type);
+    VariableLengthDataWriter val_writer(key_array_type, buffer_address, offsets, buffer_cursor);
+    val_writer.write(row_idx, val_array, start + 8 + key_array_size);
+    return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, cursor - start);
 }
 
-int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & tuple)
+int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & tuple, int64_t parent_offset)
 {
     /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data
     const auto & offset = offsets[row_idx];
@@ -504,11 +504,11 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
     const auto start = cursor;
 
     /// Skip null_bitmap
-    const auto * type_tuple = typeid_cast<const DataTypeTuple *>(type.get());
-    const auto & type_fields = type_tuple->getElements();
-    const auto num_fields = type_fields.size();
+    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type.get());
+    const auto & field_types = tuple_type->getElements();
+    const auto num_fields = field_types.size();
     if (num_fields == 0)
-        return BackingDataLengthCalculator::getOffsetAndSize(start, 0);
+        return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, 0);
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_fields);
     cursor += len_null_bitmap;
 
@@ -520,7 +520,7 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
     for (size_t i = 0; i < num_fields; ++i)
     {
         const auto & field_value = tuple[i];
-        const auto & field_type = type_fields[i];
+        const auto & field_type = field_types[i];
         if (field_value.isNull())
         {
             bitSet(buffer_address + offset + start, i);
@@ -535,14 +535,14 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
         else
         {
             VariableLengthDataWriter writer(field_type, buffer_address, offsets, buffer_cursor);
-            const auto offset_and_size = writer.write(row_idx, field_value);
+            const auto offset_and_size = writer.write(row_idx, field_value, start);
             memcpy(buffer_address + offset + start + len_null_bitmap + 8 * i, &offset_and_size, 8);
         }
     }
-    return BackingDataLengthCalculator::getOffsetAndSize(start, cursor - start);
+    return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, cursor - start);
 }
 
-int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field & field)
+int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field & field, int64_t parent_offset)
 {
     assert(row_idx < offsets.size());
 
@@ -553,32 +553,32 @@ int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field & field)
     if (which.isStringOrFixedString())
     {
         const auto & str = field.get<String>();
-        return writeUnalignedBytes(row_idx, str.data(), str.size());
+        return writeUnalignedBytes(row_idx, str.data(), str.size(), parent_offset);
     }
 
     if (which.isDecimal128())
     {
         const auto & decimal = field.get<DecimalField<Decimal128>>();
         const auto value = decimal.getValue();
-        return writeUnalignedBytes(row_idx, &value, sizeof(Decimal128));
+        return writeUnalignedBytes(row_idx, &value, sizeof(Decimal128), parent_offset);
     }
 
     if (which.isArray())
     {
         const auto & array = field.get<Array>();
-        return writeArray(row_idx, array);
+        return writeArray(row_idx, array, parent_offset);
     }
 
     if (which.isMap())
     {
         const auto & map = field.get<Map>();
-        return writeMap(row_idx, map);
+        return writeMap(row_idx, map, parent_offset);
     }
 
     if (which.isTuple())
     {
         const auto & tuple = field.get<Tuple>();
-        return writeStruct(row_idx, tuple);
+        return writeStruct(row_idx, tuple, parent_offset);
     }
 
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataWriter", type->getName());
@@ -599,10 +599,10 @@ int64_t BackingDataLengthCalculator::extractSize(int64_t offset_and_size)
     return offset_and_size & 0xffffffff;
 }
 
-int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const void * src, size_t size)
+int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const void * src, size_t size, int64_t parent_offset)
 {
     memcpy(buffer_address + offsets[row_idx] + buffer_cursor[row_idx], src, size);
-    auto res = BackingDataLengthCalculator::getOffsetAndSize(buffer_cursor[row_idx], size);
+    auto res = BackingDataLengthCalculator::getOffsetAndSize(buffer_cursor[row_idx] - parent_offset, size);
     buffer_cursor[row_idx] += roundNumberOfBytesToNearestWord(size);
     return res;
 }
@@ -616,7 +616,7 @@ FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_)
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type->getName());
 }
 
-void FixedLengthDataWriter::write(const DB::Field & field, unsigned char * buffer)
+void FixedLengthDataWriter::write(const DB::Field & field, char * buffer)
 {
     /// Skip null value
     if (field.isNull())
