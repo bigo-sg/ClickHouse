@@ -782,7 +782,7 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }
 
-void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv *  /*env*/, jobject, jlong block_address)
+void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv *  env, jobject, jlong block_address)
 {
     LOCAL_ENGINE_JNI_METHOD_START
     local_engine::SparkRowToCHColumn converter;
