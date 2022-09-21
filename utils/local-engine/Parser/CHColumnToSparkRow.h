@@ -8,6 +8,7 @@
 namespace local_engine
 {
 int64_t calculateBitSetWidthInBytes(int32_t num_fields);
+int64_t roundNumberOfBytesToNearestWord(int64_t num_bytes);
 
 class CHColumnToSparkRow;
 class SparkRowToCHColumn;
@@ -80,6 +81,10 @@ public:
     /// Is CH DataType can be converted to variable-length data type in Spark?
     static bool isVariableLengthDataType(const DB::DataTypePtr & type);
 
+    static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
+    static int64_t extractOffset(int64_t offset_and_size);
+    static int64_t extractSize(int64_t offset_and_size);
+
 private:
     const DB::DataTypePtr type;
 };
@@ -103,9 +108,6 @@ public:
     virtual int64_t write(size_t row_idx, const DB::Field & field);
 
 private:
-    static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
-    static int64_t extractOffset(int64_t offset_and_size);
-    static int64_t extractSize(int64_t offset_and_size);
 
     int64_t writeUnalignedBytes(size_t row_idx, const void * src, size_t size);
     int64_t writeArray(size_t row_idx, const DB::Array & array);
@@ -123,15 +125,14 @@ private:
 class FixedLengthDataWriter
 {
 public:
-    FixedLengthDataWriter(const DB::DataTypePtr & type_, unsigned char * buffer_address_);
+    explicit FixedLengthDataWriter(const DB::DataTypePtr & type_);
     virtual ~FixedLengthDataWriter() = default;
 
-    virtual void write(const DB::Field & field, int64_t offset, bool is_array_elem);
+    virtual void write(const DB::Field & field, unsigned char * buffer);
 
 private:
     const DB::DataTypePtr & type;
     const DB::WhichDataType which;
-    unsigned char * const buffer_address;
 };
 
 }

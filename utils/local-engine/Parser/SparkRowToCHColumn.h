@@ -5,6 +5,7 @@
 #include <Core/Block.h>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypesDecimal.h>
 #include <Parser/CHColumnToSparkRow.h>
 #include <base/StringRef.h>
 #include <Common/JNIUtils.h>
@@ -264,6 +265,63 @@ public:
         return static_cast<int32_t>(getLong(ordinal));
     }
 
+    Field getDecimal(int ordinal, uint32_t precision, uint32_t  /*scale*/)
+    {
+        if (isNullAt(ordinal))
+            return {};
+        
+        if (precision <= DataTypeDecimal<Decimal64>::maxPrecision())
+        {
+            const auto value = getLong(ordinal);
+            if (precision <= DataTypeDecimal<Decimal32>::maxPrecision())
+                return DecimalField<Decimal32>(value);
+            else   
+                return DecimalField<Decimal64>(value);
+        }
+        else
+        {
+            const auto bytes = getString(ordinal);
+            assert(bytes.size == 16);
+
+            Decimal128 value;
+            memcpy(&value, bytes.data, bytes.size);
+            return DecimalField<Decimal128>(value);
+        }
+    }
+
+    Field getArray(int ordinal)
+    {
+        if (isNullAt(ordinal))
+            return {};
+        
+        int64_t offset_and_size = getLong(ordinal);
+        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
+        int32_t size = static_cast<int32_t>(offset_and_size);
+        return Array();
+    }
+
+    Field getMap(int ordinal)
+    {
+        if (isNullAt(ordinal))
+            return {};
+
+        int64_t offset_and_size = getLong(ordinal);
+        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
+        int32_t size = static_cast<int32_t>(offset_and_size);
+        return Map();
+    }
+
+    Field getTuple(int ordinal)
+    {
+        if (isNullAt(ordinal))
+            return {};
+
+        int64_t offset_and_size = getLong(ordinal);
+        int32_t offset = static_cast<int32_t>(offset_and_size >> 32);
+        int32_t size = static_cast<int32_t>(offset_and_size);
+        return Tuple();
+    }
+
     void pointTo(int64_t base_offset_, int32_t size_in_bytes_)
     {
         this->base_offset = base_offset_;
@@ -279,5 +337,39 @@ private:
     int32_t size_in_bytes;
     int32_t bit_set_width_in_bytes;
 };
+
+class VariableLengthDataReader
+{
+public:
+    explicit VariableLengthDataReader(const DataTypePtr& type_);
+    virtual ~VariableLengthDataReader() = default;
+
+    virtual Field read(char * buffer, size_t length);
+private:
+
+    virtual Field readDecimal(char * buffer, size_t length);
+    virtual Field readString(char * buffer, size_t length);
+    virtual Field readArray(char * buffer, size_t length);
+    virtual Field readMap(char * buffer, size_t length);
+    virtual Field readTuple(char * buffer, size_t length);
+
+    const DataTypePtr & type;
+    const WhichDataType which;
+};
+
+class FixedLengthDataReader
+{
+public:
+    explicit FixedLengthDataReader(const DB::DataTypePtr & type_);
+    virtual ~FixedLengthDataReader() = default;
+
+    virtual Field read(char * buffer);
+
+private:
+    const DB::DataTypePtr & type;
+    const DB::WhichDataType which;
+    
+};
+
 
 }
