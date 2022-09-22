@@ -15,13 +15,15 @@ bool isBitSet(const char * bitmap, int32_t index);
 class CHColumnToSparkRow;
 class SparkRowToCHColumn;
 
-class SparkRowInfo
+class SparkRowInfo : public boost::noncopyable
 {
     friend CHColumnToSparkRow;
     friend SparkRowToCHColumn;
 
 public:
     explicit SparkRowInfo(DB::Block & block);
+
+    const DB::DataTypes & getDataTypes() const;
 
     int64_t getFieldOffset(int32_t col_idx) const;
 
@@ -43,6 +45,7 @@ public:
     int64_t getTotalBytes() const;
 
 private:
+    const DB::DataTypes types;
     int64_t num_rows;
     int64_t num_cols;
     int64_t null_bitset_width_in_bytes;

@@ -141,7 +141,8 @@ public:
     static std::unique_ptr<Block> convertSparkRowInfoToCHColumn(SparkRowInfo & spark_row_info, Block & header);
 
     // case 2: provided with a sequence of spark UnsafeRow, convert them to a Block
-    static Block* convertSparkRowItrToCHColumn(jobject java_iter, vector<string>& names, vector<string>& types, vector<bool>& is_nullables)
+    static Block *
+    convertSparkRowItrToCHColumn(jobject java_iter, vector<string> & names, vector<string> & types, vector<bool> & is_nullables)
     {
         SparkRowToCHColumnHelper helper(names, types, is_nullables);
 
@@ -206,16 +207,7 @@ public:
     {
     }
 
-    bool isSet(int index)
-    {
-        assert(index >= 0);
-        int64_t mask = 1 << (index & 63);
-        char * word_offset = buffer + static_cast<int64_t>(index >> 6) * 8L;
-        int64_t word = *reinterpret_cast<int64_t *>(word_offset);
-        return (word & mask) != 0;
-    }
-
-    static inline void assertIndexIsValid([[maybe_unused]] int index) 
+    void assertIndexIsValid([[maybe_unused]] int index) 
     {
         assert(index >= 0);
         assert(index < num_fields);
@@ -224,7 +216,7 @@ public:
     bool isNullAt(int ordinal)
     {
         assertIndexIsValid(ordinal);
-        return isSet(ordinal);
+        return isBitSet(buffer, ordinal);
     }
 
     char* getRawDataForFixedNumber(int ordinal)
@@ -309,7 +301,7 @@ public:
         this->length = length_;
     }
 
-    Field get(int ordinal)
+    Field getField(int ordinal)
     {
         if (isNullAt(ordinal))
             return std::move(Null{});
@@ -328,6 +320,13 @@ public:
             const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
 
             VariableLengthDataReader reader(field_type);
+            /*
+            if (WhichDataType(field_type).isMap())
+            {
+                std::cerr << "length:" << length << ",offset:" << offset << ",size:" << size << std::endl;
+                std::abort();
+            }
+            */
             return std::move(reader.read(buffer + offset, size));
         }
         else

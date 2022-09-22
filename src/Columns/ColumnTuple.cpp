@@ -140,8 +140,13 @@ void ColumnTuple::insert(const Field & x)
     const auto & tuple = DB::get<const Tuple &>(x);
 
     const size_t tuple_size = columns.size();
+    std::cerr << "field size: " << tuple.size() << std::endl;
+    std::cerr << "column size:" << tuple_size << std::endl;
     if (tuple.size() != tuple_size)
+    {
+        std::cerr << "backtrace:" << StackTrace().toString() << std::endl;
         throw Exception("Cannot insert value of different size into tuple", ErrorCodes::CANNOT_INSERT_VALUE_OF_DIFFERENT_SIZE_INTO_TUPLE);
+    }
 
     for (size_t i = 0; i < tuple_size; ++i)
         columns[i]->insert(tuple[i]);

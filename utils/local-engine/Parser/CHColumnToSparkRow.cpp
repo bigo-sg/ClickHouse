@@ -116,7 +116,8 @@ static void writeValue(
 }
 
 SparkRowInfo::SparkRowInfo(DB::Block & block)
-    : num_rows(block.rows())
+    : types(std::move(block.getDataTypes()))
+    , num_rows(block.rows())
     , num_cols(block.columns())
     , null_bitset_width_in_bytes(calculateBitSetWidthInBytes(num_cols))
     , total_bytes(0)
@@ -153,6 +154,10 @@ SparkRowInfo::SparkRowInfo(DB::Block & block)
         total_bytes += lengths[i];
 }
 
+const DB::DataTypes & SparkRowInfo::getDataTypes() const
+{
+    return types;
+}
 
 int64_t SparkRowInfo::getFieldOffset(int32_t col_idx) const
 {
@@ -311,17 +316,17 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
             array_val.push_back(pair[1]);
         }
 
-        const auto * type_map = typeid_cast<const DB::DataTypeMap *>(type.get());
+        const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type.get());
 
-        const auto & type_key = type_map->getKeyType();
-        const auto type_array_key = std::make_shared<DataTypeArray>(type_key);
-        BackingDataLengthCalculator calculator_key(type_array_key);
+        const auto & key_type = map_type->getKeyType();
+        const auto key_array_type = std::make_shared<DataTypeArray>(key_type);
+        BackingDataLengthCalculator calculator_key(key_array_type);
         res += calculator_key.calculate(array_key);
 
-        const auto & type_val = type_map->getValueType();
-        const auto type_array_val = std::make_shared<DataTypeArray>(type_val);
+        const auto & val_type = map_type->getValueType();
+        const auto type_array_val = std::make_shared<DataTypeArray>(val_type);
         BackingDataLengthCalculator calculator_val(type_array_val);
-        res += calculator_key.calculate(array_val);
+        res += calculator_val.calculate(array_val);
         return res;
     }
 
@@ -444,10 +449,13 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
             if (elem.isNull())
                 bitSet(buffer_address + offset + start + 8, i);
             else
-                writer.write(row_idx, elem, start);
+            {
+                const auto offset_and_size = writer.write(row_idx, elem, start);
+                memcpy(buffer_address + offset + start + 8 + len_null_bitmap + i * elem_size, &offset_and_size, 8);
+            }
         }
     }
-    return BackingDataLengthCalculator::getOffsetAndSize(cursor - parent_offset, cursor - start);
+    return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, cursor - start);
 }
 
 int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset)
@@ -491,7 +499,7 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map, 
     /// Append UnsafeArrayData of value
     const auto & val_type = map_type->getValueType();
     const auto val_array_type = std::make_shared<DataTypeArray>(val_type);
-    VariableLengthDataWriter val_writer(key_array_type, buffer_address, offsets, buffer_cursor);
+    VariableLengthDataWriter val_writer(val_array_type, buffer_address, offsets, buffer_cursor);
     val_writer.write(row_idx, val_array, start + 8 + key_array_size);
     return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, cursor - start);
 }

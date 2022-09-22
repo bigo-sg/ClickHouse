@@ -27,7 +27,7 @@ void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowReader &
 {
     int32_t num_fields = columns.size();
     for (int32_t i = 0; i < num_fields; i++)
-        columns[i]->insert(spark_row_reader.get(i));
+        columns[i]->insert(spark_row_reader.getField(i));
 }
 
 std::unique_ptr<Block>
@@ -287,7 +287,7 @@ Field FixedLengthDataReader::read(char * buffer)
         return value;
     }
 
-    if (which.isUInt32() || which.isDate32())
+    if (which.isUInt32())
     {
         UInt32 value = 0;
         memcpy(&value, buffer, 4);
@@ -315,7 +315,7 @@ Field FixedLengthDataReader::read(char * buffer)
         return value;
     }
 
-    if (which.isInt32())
+    if (which.isInt32() || which.isDate32())
     {
         Int32 value = 0;
         memcpy(&value, buffer, 4);
