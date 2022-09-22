@@ -14,7 +14,7 @@ namespace local_engine
 {
 ArrowParquetBlockInputFormat::ArrowParquetBlockInputFormat(
     DB::ReadBuffer & in_, const DB::Block & header, const DB::FormatSettings & formatSettings, const std::vector<int> & row_group_indices_)
-    : ParquetBlockInputFormat(in_, header, formatSettings)
+    : OptimizedParquetBlockInputFormat(in_, header, formatSettings)
     , row_group_indices(row_group_indices_)
 {
 }

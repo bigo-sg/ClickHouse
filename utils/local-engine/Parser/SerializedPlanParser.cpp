@@ -42,7 +42,7 @@
 #include <Common/MergeTreeTool.h>
 #include <Common/StringUtils.h>
 #include <google/protobuf/util/json_util.h>
-#include <Storages/SubstraitSource/SubstraitLocalFileSource.h>
+#include <Storages/SubstraitSource/SubstraitFileSource.h>
 
 #include "SerializedPlanParser.h"
 
