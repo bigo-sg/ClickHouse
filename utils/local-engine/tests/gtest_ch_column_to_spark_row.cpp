@@ -69,11 +69,6 @@ static void assertReadConsistentWithWritten(std::unique_ptr<SparkRowInfo> & spar
     reader.pointTo(spark_row_info->getBufferAddress(), spark_row_info->getTotalBytes());
     for (size_t i=0; i<type_and_fields.size(); ++i)
     {
-        /*
-        std::cerr << "i:" << i << std::endl;
-        std::cerr << "old:" << type_and_fields[i].field.getTypeName() << "," << toString(type_and_fields[i].field) << std::endl;
-        std::cerr << "new:" << reader.getField(i).getTypeName() << "," << toString(reader.getField(i)) << std::endl;
-        */
         EXPECT_TRUE(reader.getField(i) == type_and_fields[i].field);
     }
 }
