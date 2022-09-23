@@ -3,6 +3,7 @@
 #include <Columns/ColumnMap.h>
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnString.h>
+#include <Columns/ColumnDecimal.h>
 #include <Columns/IColumn.h>
 #include <Core/Types.h>
 #include <DataTypes/DataTypeArray.h>

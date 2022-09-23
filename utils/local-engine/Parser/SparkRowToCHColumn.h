@@ -121,11 +121,14 @@ struct SparkRowToCHColumnHelper
             internal_type = factory.get("Date32");
             internal_type = wrapNullableType(isNullable, internal_type);
         }
-        /// TODO: Support for other types like decimal/map/struct/array
-        else
+        else if ("timestamp" == type)
         {
-            throw Exception(0, "doesn't support spark type {}", type);
+            internal_type = factory.get("DateTime64(6)");
+            internal_type = wrapNullableType(isNullable, internal_type);
         }
+        else
+            throw Exception(0, "doesn't support spark type {}", type);
+
         return internal_type;
     }
 };
@@ -148,7 +151,8 @@ public:
 
         int attached;
         JNIEnv * env = JNIUtils::getENV(&attached);
-        while(env->CallBooleanMethod(java_iter,spark_row_interator_hasNext)){
+        while (env->CallBooleanMethod(java_iter, spark_row_interator_hasNext))
+        {
             jbyteArray row_data = static_cast<jbyteArray>(env->CallObjectMethod(java_iter, spark_row_interator_next));
 
             jsize len = env->GetArrayLength(row_data);
@@ -174,8 +178,8 @@ public:
     virtual ~VariableLengthDataReader() = default;
 
     virtual Field read(char * buffer, size_t length);
-private:
 
+private:
     virtual Field readDecimal(char * buffer, size_t length);
     virtual Field readString(char * buffer, size_t length);
     virtual Field readArray(char * buffer, size_t length);
@@ -207,13 +211,13 @@ public:
     {
     }
 
-    void assertIndexIsValid([[maybe_unused]] int index) 
+    void assertIndexIsValid([[maybe_unused]] int index) const
     {
         assert(index >= 0);
         assert(index < num_fields);
     }
 
-    bool isNullAt(int ordinal)
+    bool isNullAt(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return isBitSet(buffer, ordinal);
