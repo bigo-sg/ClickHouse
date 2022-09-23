@@ -38,11 +38,10 @@ TEST(TestSelect, ReadRel)
                         .column("type_string", "String")
                         .build();
     dbms::SerializedPlanBuilder plan_builder;
-    auto plan = plan_builder.read(TEST_DATA(/ data / iris.parquet), std::move(schema)).build();
+    auto plan = plan_builder.read(TEST_DATA(/data/iris.parquet), std::move(schema)).build();
 
     ASSERT_TRUE(plan->relations(0).root().input().has_read());
     ASSERT_EQ(plan->relations_size(), 1);
-    std::cout << "start execute" << std::endl;
     local_engine::LocalExecutor local_executor;
     local_engine::SerializedPlanParser parser(local_engine::SerializedPlanParser::global_context);
     auto query_plan = parser.parse(std::move(plan));
@@ -50,7 +49,6 @@ TEST(TestSelect, ReadRel)
     ASSERT_TRUE(local_executor.hasNext());
     while (local_executor.hasNext())
     {
-        std::cout << "fetch batch" << std::endl;
         local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
         ASSERT_GT(spark_row_info->getNumRows(), 0);
         local_engine::SparkRowToCHColumn converter;
@@ -64,11 +62,10 @@ TEST(TestSelect, ReadDate)
     dbms::SerializedSchemaBuilder schema_builder;
     auto * schema = schema_builder.column("date", "Date").build();
     dbms::SerializedPlanBuilder plan_builder;
-    auto plan = plan_builder.read(TEST_DATA(/ data / date.parquet), std::move(schema)).build();
+    auto plan = plan_builder.read(TEST_DATA(/data/date.parquet), std::move(schema)).build();
 
     ASSERT_TRUE(plan->relations(0).root().input().has_read());
     ASSERT_EQ(plan->relations_size(), 1);
-    std::cout << "start execute" << std::endl;
     local_engine::LocalExecutor local_executor;
     local_engine::SerializedPlanParser parser(local_engine::SerializedPlanParser::global_context);
     auto query_plan = parser.parse(std::move(plan));
@@ -76,7 +73,6 @@ TEST(TestSelect, ReadDate)
     ASSERT_TRUE(local_executor.hasNext());
     while (local_executor.hasNext())
     {
-        std::cout << "fetch batch" << std::endl;
         local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
         ASSERT_GT(spark_row_info->getNumRows(), 0);
         local_engine::SparkRowToCHColumn converter;
@@ -106,9 +102,8 @@ TEST(TestSelect, TestFilter)
     auto * type_0 = dbms::scalarFunction(dbms::EQUAL_TO, {dbms::selection(5), dbms::literal("类型1")});
 
     auto * filter = dbms::scalarFunction(dbms::AND, {less_exp, type_0});
-    auto plan = plan_builder.registerSupportedFunctions().filter(filter).read(TEST_DATA(/ data / iris.parquet), std::move(schema)).build();
+    auto plan = plan_builder.registerSupportedFunctions().filter(filter).read(TEST_DATA(/data/iris.parquet), std::move(schema)).build();
     ASSERT_EQ(plan->relations_size(), 1);
-    std::cout << "start execute" << std::endl;
     local_engine::LocalExecutor local_executor;
     local_engine::SerializedPlanParser parser(SerializedPlanParser::global_context);
     auto query_plan = parser.parse(std::move(plan));
@@ -116,7 +111,6 @@ TEST(TestSelect, TestFilter)
     ASSERT_TRUE(local_executor.hasNext());
     while (local_executor.hasNext())
     {
-        std::cout << "fetch batch" << std::endl;
         local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
         ASSERT_EQ(spark_row_info->getNumRows(), 1);
         local_engine::SparkRowToCHColumn converter;
@@ -143,10 +137,9 @@ TEST(TestSelect, TestAgg)
     auto plan = plan_builder.registerSupportedFunctions()
                     .aggregate({}, {measure})
                     .filter(less_exp)
-                    .read(TEST_DATA(/ data / iris.parquet), std::move(schema))
+                    .read(TEST_DATA(/data/iris.parquet), std::move(schema))
                     .build();
     ASSERT_EQ(plan->relations_size(), 1);
-    std::cout << "start execute" << std::endl;
     local_engine::LocalExecutor local_executor;
     local_engine::SerializedPlanParser parser(SerializedPlanParser::global_context);
     auto query_plan = parser.parse(std::move(plan));
@@ -154,7 +147,6 @@ TEST(TestSelect, TestAgg)
     ASSERT_TRUE(local_executor.hasNext());
     while (local_executor.hasNext())
     {
-        std::cout << "fetch batch" << std::endl;
         local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
         ASSERT_EQ(spark_row_info->getNumRows(), 1);
         ASSERT_EQ(spark_row_info->getNumCols(), 1);

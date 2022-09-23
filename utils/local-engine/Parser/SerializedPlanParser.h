@@ -78,6 +78,9 @@ struct QueryContext
     std::shared_ptr<CustomStorageMergeTree> custom_storage_merge_tree;
 };
 
+DataTypePtr wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type);
+DataTypePtr wrapNullableType(bool nullable, DataTypePtr nested_type);
+
 class SerializedPlanParser
 {
 public:

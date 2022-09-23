@@ -23,7 +23,7 @@ jclass SparkRowToCHColumn::spark_row_interator_class = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_hasNext = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_next = nullptr;
 
-void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowReader & spark_row_reader)
+static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const SparkRowReader & spark_row_reader)
 {
     int32_t num_fields = columns.size();
     for (int32_t i = 0; i < num_fields; i++)
@@ -31,53 +31,38 @@ void writeRowToColumns(std::vector<MutableColumnPtr> & columns, SparkRowReader &
 }
 
 std::unique_ptr<Block>
-SparkRowToCHColumn::convertSparkRowInfoToCHColumn(local_engine::SparkRowInfo & spark_row_info, DB::Block & header)
+SparkRowToCHColumn::convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row_info, const Block & header)
 {
-    auto columns_list = std::make_unique<ColumnsWithTypeAndName>();
-    columns_list->reserve(header.columns());
-    std::vector<MutableColumnPtr> mutable_columns;
-    std::vector<DataTypePtr> types;
-    for (size_t column_i = 0, columns = header.columns(); column_i < columns; ++column_i)
-    {
-        const ColumnWithTypeAndName & header_column = header.getByPosition(column_i);
-        MutableColumnPtr read_column = header_column.type->createColumn();
-        read_column->reserve(spark_row_info.getNumRows());
-        mutable_columns.push_back(std::move(read_column));
-        types.push_back(header_column.type);
-    }
+    auto block = std::make_unique<Block>();
+    *block = std::move(header.cloneEmpty());
+    MutableColumns mutable_columns{std::move(block->mutateColumns())};
+    const auto num_rows = spark_row_info.getNumRows();
+    for (size_t col_i = 0; col_i < header.columns(); ++col_i)
+        mutable_columns[col_i]->reserve(num_rows);
+
+    DataTypes types{std::move(header.getDataTypes())};
     SparkRowReader row_reader(header.columns(), types);
-    for (int64_t i = 0; i < spark_row_info.getNumRows(); i++)
+    for (int64_t i = 0; i < num_rows; i++)
     {
         row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
         writeRowToColumns(mutable_columns, row_reader);
     }
-    auto block = std::make_unique<Block>(*std::move(columns_list));
-    for (size_t column_i = 0, columns = mutable_columns.size(); column_i < columns; ++column_i)
-    {
-        const ColumnWithTypeAndName & header_column = header.getByPosition(column_i);
-        ColumnWithTypeAndName column(std::move(mutable_columns[column_i]), header_column.type, header_column.name);
-        block->insert(column);
-    }
-    mutable_columns.clear();
-    return block;
+    block->setColumns(std::move(mutable_columns));
+    return std::move(block);
 }
 
 void SparkRowToCHColumn::appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer, int32_t length)
 {
-    SparkRowReader row_reader(helper.header->columns(), *helper.data_types);
+    SparkRowReader row_reader(helper.header.columns(), helper.data_types);
     row_reader.pointTo(buffer, length);
-    writeRowToColumns(*helper.cols, row_reader);
+    writeRowToColumns(helper.mutable_columns, row_reader);
 }
 
-Block * SparkRowToCHColumn::getWrittenBlock(SparkRowToCHColumnHelper & helper)
+Block * SparkRowToCHColumn::getBlock(SparkRowToCHColumnHelper & helper)
 {
     auto * block = new Block();
-    for (size_t column_i = 0, columns = helper.cols->size(); column_i < columns; ++column_i)
-    {
-        const ColumnWithTypeAndName & header_column = helper.header->getByPosition(column_i);
-        ColumnWithTypeAndName column(std::move(helper.cols->operator[](column_i)), header_column.type, header_column.name);
-        block->insert(column);
-    }
+    *block = std::move(helper.header.cloneEmpty());
+    block->setColumns(std::move(helper.mutable_columns));
     return block;
 }
 

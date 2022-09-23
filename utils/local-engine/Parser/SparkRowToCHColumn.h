@@ -6,15 +6,18 @@
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypesDecimal.h>
+#include <Parser/SerializedPlanParser.h>
 #include <Parser/CHColumnToSparkRow.h>
 #include <base/StringRef.h>
 #include <Common/JNIUtils.h>
+#include <substrait/type.pb.h>
 
 namespace DB
 {
 namespace ErrorCodes
 {
     extern const int UNKNOWN_TYPE;
+    extern const int CANNOT_PARSE_PROTOBUF_SCHEMA;
 }
 }
 
@@ -26,110 +29,38 @@ using namespace std;
 
 struct SparkRowToCHColumnHelper
 {
-    SparkRowToCHColumnHelper(vector<string>& names, vector<string>& types, vector<bool>& isNullables)
+    DataTypes data_types;
+    Block header;
+    MutableColumns mutable_columns;
+
+    SparkRowToCHColumnHelper(vector<string> & names, vector<string> & types)
+        : data_types(names.size())
     {
-        internal_cols = std::make_unique<std::vector<ColumnWithTypeAndName>>();
-        internal_cols->reserve(names.size());
-        data_types = std::make_unique<std::vector<DataTypePtr>>();
-        data_types->reserve(names.size());
+        assert(names.size() == types.size());
+
+        ColumnsWithTypeAndName columns(names.size());
         for (size_t i = 0; i < names.size(); ++i)
-        {
-            const auto & name = names[i];
-            const auto & type = types[i];
-            const bool is_nullable = isNullables[i];
-            auto data_type = parseType(type, is_nullable);
-            internal_cols->push_back(ColumnWithTypeAndName(data_type, name));
-            data_types->push_back(data_type);
-        }
-        header = std::make_shared<Block>(*std::move(internal_cols));
-        resetWrittenColumns();
+            columns[i] = std::move(ColumnWithTypeAndName(parseType(types[i]), names[i]));
+
+        header = std::move(Block(columns));
+        resetMutableColumns();
     }
 
-    unique_ptr<vector<ColumnWithTypeAndName>> internal_cols; //for headers
-    unique_ptr<vector<MutableColumnPtr>> cols;
-    unique_ptr<vector<DataTypePtr>> data_types;
-    shared_ptr<Block> header;
+    ~SparkRowToCHColumnHelper() = default;
 
-    void resetWrittenColumns()
+
+    void resetMutableColumns()
     {
-        cols = make_unique<vector<MutableColumnPtr>>();
-        for (auto & i : *internal_cols)
-        {
-            cols->push_back(i.type->createColumn());
-        }
+        mutable_columns = std::move(header.mutateColumns());
     }
 
-    static DataTypePtr inline wrapNullableType(bool isNullable, DataTypePtr nested_type)
+    static DataTypePtr parseType(const string & type)
     {
-        if (isNullable)
-        {
-            return std::make_shared<DataTypeNullable>(nested_type);
-        }
-        else
-        {
-            return nested_type;
-        }
-    }
-
-    //parse Spark type name to CH DataType
-    static DataTypePtr parseType(const string& type, const bool isNullable)
-    {
-        DataTypePtr internal_type = nullptr;
-        auto & factory = DataTypeFactory::instance();
-        if ("boolean" == type)
-        {
-            internal_type = factory.get("UInt8");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("byte" == type)
-        {
-            internal_type = factory.get("Int8");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("short" == type)
-        {
-            internal_type = factory.get("Int16");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("integer" == type)
-        {
-            internal_type = factory.get("Int32");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("long" == type)
-        {
-            internal_type = factory.get("Int64");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("string" == type)
-        {
-            internal_type = factory.get("String");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("float" == type)
-        {
-            internal_type = factory.get("Float32");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("double" == type)
-        {
-            internal_type = factory.get("Float64");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("date" == type)
-        {
-            internal_type = factory.get("Date32");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else if ("timestamp" == type)
-        {
-            internal_type = factory.get("DateTime64(6)");
-            internal_type = wrapNullableType(isNullable, internal_type);
-        }
-        else
-            throw Exception(0, "doesn't support spark type {}", type);
-
-        return internal_type;
+        auto substrait_type = std::make_unique<substrait::Type>();
+        auto ok = substrait_type->ParseFromString(type);
+        if (!ok)
+            throw Exception(ErrorCodes::CANNOT_PARSE_PROTOBUF_SCHEMA, "Parse substrait::Type from string failed");
+        return std::move(SerializedPlanParser::parseType(*substrait_type));
     }
 };
 
@@ -141,13 +72,13 @@ public:
     static jmethodID spark_row_interator_next;
 
     // case 1: rows are batched (this is often directly converted from Block)
-    static std::unique_ptr<Block> convertSparkRowInfoToCHColumn(SparkRowInfo & spark_row_info, Block & header);
+    static std::unique_ptr<Block> convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row_info, const Block & header);
 
     // case 2: provided with a sequence of spark UnsafeRow, convert them to a Block
     static Block *
-    convertSparkRowItrToCHColumn(jobject java_iter, vector<string> & names, vector<string> & types, vector<bool> & is_nullables)
+    convertSparkRowItrToCHColumn(jobject java_iter, vector<string> & names, vector<string> & types)
     {
-        SparkRowToCHColumnHelper helper(names, types, is_nullables);
+        SparkRowToCHColumnHelper helper(names, types);
 
         int attached;
         JNIEnv * env = JNIUtils::getENV(&attached);
@@ -159,16 +90,22 @@ public:
             char * c_arr = new char[len];
             env->GetByteArrayRegion(row_data, 0, len, reinterpret_cast<jbyte*>(c_arr));
             appendSparkRowToCHColumn(helper, c_arr, len);
+
             delete[] c_arr;
+            c_arr = nullptr;
         }
-        return getWrittenBlock(helper);
+        return getBlock(helper);
     }
 
-    static void freeBlock(Block * block) { delete block; }
+    static void freeBlock(Block * block)
+    {
+        delete block;
+        block = nullptr;
+    }
 
 private:
-    static void appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer , int32_t length);
-    static Block * getWrittenBlock(SparkRowToCHColumnHelper & helper);
+    static void appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer, int32_t length);
+    static Block * getBlock(SparkRowToCHColumnHelper & helper);
 };
 
 class VariableLengthDataReader
@@ -223,68 +160,68 @@ public:
         return isBitSet(buffer, ordinal);
     }
 
-    char* getRawDataForFixedNumber(int ordinal)
+    const char* getRawDataForFixedNumber(int ordinal) const
     {
         assertIndexIsValid(ordinal);
-        return reinterpret_cast<char *>(getFieldOffset(ordinal));
+        return reinterpret_cast<const char *>(getFieldOffset(ordinal));
     }
 
-    int8_t getByte(int ordinal)
+    int8_t getByte(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<int8_t *>(getFieldOffset(ordinal));
     }
 
-    uint8_t getUnsignedByte(int ordinal)
+    uint8_t getUnsignedByte(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<uint8_t *>(getFieldOffset(ordinal));
     }
 
 
-    int16_t getShort(int ordinal)
+    int16_t getShort(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<int16_t *>(getFieldOffset(ordinal));
     }
 
-    uint16_t getUnsignedShort(int ordinal)
+    uint16_t getUnsignedShort(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<uint16_t *>(getFieldOffset(ordinal));
     }
 
-    int32_t getInt(int ordinal)
+    int32_t getInt(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<int32_t *>(getFieldOffset(ordinal));
     }
 
-    uint32_t getUnsignedInt(int ordinal)
+    uint32_t getUnsignedInt(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<uint32_t *>(getFieldOffset(ordinal));
     }
 
-    int64_t getLong(int ordinal)
+    int64_t getLong(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<int64_t *>(getFieldOffset(ordinal));
     }
 
-    float_t getFloat(int ordinal)
+    float_t getFloat(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<float_t *>(getFieldOffset(ordinal));
     }
 
-    double_t getDouble(int ordinal)
+    double_t getDouble(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return *reinterpret_cast<double_t *>(getFieldOffset(ordinal));
     }
 
-    StringRef getString(int ordinal)
+    StringRef getString(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         int64_t offset_and_size = getLong(ordinal);
@@ -293,7 +230,7 @@ public:
         return StringRef(reinterpret_cast<char *>(this->buffer + offset), size);
     }
 
-    int32_t getStringSize(int ordinal)
+    int32_t getStringSize(int ordinal) const
     {
         assertIndexIsValid(ordinal);
         return static_cast<int32_t>(getLong(ordinal));
@@ -305,7 +242,7 @@ public:
         this->length = length_;
     }
 
-    Field getField(int ordinal)
+    Field getField(int ordinal) const
     {
         if (isNullAt(ordinal))
             return std::move(Null{});
@@ -324,13 +261,6 @@ public:
             const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
 
             VariableLengthDataReader reader(field_type);
-            /*
-            if (WhichDataType(field_type).isMap())
-            {
-                std::cerr << "length:" << length << ",offset:" << offset << ",size:" << size << std::endl;
-                std::abort();
-            }
-            */
             return std::move(reader.read(buffer + offset, size));
         }
         else

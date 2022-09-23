@@ -1247,7 +1247,6 @@ public:
 
 #include <Parser/CHColumnToSparkRow.h>
 
-
 [[maybe_unused]] static void BM_CHColumnToSparkRowNew(benchmark::State & state)
 {
     std::shared_ptr<DB::StorageInMemoryMetadata> metadata = std::make_shared<DB::StorageInMemoryMetadata>();

@@ -755,30 +755,32 @@ void Java_io_glutenproject_vectorized_BlockNativeConverter_freeMemory(JNIEnv * e
 }
 
 jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCHColumn(
-    JNIEnv * env, jobject, jobject java_iter, jobjectArray names, jobjectArray types, jbooleanArray is_nullables)
+    JNIEnv * env, jobject, jobject java_iter, jobjectArray names, jobjectArray types)
 {
     LOCAL_ENGINE_JNI_METHOD_START
     using namespace std;
-    int column_size = env->GetArrayLength(names);
 
+    int num_columns = env->GetArrayLength(names);
     vector<string> c_names;
     vector<string> c_types;
-    vector<bool> c_isnullables;
-    jboolean * p_booleans = env->GetBooleanArrayElements(is_nullables, nullptr);
-    for (int i = 0; i < column_size; i++)
+    c_names.reserve(num_columns);
+    for (int i = 0; i < num_columns; i++)
     {
         auto * name = static_cast<jstring>(env->GetObjectArrayElement(names, i));
-        auto * type = static_cast<jstring>(env->GetObjectArrayElement(types, i));
-        c_names.push_back(jstring2string(env, name));
-        c_types.push_back(jstring2string(env, type));
-        c_isnullables.push_back(p_booleans[i] == JNI_TRUE);
+        c_names.emplace_back(std::move(jstring2string(env, name)));
+
+
+        auto * type = static_cast<jbyteArray>(env->GetObjectArrayElement(types, i));
+        auto type_length = env->GetArrayLength(type);
+        jbyte * type_ptr = env->GetByteArrayElements(type, nullptr);
+        string str_type(reinterpret_cast<const char *>(type_ptr), type_length);
+        c_types.emplace_back(std::move(str_type));
 
         env->DeleteLocalRef(name);
         env->DeleteLocalRef(type);
     }
-    env->ReleaseBooleanArrayElements(is_nullables, p_booleans, JNI_ABORT);
     local_engine::SparkRowToCHColumn converter;
-    return reinterpret_cast<jlong>(converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types, c_isnullables));
+    return reinterpret_cast<jlong>(converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types));
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }
 

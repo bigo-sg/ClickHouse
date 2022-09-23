@@ -1,4 +1,5 @@
 #include <base/logger_useful.h>
+#include <base/Decimal.h>
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/registerAggregateFunctions.h>
 #include <Builder/BroadCastJoinBuilder.h>
@@ -10,8 +11,12 @@
 #include <DataTypes/DataTypeDate32.h>
 #include <DataTypes/DataTypeSet.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeDateTime64.h>
+#include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeMap.h>
+#include <DataTypes/DataTypeTuple.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/registerFunctions.h>
 #include <Interpreters/ActionsDAG.h>
@@ -54,6 +59,7 @@ namespace ErrorCodes
     extern const int NO_SUCH_DATA_PART;
     extern const int UNKNOWN_FUNCTION;
     extern const int NOT_IMPLEMENTED;
+    extern const int CANNOT_PARSE_PROTOBUF_SCHEMA;
 }
 }
 
@@ -333,77 +339,123 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
     return Block(*std::move(internal_cols));
 }
 
-static DataTypePtr wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type)
+DataTypePtr wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type)
 {
-    if (nullable == substrait::Type_Nullability_NULLABILITY_NULLABLE)
-    {
-        return std::make_shared<DataTypeNullable>(nested_type);
-    }
-    else
-    {
-        return nested_type;
-    }
+    return wrapNullableType(nullable == substrait::Type_Nullability_NULLABILITY_NULLABLE, nested_type);
 }
 
-DataTypePtr SerializedPlanParser::parseType(const substrait::Type & type)
+DataTypePtr wrapNullableType(bool nullable, DataTypePtr nested_type)
 {
-    DataTypePtr internal_type = nullptr;
+    if (nullable)
+        return std::make_shared<DataTypeNullable>(nested_type);
+    else
+        return nested_type;
+}
+
+DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_type)
+{
     auto & factory = DataTypeFactory::instance();
-    if (type.has_bool_())
+    DataTypePtr ch_type;
+    if (substrait_type.has_bool_())
     {
-        internal_type = factory.get("UInt8");
-        internal_type = wrapNullableType(type.bool_().nullability(), internal_type);
+        ch_type = factory.get("UInt8");
+        ch_type = wrapNullableType(substrait_type.bool_().nullability(), ch_type);
     }
-    else if (type.has_i8())
+    else if (substrait_type.has_i8())
     {
-        internal_type = factory.get("Int8");
-        internal_type = wrapNullableType(type.i8().nullability(), internal_type);
+        ch_type = factory.get("Int8");
+        ch_type = wrapNullableType(substrait_type.i8().nullability(), ch_type);
     }
-    else if (type.has_i16())
+    else if (substrait_type.has_i16())
     {
-        internal_type = factory.get("Int16");
-        internal_type = wrapNullableType(type.i16().nullability(), internal_type);
+        ch_type = factory.get("Int16");
+        ch_type = wrapNullableType(substrait_type.i16().nullability(), ch_type);
     }
-    else if (type.has_i32())
+    else if (substrait_type.has_i32())
     {
-        internal_type = factory.get("Int32");
-        internal_type = wrapNullableType(type.i32().nullability(), internal_type);
+        ch_type = factory.get("Int32");
+        ch_type = wrapNullableType(substrait_type.i32().nullability(), ch_type);
     }
-    else if (type.has_i64())
+    else if (substrait_type.has_i64())
     {
-        internal_type = factory.get("Int64");
-        internal_type = wrapNullableType(type.i64().nullability(), internal_type);
+        ch_type = factory.get("Int64");
+        ch_type = wrapNullableType(substrait_type.i64().nullability(), ch_type);
     }
-    else if (type.has_string())
+    else if (substrait_type.has_string())
     {
-        internal_type = factory.get("String");
-        internal_type = wrapNullableType(type.string().nullability(), internal_type);
+        ch_type = factory.get("String");
+        ch_type = wrapNullableType(substrait_type.string().nullability(), ch_type);
     }
-    else if (type.has_fp32())
+    else if (substrait_type.has_fp32())
     {
-        internal_type = factory.get("Float32");
-        internal_type = wrapNullableType(type.fp32().nullability(), internal_type);
+        ch_type = factory.get("Float32");
+        ch_type = wrapNullableType(substrait_type.fp32().nullability(), ch_type);
     }
-    else if (type.has_fp64())
+    else if (substrait_type.has_fp64())
     {
-        internal_type = factory.get("Float64");
-        internal_type = wrapNullableType(type.fp64().nullability(), internal_type);
+        ch_type = factory.get("Float64");
+        ch_type = wrapNullableType(substrait_type.fp64().nullability(), ch_type);
     }
-    else if (type.has_date())
+    else if (substrait_type.has_string() || substrait_type.has_binary())
     {
-        internal_type = factory.get("Date32");
-        internal_type = wrapNullableType(type.date().nullability(), internal_type);
+        ch_type = factory.get("String");
+        ch_type = wrapNullableType(substrait_type.fp64().nullability(), ch_type);
     }
-    else if (type.has_timestamp())
+    else if (substrait_type.has_timestamp())
     {
-        internal_type = factory.get("DateTime64(6)");
-        internal_type = wrapNullableType(type.timestamp().nullability(), internal_type);
+        ch_type = factory.get("DateTime64(6)");
+        ch_type = wrapNullableType(substrait_type.timestamp().nullability(), ch_type);
+    }
+    else if (substrait_type.has_date())
+    {
+        ch_type = factory.get("Date32");
+        ch_type = wrapNullableType(substrait_type.date().nullability(), ch_type);
+    }
+    else if (substrait_type.has_decimal())
+    {
+        UInt32 precision = substrait_type.decimal().precision();
+        UInt32 scale = substrait_type.decimal().scale();
+        if (precision <= DataTypeDecimal32::maxPrecision())
+            ch_type = std::make_shared<DataTypeDecimal32>(precision, scale);
+        else if (precision <= DataTypeDecimal64::maxPrecision())
+            ch_type = std::make_shared<DataTypeDecimal64>(precision, scale);
+        else if (precision <= DataTypeDecimal128::maxPrecision())
+            ch_type = std::make_shared<DataTypeDecimal128>(precision, scale);
+        else
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support decimal type with precision {}", precision);
+
+        ch_type = wrapNullableType(substrait_type.decimal().nullability(), ch_type);
+    }
+    else if (substrait_type.has_struct_())
+    {
+        assert(substrait_type.struct_().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+
+        DataTypes ch_field_types(substrait_type.struct_().types().size());
+        for (size_t i = 0; i < ch_field_types.size(); ++i)
+            ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i]));
+        ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+    }
+    else if (substrait_type.has_list())
+    {
+        assert(substrait_type.struct_().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+
+        auto ch_nested_type = parseType(substrait_type.list().type());
+        ch_type = std::make_shared<DataTypeArray>(ch_nested_type);
+    }
+    else if (substrait_type.has_map())
+    {
+        assert(substrait_type.map().key().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+        assert(substrait_type.map().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+
+        auto ch_key_type = parseType(substrait_type.map().key());
+        auto ch_val_type = parseType(substrait_type.map().value());
+        ch_type = std::make_shared<DataTypeMap>(ch_key_type, ch_val_type);
     }
     else
-    {
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {}", type.DebugString());
-    }
-    return internal_type;
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {}", substrait_type.DebugString());
+
+    /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/FixedChar/VarChar/FixedBinary/UserDefined
+    return std::move(ch_type);
 }
 QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 {
@@ -1391,9 +1443,12 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
 QueryPlanPtr SerializedPlanParser::parse(std::string & plan)
 {
     auto plan_ptr = std::make_unique<substrait::Plan>();
-    plan_ptr->ParseFromString(plan);
+    auto ok = plan_ptr->ParseFromString(plan);
+    if (!ok)
+        throw Exception(ErrorCodes::CANNOT_PARSE_PROTOBUF_SCHEMA, "Parse substrait::Plan from string failed");
+
     LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "parse plan \n{}", plan_ptr->DebugString());
-    return parse(std::move(plan_ptr));
+    return std::move(parse(std::move(plan_ptr)));
 }
 void SerializedPlanParser::initFunctionEnv()
 {
