@@ -21,7 +21,7 @@ class SparkRowInfo : public boost::noncopyable
     friend SparkRowToCHColumn;
 
 public:
-    explicit SparkRowInfo(DB::Block & block);
+    explicit SparkRowInfo(const DB::Block & block);
 
     const DB::DataTypes & getDataTypes() const;
 
@@ -62,7 +62,7 @@ using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
 class CHColumnToSparkRow : private Allocator<false>
 {
 public:
-    std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(DB::Block & block);
+    std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(const DB::Block & block);
     void freeMem(char * address, size_t size);
 };
 
@@ -86,13 +86,17 @@ public:
     /// Is CH DataType can be converted to variable-length data type in Spark?
     static bool isVariableLengthDataType(const DB::DataTypePtr & type_without_nullable);
 
+    /// If Data Type can use raw data between CH Column and Spark Row if value is not null
+    static bool isDataTypeSupportRawData(const DB::DataTypePtr & type_without_nullable);
+
     static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
     static int64_t extractOffset(int64_t offset_and_size);
     static int64_t extractSize(int64_t offset_and_size);
 
 private:
-    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
+    const DB::WhichDataType which;
 };
 
 /// Writing variable-length typed values to backing data region of Spark Row
@@ -114,15 +118,16 @@ public:
     /// parent_offset: the starting offset of current structure in which we are updating it's backing data region
     virtual int64_t write(size_t row_idx, const DB::Field & field, int64_t parent_offset);
 
+    /// Only support String/FixedString/Decimal32/Decimal64
+    int64_t writeUnalignedBytes(size_t row_idx, const char * src, size_t size, int64_t parent_offset);
 private:
-
-    int64_t writeUnalignedBytes(size_t row_idx, const void * src, size_t size, int64_t parent_offset);
     int64_t writeArray(size_t row_idx, const DB::Array & array, int64_t parent_offset);
     int64_t writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset);
     int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple, int64_t parent_offset);
 
-    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
+    const DB::WhichDataType which;
 
     /// Global buffer of spark rows
     char * const buffer_address;
@@ -151,7 +156,7 @@ public:
     virtual void unsafeWrite(const char * src, char * buffer);
 
 private:
-    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
 };

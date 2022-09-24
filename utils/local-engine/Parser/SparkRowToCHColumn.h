@@ -115,6 +115,7 @@ public:
     virtual ~VariableLengthDataReader() = default;
 
     virtual Field read(char * buffer, size_t length);
+    virtual StringRef readUnalignedBytes(char * buffer, size_t length);
 
 private:
     virtual Field readDecimal(char * buffer, size_t length);
@@ -123,7 +124,7 @@ private:
     virtual Field readMap(char * buffer, size_t length);
     virtual Field readStruct(char * buffer, size_t length);
 
-    const DataTypePtr & type;
+    const DataTypePtr type;
     const DataTypePtr type_without_nullable;
     const WhichDataType which;
 };
@@ -135,9 +136,10 @@ public:
     virtual ~FixedLengthDataReader() = default;
 
     virtual Field read(char * buffer);
+    virtual StringRef unsafeRead(char * buffer);
 
 private:
-    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
     
@@ -148,6 +150,11 @@ public:
     explicit SparkRowReader(int32_t num_fields_, const DataTypes & field_types_)
         : num_fields(num_fields_), field_types(field_types_), bit_set_width_in_bytes(calculateBitSetWidthInBytes(num_fields))
     {
+    }
+
+    const DataTypes & getFieldTypes() const
+    {
+        return field_types;
     }
 
     void assertIndexIsValid([[maybe_unused]] int index) const
@@ -242,6 +249,36 @@ public:
     {
         this->buffer = buffer_;
         this->length = length_;
+    }
+
+    StringRef getStringRef(int ordinal) const
+    {
+        if (!BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[ordinal])))
+            throw Exception(
+                ErrorCodes::UNKNOWN_TYPE, "SparkRowReader::getStringRef doesn't support type {}", field_types[ordinal]->getName());
+
+        if (isNullAt(ordinal))
+            return EMPTY_STRING_REF;
+        
+        const auto field_type = removeNullable(field_types[ordinal]);
+        const WhichDataType which(field_type);
+        if (BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(field_type)))
+        {
+            FixedLengthDataReader reader(field_type);
+            return std::move(reader.unsafeRead(getFieldOffset(ordinal)));
+        }
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(removeNullable(field_type)))
+        {
+            int64_t offset_and_size = 0;
+            memcpy(&offset_and_size, buffer + bit_set_width_in_bytes + ordinal * 8, 8);
+            const int64_t offset = BackingDataLengthCalculator::extractOffset(offset_and_size);
+            const int64_t size = BackingDataLengthCalculator::extractSize(offset_and_size);
+
+            VariableLengthDataReader reader(field_type);
+            return std::move(reader.readUnalignedBytes(buffer + offset, size));
+        }
+        else
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "SparkRowReader doesn't support type {}", field_type->getName());
     }
 
     Field getField(int ordinal) const

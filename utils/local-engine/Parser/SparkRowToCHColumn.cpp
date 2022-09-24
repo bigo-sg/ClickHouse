@@ -25,9 +25,18 @@ jmethodID SparkRowToCHColumn::spark_row_interator_next = nullptr;
 
 static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const SparkRowReader & spark_row_reader)
 {
-    int32_t num_fields = columns.size();
-    for (int32_t i = 0; i < num_fields; i++)
-        columns[i]->insert(spark_row_reader.getField(i));
+    auto num_fields = columns.size();
+    const auto & field_types = spark_row_reader.getFieldTypes();
+    for (size_t i = 0; i < num_fields; i++)
+    {
+        if (BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[i]))
+        {
+            const auto str{std::move(spark_row_reader.getStringRef())};
+            columns[i]->insertData(str.data, str.size);
+        }
+        else
+            columns[i]->insert(spark_row_reader.getField(i));
+    }
 }
 
 std::unique_ptr<Block>
@@ -91,6 +100,11 @@ Field VariableLengthDataReader::read(char *buffer, size_t length)
         return std::move(readStruct(buffer, length));
 
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
+}
+
+StringRef VariableLengthDataReader::readUnalignedBytes(char * buffer, size_t length)
+{
+    return {buffer, length};
 }
 
 Field VariableLengthDataReader::readDecimal(char * buffer, size_t length)
@@ -259,6 +273,15 @@ FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_)
     if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
+
+StringRef FixedLengthDataReader::unsafeRead(char * buffer)
+{
+    if (!type_without_nullable->isValueRepresentedByNumber())
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataReader doesn't support type {}", type->getName());
+    
+    return {buffer, type_without_nullable->getSizeOfValueInMemory()};
+}
+
 
 Field FixedLengthDataReader::read(char * buffer)
 {
