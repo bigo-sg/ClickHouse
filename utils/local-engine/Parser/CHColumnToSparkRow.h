@@ -94,7 +94,7 @@ public:
     static int64_t extractSize(int64_t offset_and_size);
 
 private:
-    const DB::DataTypePtr type;
+    // const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
 };
@@ -125,7 +125,7 @@ private:
     int64_t writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset);
     int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple, int64_t parent_offset);
 
-    const DB::DataTypePtr type;
+    // const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
 
@@ -156,7 +156,7 @@ public:
     virtual void unsafeWrite(const char * src, char * buffer);
 
 private:
-    const DB::DataTypePtr type;
+    // const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
 };

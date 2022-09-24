@@ -87,18 +87,16 @@ static void writeValue(
             setNullAt(buffer_address, offsets[i], field_offset, col_index); \
         else \
             writer.unsafeWrite(col.column->getDataAt(i), buffer_address + offsets[i] + field_offset); \
-    }
+    } \
 
 #define WRITE_VARIABLE_LENGTH_COLUMN \
     VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor); \
-    const WhichDataType which(removeNullable(col.type)); \
-    const bool use_zero_copy = which.isStringOrFixedString() || which.isDecimal128(); \
-    Field field; \
+    const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable); \
     for (auto i = 0; i < num_rows; i++) \
     { \
         if (col.column->isNullAt(i)) \
             setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        else if (use_zero_copy) \
+        else if (use_raw_data) \
         { \
             StringRef str = col.column->getDataAt(i); \
             int64_t offset_and_size = writer.writeUnalignedBytes(i, str.data, str.size, 0); \
@@ -106,17 +104,18 @@ static void writeValue(
         } \
         else \
         { \
-            field = std::move((*col.column)[i]); \
+            Field field{std::move((*col.column)[i])}; \
             int64_t offset_and_size = writer.write(i, field, 0); \
             memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
         } \
-    }
+    } \
 
-    if (BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(col.type)))
+    const auto type_without_nullable{std::move(removeNullable(col.type))};
+    if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
     {
         WRITE_FIXED_LENGTH_COLUMN
     }
-    else if (BackingDataLengthCalculator::isVariableLengthDataType(removeNullable(col.type)))
+    else if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
     {
         WRITE_VARIABLE_LENGTH_COLUMN
     }
@@ -138,28 +137,43 @@ SparkRowInfo::SparkRowInfo(const Block & block)
     int64_t fixed_size_per_row = calculatedFixeSizePerRow(num_cols);
 
     /// Initialize lengths and buffer_cursor
-    for (auto i = 0; i < num_rows; i++)
+    for (int64_t i = 0; i < num_rows; i++)
     {
         lengths[i] = fixed_size_per_row;
         buffer_cursor[i] = fixed_size_per_row;
     }
-    for (auto col_idx = 0; col_idx < num_cols; ++col_idx)
+
+    for (int64_t col_idx = 0; col_idx < num_cols; ++col_idx)
     {
         const auto & col = block.getByPosition(col_idx);
-        BackingDataLengthCalculator calculator(col.type);
-        for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+
+        /// No need to calculate backing data length for fixed length types
+        const auto type_without_nullable = removeNullable(col.type);
+        if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
         {
-            const auto field = (*col.column)[row_idx];
-            lengths[row_idx] += calculator.calculate(field);
+            BackingDataLengthCalculator calculator(col.type);
+            if (BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable))
+            {
+                for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+                    lengths[row_idx] += col.column->getDataAt(row_idx).size;
+            }
+            else
+            {
+                for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+                {
+                    const auto field = (*col.column)[row_idx];
+                    lengths[row_idx] += calculator.calculate(field);
+                }
+            }
         }
     }
 
     /// Initialize offsets
-    for (auto i = 1; i < num_rows; ++i)
+    for (int64_t i = 1; i < num_rows; ++i)
         offsets[i] = offsets[i - 1] + lengths[i - 1];
 
     /// Initialize total_bytes
-    for (auto i = 0; i < num_rows; ++i)
+    for (int64_t i = 0; i < num_rows; ++i)
         total_bytes += lengths[i];
 }
 
@@ -263,12 +277,13 @@ void CHColumnToSparkRow::freeMem(char * address, size_t size)
 }
 
 BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_)
-    : type(type_), type_without_nullable(removeNullable(type)), which(type_without_nullable)
+    // : type(type_)
+    : type_without_nullable(removeNullable(type_)), which(type_without_nullable)
 {
     assert(type);
 
     if (!isFixedLengthDataType(type_without_nullable) && !isVariableLengthDataType(type_without_nullable))
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataLengthCalculator", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataLengthCalculator", type_without_nullable->getName());
 }
 
 int64_t BackingDataLengthCalculator::calculate(const Field & field) const
@@ -296,7 +311,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         const auto num_elems = array.size();
         int64_t res = 8 + calculateBitSetWidthInBytes(num_elems);
 
-        const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
+        const auto * array_type = typeid_cast<const DataTypeArray *>(type_without_nullable.get());
         const auto & nested_type = array_type->getNestedType();
         res += roundNumberOfBytesToNearestWord(getArrayElementSize(nested_type) * num_elems);
 
@@ -325,7 +340,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
             array_val.push_back(pair[1]);
         }
 
-        const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type.get());
+        const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type_without_nullable.get());
 
         const auto & key_type = map_type->getKeyType();
         const auto key_array_type = std::make_shared<DataTypeArray>(key_type);
@@ -343,7 +358,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
     {
         /// 内存布局：null_bitmap(字节数与字段数成正比) | field1 value(8B) | field2 value(8B) | ... | fieldn value(8B) | backing buffer
         const auto & tuple = field.get<Tuple>(); /// Tuple can not be wrapped with Nullable
-        const auto * type_tuple = typeid_cast<const DataTypeTuple *>(type.get());
+        const auto * type_tuple = typeid_cast<const DataTypeTuple *>(type_without_nullable.get());
         const auto & type_fields = type_tuple->getElements();
         const auto num_fields = type_fields.size();
         int64_t res = calculateBitSetWidthInBytes(num_fields) + 8 * num_fields;
@@ -355,7 +370,7 @@ int64_t BackingDataLengthCalculator::calculate(const Field & field) const
         return res;
     }
 
-    throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type->getName());
+    throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingBufferLengthCalculator", type_without_nullable->getName());
 }
 
 int64_t BackingDataLengthCalculator::getArrayElementSize(const DataTypePtr & nested_type)
@@ -400,8 +415,8 @@ bool BackingDataLengthCalculator::isDataTypeSupportRawData(const DB::DataTypePtr
 
 VariableLengthDataWriter::VariableLengthDataWriter(
     const DataTypePtr & type_, char * buffer_address_, const std::vector<int64_t> & offsets_, std::vector<int64_t> & buffer_cursor_)
-    : type(type_)
-    , type_without_nullable(removeNullable(type))
+    // : type(type_)
+    : type_without_nullable(removeNullable(type_))
     , which(type_without_nullable)
     , buffer_address(buffer_address_)
     , offsets(offsets_)
@@ -414,7 +429,7 @@ VariableLengthDataWriter::VariableLengthDataWriter(
     assert(offsets.size() == buffer_cursor.size());
 
     if (!BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataWriter doesn't support type {}", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataWriter doesn't support type {}", type_without_nullable->getName());
 }
 
 int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & array, int64_t parent_offset)
@@ -423,7 +438,7 @@ int64_t VariableLengthDataWriter::writeArray(size_t row_idx, const DB::Array & a
     const auto & offset = offsets[row_idx];
     auto & cursor = buffer_cursor[row_idx];
     const auto num_elems = array.size();
-    const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
+    const auto * array_type = typeid_cast<const DataTypeArray *>(type_without_nullable.get());
     const auto & nested_type = array_type->getNestedType();
 
     /// Write numElements(8B)
@@ -503,7 +518,7 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map, 
         val_array.push_back(pair[1]);
     }
 
-    const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type.get());
+    const auto * map_type = typeid_cast<const DB::DataTypeMap *>(type_without_nullable.get());
 
     /// Append UnsafeArrayData of key
     const auto & key_type = map_type->getKeyType();
@@ -530,7 +545,7 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
     const auto start = cursor;
 
     /// Skip null_bitmap
-    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type.get());
+    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type_without_nullable.get());
     const auto & field_types = tuple_type->getElements();
     const auto num_fields = field_types.size();
     if (num_fields == 0)
@@ -607,7 +622,7 @@ int64_t VariableLengthDataWriter::write(size_t row_idx, const DB::Field & field,
         return writeStruct(row_idx, tuple, parent_offset);
     }
 
-    throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataWriter", type->getName());
+    throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataWriter", type_without_nullable->getName());
 }
 
 int64_t BackingDataLengthCalculator::getOffsetAndSize(int64_t cursor, int64_t size)
@@ -635,12 +650,13 @@ int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const char
 
 
 FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_)
-    : type(type_), type_without_nullable(removeNullable(type)), which(type_without_nullable)
+    // : type(type_), 
+    : type_without_nullable(removeNullable(type_)), which(type_without_nullable)
 {
     assert(type);
 
     if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type_without_nullable->getName());
 }
 
 void FixedLengthDataWriter::write(const DB::Field & field, char * buffer)
@@ -712,7 +728,7 @@ void FixedLengthDataWriter::write(const DB::Field & field, char * buffer)
         memcpy(buffer, &decimal, 8);
     }
     else
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
 }
 
 void FixedLengthDataWriter::unsafeWrite(const StringRef & str, char * buffer)
@@ -722,7 +738,7 @@ void FixedLengthDataWriter::unsafeWrite(const StringRef & str, char * buffer)
         return;
 
     if (!type_without_nullable->isValueRepresentedByNumber() || str.size != type_without_nullable->getSizeOfValueInMemory())
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
 
     memcpy(buffer, str.data, str.size);
 }
@@ -734,7 +750,7 @@ void FixedLengthDataWriter::unsafeWrite(const char * src, char * buffer)
         return;
     
     if (!type_without_nullable->isValueRepresentedByNumber())
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type->getName());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
 
     memcpy(buffer, src, type_without_nullable->getSizeOfValueInMemory());
 }
