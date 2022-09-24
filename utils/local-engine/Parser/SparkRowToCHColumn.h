@@ -124,6 +124,7 @@ private:
     virtual Field readStruct(char * buffer, size_t length);
 
     const DataTypePtr & type;
+    const DataTypePtr type_without_nullable;
     const WhichDataType which;
 };
 
@@ -137,6 +138,7 @@ public:
 
 private:
     const DB::DataTypePtr & type;
+    const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
     
 };
@@ -248,12 +250,12 @@ public:
             return std::move(Null{});
 
         const auto & field_type = field_types[ordinal];
-        if (BackingDataLengthCalculator::isFixedLengthDataType(field_type))
+        if (BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(field_type)))
         {
             FixedLengthDataReader reader(field_type);
             return std::move(reader.read(getFieldOffset(ordinal)));
         }
-        else if (BackingDataLengthCalculator::isVariableLengthDataType(field_type))
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(removeNullable(field_type)))
         {
             int64_t offset_and_size = 0;
             memcpy(&offset_and_size, buffer + bit_set_width_in_bytes + ordinal * 8, 8);

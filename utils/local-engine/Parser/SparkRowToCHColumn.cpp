@@ -66,9 +66,10 @@ Block * SparkRowToCHColumn::getBlock(SparkRowToCHColumnHelper & helper)
     return block;
 }
 
-VariableLengthDataReader::VariableLengthDataReader(const DataTypePtr & type_) : type(type_), which(removeNullable(type))
+VariableLengthDataReader::VariableLengthDataReader(const DataTypePtr & type_)
+    : type(type_), type_without_nullable(removeNullable(type)), which(type_without_nullable)
 {
-    if (!BackingDataLengthCalculator::isVariableLengthDataType(type))
+    if (!BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
 
@@ -127,7 +128,7 @@ Field VariableLengthDataReader::readArray(char * buffer, [[maybe_unused]] size_t
     Array array;
     array.reserve(num_elems);
 
-    if (BackingDataLengthCalculator::isFixedLengthDataType(nested_type))
+    if (BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(nested_type)))
     {
         FixedLengthDataReader reader(nested_type);
         for (int64_t i = 0; i < num_elems; ++i)
@@ -143,7 +144,7 @@ Field VariableLengthDataReader::readArray(char * buffer, [[maybe_unused]] size_t
             }
         }
     }
-    else if (BackingDataLengthCalculator::isVariableLengthDataType(nested_type))
+    else if (BackingDataLengthCalculator::isVariableLengthDataType(removeNullable(nested_type)))
     {
         VariableLengthDataReader reader(nested_type);
         for (int64_t i = 0; i < num_elems; ++i)
@@ -231,12 +232,12 @@ Field VariableLengthDataReader::readStruct(char * buffer, size_t  /*length*/)
             continue;
         }
 
-        if (BackingDataLengthCalculator::isFixedLengthDataType(field_type))
+        if (BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(field_type)))
         {
             FixedLengthDataReader reader(field_type);
             tuple[i] = std::move(reader.read(buffer + len_null_bitmap + i * 8));
         }
-        else if (BackingDataLengthCalculator::isVariableLengthDataType(field_type))
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(removeNullable(field_type)))
         {
             int64_t offset_and_size = 0;
             memcpy(&offset_and_size, buffer + len_null_bitmap + i * 8, 8);
@@ -252,8 +253,11 @@ Field VariableLengthDataReader::readStruct(char * buffer, size_t  /*length*/)
     return std::move(tuple);
 }
 
-FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_) : type(type_), which(type)
+FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_)
+    : type(type_), type_without_nullable(removeNullable(type)), which(type_without_nullable)
 {
+    if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
 
 Field FixedLengthDataReader::read(char * buffer)

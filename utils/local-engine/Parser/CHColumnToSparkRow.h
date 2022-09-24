@@ -81,17 +81,18 @@ public:
     static int64_t getArrayElementSize(const DB::DataTypePtr & nested_type);
 
     /// Is CH DataType can be converted to fixed-length data type in Spark?
-    static bool isFixedLengthDataType(const DB::DataTypePtr & type);
+    static bool isFixedLengthDataType(const DB::DataTypePtr & type_without_nullable);
 
     /// Is CH DataType can be converted to variable-length data type in Spark?
-    static bool isVariableLengthDataType(const DB::DataTypePtr & type);
+    static bool isVariableLengthDataType(const DB::DataTypePtr & type_without_nullable);
 
     static int64_t getOffsetAndSize(int64_t cursor, int64_t size);
     static int64_t extractOffset(int64_t offset_and_size);
     static int64_t extractSize(int64_t offset_and_size);
 
 private:
-    const DB::DataTypePtr type;
+    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type_without_nullable;
 };
 
 /// Writing variable-length typed values to backing data region of Spark Row
@@ -120,7 +121,8 @@ private:
     int64_t writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset);
     int64_t writeStruct(size_t row_idx, const DB::Tuple & tuple, int64_t parent_offset);
 
-    const DB::DataTypePtr type;
+    const DB::DataTypePtr & type;
+    const DB::DataTypePtr type_without_nullable;
 
     /// Global buffer of spark rows
     char * const buffer_address;
@@ -140,8 +142,17 @@ public:
     /// It's caller's duty to make sure that struct fields or array elements are written in order
     virtual void write(const DB::Field & field, char * buffer);
 
+    /// Copy memory chunk of Fixed length typed CH Column directory to buffer for performance.
+    /// It is unsafe unless you know what you are doing.
+    virtual void unsafeWrite(const StringRef & str, char * buffer);
+
+    /// Copy memory chunk of in fixed length typed Field directory to buffer for performance.
+    /// It is unsafe unless you know what you are doing.
+    virtual void unsafeWrite(const char * src, char * buffer);
+
 private:
     const DB::DataTypePtr & type;
+    const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
 };
 
