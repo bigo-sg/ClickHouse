@@ -29,9 +29,9 @@ static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const Spa
     const auto & field_types = spark_row_reader.getFieldTypes();
     for (size_t i = 0; i < num_fields; i++)
     {
-        if (BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[i]))
+        if (BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[i])))
         {
-            const auto str{std::move(spark_row_reader.getStringRef())};
+            const StringRef str{std::move(spark_row_reader.getStringRef(i))};
             columns[i]->insertData(str.data, str.size);
         }
         else
