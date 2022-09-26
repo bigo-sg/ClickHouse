@@ -63,12 +63,122 @@ bool isBitSet(const char * bitmap, int32_t index)
 }
 
 
+/*
 static void setNullAt(char * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
 {
     bitSet(buffer_address + row_offset, col_index);
     // set the value to 0
     memset(buffer_address + row_offset + field_offset, 0, sizeof(int64_t));
 }
+*/
+
+static void writeFixedLengthNonNullableValue(
+    char * buffer_address,
+    int64_t field_offset,
+    const ColumnWithTypeAndName & col,
+    int64_t num_rows,
+    const std::vector<int64_t> & offsets)
+{
+    FixedLengthDataWriter writer(col.type);
+    for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+        writer.unsafeWrite(col.column->getDataAt(i), buffer_address + offsets[i] + field_offset);
+}
+
+static void writeFixedLengthNullableValue(
+    char * buffer_address,
+    int64_t field_offset,
+    const ColumnWithTypeAndName & col,
+    int32_t col_index,
+    int64_t num_rows,
+    const std::vector<int64_t> & offsets)
+{
+    const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
+    const auto & null_map = nullable_column->getNullMapData();
+    FixedLengthDataWriter writer(col.type);
+    for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+    {
+        if (null_map[i])
+            bitSet(buffer_address + offsets[i], col_index);
+        else
+            writer.unsafeWrite(col.column->getDataAt(i), buffer_address + offsets[i] + field_offset);
+    }
+}
+
+static void writeVariableLengthNonNullableValue(
+    char * buffer_address,
+    int64_t field_offset,
+    const ColumnWithTypeAndName & col,
+    int64_t num_rows,
+    const std::vector<int64_t> & offsets,
+    std::vector<int64_t> & buffer_cursor)
+{
+    const auto type_without_nullable{std::move(removeNullable(col.type))};
+    const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable);
+    VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor);
+    if (use_raw_data)
+    {
+        for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+        {
+            StringRef str = col.column->getDataAt(i);
+            int64_t offset_and_size = writer.writeUnalignedBytes(i, str.data, str.size, 0);
+            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+        {
+            const auto field{std::move((*col.column)[i])};
+            int64_t offset_and_size = writer.write(i, field, 0);
+            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
+        }
+    }
+}
+
+static void writeVariableLengthNullableValue(
+    char * buffer_address,
+    int64_t field_offset,
+    const ColumnWithTypeAndName & col,
+    int32_t col_index,
+    int64_t num_rows,
+    const std::vector<int64_t> & offsets,
+    std::vector<int64_t> & buffer_cursor)
+{
+    const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
+    const auto & null_map = nullable_column->getNullMapData();
+    const auto type_without_nullable{std::move(removeNullable(col.type))};
+    const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable);
+    VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor);
+    if (use_raw_data)
+    {
+        for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+        {
+            if (null_map[i])
+                bitSet(buffer_address + offsets[i], col_index);
+            else
+            {
+                StringRef str = col.column->getDataAt(i);
+                int64_t offset_and_size = writer.writeUnalignedBytes(i, str.data, str.size, 0);
+                memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
+            }
+        }
+    }
+    else
+    {
+        for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
+        {
+            if (null_map[i])
+                bitSet(buffer_address + offsets[i], col_index);
+            else
+            {
+                const auto field{std::move((*col.column)[i])};
+                int64_t offset_and_size = writer.write(i, field, 0);
+                memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
+            }
+        }
+    }
+}
+
 
 static void writeValue(
     char * buffer_address,
@@ -79,6 +189,7 @@ static void writeValue(
     const std::vector<int64_t> & offsets,
     std::vector<int64_t> & buffer_cursor)
 {
+    /*
 #define WRITE_FIXED_LENGTH_COLUMN \
     FixedLengthDataWriter writer(col.type); \
     for (auto i = 0; i < num_rows; i++) \
@@ -109,15 +220,24 @@ static void writeValue(
             memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
         } \
     } \
+    */
 
+    
     const auto type_without_nullable{std::move(removeNullable(col.type))};
+    const auto is_nullable = isColumnNullable(*col.column);
     if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
     {
-        WRITE_FIXED_LENGTH_COLUMN
+        if (is_nullable)
+            writeFixedLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets);
+        else
+            writeFixedLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets);
     }
     else if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
     {
-        WRITE_VARIABLE_LENGTH_COLUMN
+        if (is_nullable)
+            writeVariableLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets, buffer_cursor);
+        else
+            writeVariableLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets, buffer_cursor);
     }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
@@ -743,7 +863,7 @@ void FixedLengthDataWriter::unsafeWrite(const StringRef & str, char * buffer)
     memcpy(buffer, str.data, str.size);
 }
 
-void FixedLengthDataWriter::unsafeWrite(const char * src, char * buffer)
+void FixedLengthDataWriter::unsafeWrite(const char * __restrict src, char * __restrict buffer)
 {
     /// Skip nullptr 
     if (src == nullptr)

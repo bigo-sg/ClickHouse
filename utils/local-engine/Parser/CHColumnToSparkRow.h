@@ -153,7 +153,7 @@ public:
 
     /// Copy memory chunk of in fixed length typed Field directory to buffer for performance.
     /// It is unsafe unless you know what you are doing.
-    virtual void unsafeWrite(const char * src, char * buffer);
+    virtual void unsafeWrite(const char * __restrict src, char * __restrict buffer);
 
 private:
     // const DB::DataTypePtr type;
