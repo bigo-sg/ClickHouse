@@ -133,7 +133,7 @@ DB::ColumnPtr FileReaderWrapper::createConstColumn(DB::DataTypePtr data_type, co
     auto column = nested_type->createColumnConst(rows, field);
 
     if (data_type->isNullable())
-        column = DB::ColumnNullable::create(column, DB::ColumnUInt8::create());
+        column = DB::ColumnNullable::create(column, DB::ColumnUInt8::create(rows));
     return column;
 }
 
