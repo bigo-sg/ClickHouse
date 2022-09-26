@@ -3,6 +3,7 @@
 #include <Core/Block.h>
 #include <Core/Field.h>
 #include <Common/Allocator.h>
+#include <Common/Arena.h>
 
 
 namespace local_engine
@@ -59,7 +60,8 @@ private:
 
 using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
 
-class CHColumnToSparkRow : private Allocator<false>
+// class CHColumnToSparkRow : private Allocator<false, true>
+class CHColumnToSparkRow : public DB::Arena
 {
 public:
     std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(const DB::Block & block);

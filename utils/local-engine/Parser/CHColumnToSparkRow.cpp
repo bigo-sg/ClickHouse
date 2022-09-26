@@ -239,14 +239,26 @@ SparkRowInfo::SparkRowInfo(const Block & block)
         const auto type_without_nullable = removeNullable(col.type);
         if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
         {
-            BackingDataLengthCalculator calculator(col.type);
             if (BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable))
             {
-                for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
-                    lengths[row_idx] += roundNumberOfBytesToNearestWord(col.column->getDataAt(row_idx).size);
+                const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
+                if (nullable_column)
+                {
+                    const auto & nested_column = nullable_column->getNestedColumn();
+                    const auto & null_map = nullable_column->getNullMapData();
+                    for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+                        if (!null_map[row_idx])
+                            lengths[row_idx] += roundNumberOfBytesToNearestWord(nested_column.getDataAt(row_idx).size);
+                }
+                else
+                {
+                    for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
+                        lengths[row_idx] += roundNumberOfBytesToNearestWord(col.column->getDataAt(row_idx).size);
+                }
             }
             else
             {
+                BackingDataLengthCalculator calculator(col.type);
                 for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
                 {
                     const auto field = (*col.column)[row_idx];
@@ -341,8 +353,10 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
         return {};
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
+    // spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
+    spark_row_info->setBufferAddress(alignedAlloc(spark_row_info->getTotalBytes(), 64));
     // memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
+    std::cerr << "total bytes:" << spark_row_info->getTotalBytes() << std::endl;
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
         const auto & col = block.getByPosition(col_idx);
@@ -359,9 +373,10 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
     return spark_row_info;
 }
 
-void CHColumnToSparkRow::freeMem(char * address, size_t size)
+void CHColumnToSparkRow::freeMem(char * /*address*/, size_t size)
 {
-    free(address, size);
+    // free(address, size));
+    rollback(size);
 }
 
 BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_)
