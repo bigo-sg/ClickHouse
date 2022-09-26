@@ -63,14 +63,12 @@ bool isBitSet(const char * bitmap, int32_t index)
 }
 
 
-/*
-static void setNullAt(char * buffer_address, int64_t row_offset, int64_t field_offset, int32_t col_index)
+static void setNullAt(char * buffer_address, int64_t row_offset, int64_t /*field_offset*/, int32_t col_index)
 {
     bitSet(buffer_address + row_offset, col_index);
     // set the value to 0
-    memset(buffer_address + row_offset + field_offset, 0, sizeof(int64_t));
+    // memset(buffer_address + row_offset + field_offset, 0, sizeof(int64_t));
 }
-*/
 
 static void writeFixedLengthNonNullableValue(
     char * buffer_address,
@@ -94,13 +92,14 @@ static void writeFixedLengthNullableValue(
 {
     const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
     const auto & null_map = nullable_column->getNullMapData();
+    const auto & nested_column = nullable_column->getNestedColumn();
     FixedLengthDataWriter writer(col.type);
     for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
     {
         if (null_map[i])
             bitSet(buffer_address + offsets[i], col_index);
         else
-            writer.unsafeWrite(col.column->getDataAt(i), buffer_address + offsets[i] + field_offset);
+            writer.unsafeWrite(nested_column.getDataAt(i), buffer_address + offsets[i] + field_offset);
     }
 }
 
@@ -126,9 +125,10 @@ static void writeVariableLengthNonNullableValue(
     }
     else
     {
+        Field field;
         for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
         {
-            const auto field{std::move((*col.column)[i])};
+            field = std::move((*col.column)[i]);
             int64_t offset_and_size = writer.write(i, field, 0);
             memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
         }
@@ -146,6 +146,7 @@ static void writeVariableLengthNullableValue(
 {
     const auto * nullable_column = checkAndGetColumn<ColumnNullable>(*col.column);
     const auto & null_map = nullable_column->getNullMapData();
+    const auto & nested_column = nullable_column->getNestedColumn();
     const auto type_without_nullable{std::move(removeNullable(col.type))};
     const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable);
     VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor);
@@ -157,7 +158,7 @@ static void writeVariableLengthNullableValue(
                 bitSet(buffer_address + offsets[i], col_index);
             else
             {
-                StringRef str = col.column->getDataAt(i);
+                StringRef str = nested_column.getDataAt(i);
                 int64_t offset_and_size = writer.writeUnalignedBytes(i, str.data, str.size, 0);
                 memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
             }
@@ -165,13 +166,14 @@ static void writeVariableLengthNullableValue(
     }
     else
     {
+        Field field;
         for (size_t i = 0; i < static_cast<size_t>(num_rows); i++)
         {
             if (null_map[i])
                 bitSet(buffer_address + offsets[i], col_index);
             else
             {
-                const auto field{std::move((*col.column)[i])};
+                field = std::move(nested_column[i]);
                 int64_t offset_and_size = writer.write(i, field, 0);
                 memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
             }
@@ -189,40 +191,6 @@ static void writeValue(
     const std::vector<int64_t> & offsets,
     std::vector<int64_t> & buffer_cursor)
 {
-    /*
-#define WRITE_FIXED_LENGTH_COLUMN \
-    FixedLengthDataWriter writer(col.type); \
-    for (auto i = 0; i < num_rows; i++) \
-    { \
-        if (col.column->isNullAt(i)) \
-            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        else \
-            writer.unsafeWrite(col.column->getDataAt(i), buffer_address + offsets[i] + field_offset); \
-    } \
-
-#define WRITE_VARIABLE_LENGTH_COLUMN \
-    VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor); \
-    const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable); \
-    for (auto i = 0; i < num_rows; i++) \
-    { \
-        if (col.column->isNullAt(i)) \
-            setNullAt(buffer_address, offsets[i], field_offset, col_index); \
-        else if (use_raw_data) \
-        { \
-            StringRef str = col.column->getDataAt(i); \
-            int64_t offset_and_size = writer.writeUnalignedBytes(i, str.data, str.size, 0); \
-            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
-        } \
-        else \
-        { \
-            Field field{std::move((*col.column)[i])}; \
-            int64_t offset_and_size = writer.write(i, field, 0); \
-            memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8); \
-        } \
-    } \
-    */
-
-    
     const auto type_without_nullable{std::move(removeNullable(col.type))};
     const auto is_nullable = isColumnNullable(*col.column);
     if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
@@ -275,7 +243,7 @@ SparkRowInfo::SparkRowInfo(const Block & block)
             if (BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable))
             {
                 for (auto row_idx = 0; row_idx < num_rows; ++row_idx)
-                    lengths[row_idx] += col.column->getDataAt(row_idx).size;
+                    lengths[row_idx] += roundNumberOfBytesToNearestWord(col.column->getDataAt(row_idx).size);
             }
             else
             {
@@ -373,8 +341,8 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
         return {};
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes())));
-    memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
+    spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
+    // memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
         const auto & col = block.getByPosition(col_idx);
@@ -853,24 +821,28 @@ void FixedLengthDataWriter::write(const DB::Field & field, char * buffer)
 
 void FixedLengthDataWriter::unsafeWrite(const StringRef & str, char * buffer)
 {
+    /*
     /// Skip empty string ref
     if (str == EMPTY_STRING_REF)
         return;
 
     if (!type_without_nullable->isValueRepresentedByNumber() || str.size != type_without_nullable->getSizeOfValueInMemory())
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
+    */
 
     memcpy(buffer, str.data, str.size);
 }
 
 void FixedLengthDataWriter::unsafeWrite(const char * __restrict src, char * __restrict buffer)
 {
+    /*
     /// Skip nullptr 
     if (src == nullptr)
         return;
     
     if (!type_without_nullable->isValueRepresentedByNumber())
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
+    */
 
     memcpy(buffer, src, type_without_nullable->getSizeOfValueInMemory());
 }
