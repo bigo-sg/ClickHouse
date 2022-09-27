@@ -35,6 +35,7 @@ target_link_libraries(substait_source PUBLIC
     ch_contrib::protobuf
     clickhouse_common_io
     ch_contrib::hdfs
+    substrait
 )
 
 target_include_directories(substait_source SYSTEM BEFORE PUBLIC 
