@@ -9,6 +9,7 @@
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
 #include <QueryPipeline/QueryPipeline.h>
 #include <Parser/CHColumnToSparkRow.h>
+#include <Parser/SparkRowToCHColumn.h>
 
 #include <string>
 #include <vector>
@@ -83,5 +84,43 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
     }
 }
 
-BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
 
+
+static void BM_SparkRowToCHColumn_Lineitem(benchmark::State& state)
+{
+    const NameTypes name_types = {
+        {"l_orderkey", "Nullable(Int64)"},
+        {"l_partkey", "Nullable(Int64)"},
+        {"l_suppkey", "Nullable(Int64)"},
+        {"l_linenumber", "Nullable(Int64)"},
+        {"l_quantity", "Nullable(Float64)"},
+        {"l_extendedprice", "Nullable(Float64)"},
+        {"l_discount", "Nullable(Float64)"},
+        {"l_tax", "Nullable(Float64)"},
+        {"l_returnflag", "Nullable(String)"},
+        {"l_linestatus", "Nullable(String)"},
+        {"l_shipdate", "Nullable(Date32)"},
+        {"l_commitdate", "Nullable(Date32)"},
+        {"l_receiptdate", "Nullable(Date32)"},
+        {"l_shipinstruct", "Nullable(String)"},
+        {"l_shipmode", "Nullable(String)"},
+        {"l_comment", "Nullable(String)"},
+    };
+
+    Block header = std::move(getLineitemHeader(name_types));
+    const String file = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
+                        "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
+    Block in_block;
+    readParquetFile(header, file, in_block);
+
+    CHColumnToSparkRow spark_row_converter;
+    auto spark_row_info = spark_row_converter.convertCHColumnToSparkRow(in_block);
+    for (auto _ : state)
+    {
+        auto out_block = SparkRowToCHColumn::convertSparkRowInfoToCHColumn(*spark_row_info, header);
+        std::cerr << out_block->rows() << std::endl;
+    }
+}
+
+BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_SparkRowToCHColumn_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
