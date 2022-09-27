@@ -29,7 +29,7 @@ static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const Spa
     const auto & field_types = spark_row_reader.getFieldTypes();
     for (size_t i = 0; i < num_fields; i++)
     {
-        if (BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[i])))
+        if (spark_row_reader.supportRawData(i))
         {
             const StringRef str{std::move(spark_row_reader.getStringRef(i))};
             columns[i]->insertData(str != EMPTY_STRING_REF ? str.data : nullptr, str.size);
@@ -50,7 +50,7 @@ SparkRowToCHColumn::convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row
         mutable_columns[col_i]->reserve(num_rows);
 
     DataTypes types{std::move(header.getDataTypes())};
-    SparkRowReader row_reader(header.columns(), types);
+    SparkRowReader row_reader(types);
     for (int64_t i = 0; i < num_rows; i++)
     {
         row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
@@ -62,7 +62,7 @@ SparkRowToCHColumn::convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row
 
 void SparkRowToCHColumn::appendSparkRowToCHColumn(SparkRowToCHColumnHelper & helper, char * buffer, int32_t length)
 {
-    SparkRowReader row_reader(helper.header.columns(), helper.data_types);
+    SparkRowReader row_reader(helper.data_types);
     row_reader.pointTo(buffer, length);
     writeRowToColumns(helper.mutable_columns, row_reader);
 }
@@ -82,7 +82,7 @@ VariableLengthDataReader::VariableLengthDataReader(const DataTypePtr & type_)
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
 
-Field VariableLengthDataReader::read(char *buffer, size_t length)
+Field VariableLengthDataReader::read(const char *buffer, size_t length) const
 {
     if (which.isStringOrFixedString() )
         return std::move(readString(buffer, length));
@@ -102,12 +102,12 @@ Field VariableLengthDataReader::read(char *buffer, size_t length)
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
 
-StringRef VariableLengthDataReader::readUnalignedBytes(char * buffer, size_t length)
+StringRef VariableLengthDataReader::readUnalignedBytes(const char * buffer, size_t length) const
 {
     return {buffer, length};
 }
 
-Field VariableLengthDataReader::readDecimal(char * buffer, size_t length)
+Field VariableLengthDataReader::readDecimal(const char * buffer, size_t length) const
 {
     assert(sizeof(Decimal128) == length);
 
@@ -116,13 +116,13 @@ Field VariableLengthDataReader::readDecimal(char * buffer, size_t length)
     return DecimalField<Decimal128>(value);
 }
 
-Field VariableLengthDataReader::readString(char * buffer, size_t length)
+Field VariableLengthDataReader::readString(const char * buffer, size_t length) const
 {
     String str(buffer, length);
     return std::move(Field(std::move(str)));
 }
 
-Field VariableLengthDataReader::readArray(char * buffer, [[maybe_unused]] size_t length)
+Field VariableLengthDataReader::readArray(const char * buffer, [[maybe_unused]] size_t length) const
 {
     /// 内存布局：numElements(8B) | null_bitmap(与numElements成正比) | values(每个值长度与类型有关) | backing data
     /// Read numElements
@@ -185,7 +185,7 @@ Field VariableLengthDataReader::readArray(char * buffer, [[maybe_unused]] size_t
     return std::move(array);
 }
 
-Field VariableLengthDataReader::readMap(char * buffer, size_t length)
+Field VariableLengthDataReader::readMap(const char * buffer, size_t length) const
 {
     /// 内存布局：Length of UnsafeArrayData of key(8B) |  UnsafeArrayData of key | UnsafeArrayData of value
     /// Read Length of UnsafeArrayData of key
@@ -225,7 +225,7 @@ Field VariableLengthDataReader::readMap(char * buffer, size_t length)
 }
 
 
-Field VariableLengthDataReader::readStruct(char * buffer, size_t  /*length*/)
+Field VariableLengthDataReader::readStruct(const char * buffer, size_t  /*length*/) const
 {
     /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data
     const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type.get());
@@ -274,7 +274,7 @@ FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_)
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
 }
 
-StringRef FixedLengthDataReader::unsafeRead(char * buffer)
+StringRef FixedLengthDataReader::unsafeRead(const char * buffer) const
 {
     if (!type_without_nullable->isValueRepresentedByNumber())
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataReader doesn't support type {}", type->getName());
@@ -283,7 +283,7 @@ StringRef FixedLengthDataReader::unsafeRead(char * buffer)
 }
 
 
-Field FixedLengthDataReader::read(char * buffer)
+Field FixedLengthDataReader::read(const char * buffer) const
 {
     if (which.isUInt8())
     {

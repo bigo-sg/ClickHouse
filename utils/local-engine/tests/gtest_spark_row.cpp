@@ -70,7 +70,7 @@ static void assertReadConsistentWithWritten(const SparkRowInfo & spark_row_info,
 {
     /// Check if output of SparkRowReader is consistent with types_and_fields
     {
-        auto reader = SparkRowReader(spark_row_info.getNumCols(), spark_row_info.getDataTypes());
+        auto reader = SparkRowReader(spark_row_info.getDataTypes());
         reader.pointTo(spark_row_info.getBufferAddress(), spark_row_info.getTotalBytes());
         for (size_t i = 0; i < type_and_fields.size(); ++i)
         {

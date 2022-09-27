@@ -153,7 +153,7 @@ TEST(TestSelect, TestAgg)
         local_engine::SparkRowToCHColumn converter;
         auto block = converter.convertSparkRowInfoToCHColumn(*spark_row_info, local_executor.getHeader());
         ASSERT_EQ(spark_row_info->getNumRows(), block->rows());
-        auto reader = SparkRowReader(spark_row_info->getNumCols(), block->getDataTypes());
+        auto reader = SparkRowReader(block->getDataTypes());
         reader.pointTo(spark_row_info->getBufferAddress() + spark_row_info->getOffsets()[1], spark_row_info->getLengths()[0]);
         ASSERT_EQ(reader.getDouble(0), 103.2);
     }

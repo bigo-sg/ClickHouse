@@ -85,7 +85,7 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
 }
 
 
-static void BM_SparkRowTOCHColumn_Lineitem(benchmark::State& state)
+static void BM_SparkRowToCHColumn_Lineitem(benchmark::State& state)
 {
     const NameTypes name_types = {
         {"l_orderkey", "Nullable(Int64)"},
@@ -122,4 +122,4 @@ static void BM_SparkRowTOCHColumn_Lineitem(benchmark::State& state)
 }
 
 BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
-BENCHMARK(BM_SparkRowTOCHColumn_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_SparkRowToCHColumn_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
