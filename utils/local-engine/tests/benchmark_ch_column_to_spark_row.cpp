@@ -74,7 +74,7 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
                         "part-00000-d08071cb-0dfa-42dc-9198-83cb334ccda3-c000.snappy.parquet";
     Block block;
     readParquetFile(header, file, block);
-    std::cerr << "read_rows:" << block.rows() << std::endl;
+    // std::cerr << "read_rows:" << block.rows() << std::endl;
     CHColumnToSparkRow converter; 
     for (auto _ : state)
     {
