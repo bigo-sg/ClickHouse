@@ -20,13 +20,10 @@ namespace ErrorCodes
     extern const int CANNOT_PARSE_PROTOBUF_SCHEMA;
 }
 }
-
 namespace local_engine
 {
 using namespace DB;
 using namespace std;
-
-
 struct SparkRowToCHColumnHelper
 {
     DataTypes data_types;

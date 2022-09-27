@@ -28,7 +28,6 @@ using NameTypes = std::vector<NameType>;
 static Block getLineitemHeader(const NameTypes & name_types)
 {
     auto & factory = DataTypeFactory::instance();
-    
     ColumnsWithTypeAndName columns(name_types.size());
     for (size_t i=0; i<columns.size(); ++i)
     {
@@ -76,7 +75,7 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
     Block block;
     readParquetFile(header, file, block);
     // std::cerr << "read_rows:" << block.rows() << std::endl;
-    CHColumnToSparkRow converter; 
+    CHColumnToSparkRow converter;
     for (auto _ : state)
     {
         auto spark_row_info = converter.convertCHColumnToSparkRow(block);

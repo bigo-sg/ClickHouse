@@ -12,6 +12,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int UNKNOWN_TYPE;
+    extern const int LOGICAL_ERROR;
 }
 }
 
@@ -84,18 +85,18 @@ VariableLengthDataReader::VariableLengthDataReader(const DataTypePtr & type_)
 
 Field VariableLengthDataReader::read(const char *buffer, size_t length) const
 {
-    if (which.isStringOrFixedString() )
+    if (which.isStringOrFixedString())
         return std::move(readString(buffer, length));
-    
+
     if (which.isDecimal128())
         return std::move(readDecimal(buffer, length));
-    
+
     if (which.isArray())
         return std::move(readArray(buffer, length));
-    
+
     if (which.isMap())
         return std::move(readMap(buffer, length));
-    
+
     if (which.isTuple())
         return std::move(readStruct(buffer, length));
 
@@ -181,7 +182,7 @@ Field VariableLengthDataReader::readArray(const char * buffer, [[maybe_unused]] 
     }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", nested_type->getName());
-    
+
     return std::move(array);
 }
 
@@ -218,12 +219,11 @@ Field VariableLengthDataReader::readMap(const char * buffer, size_t length) cons
         Tuple tuple(2);
         tuple[0] = std::move(key_array[i]);
         tuple[1] = std::move(val_array[i]);
-        
+
         map[i] = std::move(tuple);
     }
     return std::move(map);
 }
-
 
 Field VariableLengthDataReader::readStruct(const char * buffer, size_t  /*length*/) const
 {
@@ -233,9 +233,9 @@ Field VariableLengthDataReader::readStruct(const char * buffer, size_t  /*length
     const auto num_fields = field_types.size();
     if (num_fields == 0)
         return std::move(Tuple());
-    
+
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_fields);
-    
+
     Tuple tuple(num_fields);
     for (size_t i=0; i<num_fields; ++i)
     {
@@ -272,7 +272,7 @@ FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_)
 {
     if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable) || !type_without_nullable->isValueRepresentedByNumber())
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
-    
+
     value_size = type_without_nullable->getSizeOfValueInMemory();
 }
 
@@ -280,7 +280,6 @@ StringRef FixedLengthDataReader::unsafeRead(const char * buffer) const
 {
     return {buffer, value_size};
 }
-
 
 Field FixedLengthDataReader::read(const char * buffer) const
 {

@@ -751,7 +751,7 @@ int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const char
 
 
 FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_)
-    // : type(type_), 
+    // : type(type_),
     : type_without_nullable(removeNullable(type_)), which(type_without_nullable)
 {
     assert(type);
@@ -834,29 +834,11 @@ void FixedLengthDataWriter::write(const DB::Field & field, char * buffer)
 
 void FixedLengthDataWriter::unsafeWrite(const StringRef & str, char * buffer)
 {
-    /*
-    /// Skip empty string ref
-    if (str == EMPTY_STRING_REF)
-        return;
-
-    if (!type_without_nullable->isValueRepresentedByNumber() || str.size != type_without_nullable->getSizeOfValueInMemory())
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
-    */
-
     memcpy(buffer, str.data, str.size);
 }
 
 void FixedLengthDataWriter::unsafeWrite(const char * __restrict src, char * __restrict buffer)
 {
-    /*
-    /// Skip nullptr 
-    if (src == nullptr)
-        return;
-    
-    if (!type_without_nullable->isValueRepresentedByNumber())
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataWriter doesn't support type {}", type_without_nullable->getName());
-    */
-
     memcpy(buffer, src, type_without_nullable->getSizeOfValueInMemory());
 }
 

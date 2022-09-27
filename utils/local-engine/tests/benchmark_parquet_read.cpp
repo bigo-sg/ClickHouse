@@ -101,7 +101,6 @@ static void BM_OptimizedParquetReadString(benchmark::State& state)
 }
 
 
-
 static void BM_OptimizedParquetReadDate32(benchmark::State& state)
 {
     using namespace DB;

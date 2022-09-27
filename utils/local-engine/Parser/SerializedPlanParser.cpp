@@ -180,7 +180,7 @@ std::string getCastFunction(const substrait::Type & type)
     {
         ch_function_name = "toDate32";
     }
-    // TODO need complete param: scale 
+    // TODO need complete param: scale
     else if (type.has_timestamp())
     {
         ch_function_name = "toDateTime64";
