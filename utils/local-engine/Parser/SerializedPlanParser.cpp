@@ -459,6 +459,8 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
 }
 QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 {
+    auto * logger = &Poco::Logger::get("SerializedPlanParser");
+    if (logger->debug())
     {
         namespace pb_util = google::protobuf::util;
         pb_util::JsonOptions options;
@@ -466,7 +468,6 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         pb_util::MessageToJsonString(*plan, &json, options);
         LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "substrait plan:{}", json);
     }
-
     if (plan->extensions_size() > 0)
     {
         for (const auto & extension : plan->extensions())
@@ -499,8 +500,7 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         expression_step->setStepDescription("Rename Output");
         query_plan->addStep(std::move(expression_step));
 
-        auto * logger = &Poco::Logger::get("SerializedPlanParser");
-        if (logger->is(Poco::Message::Priority::PRIO_TRACE))
+        if (logger->trace())
         {
             WriteBufferFromOwnString plan_string;
             QueryPlan::ExplainPlanOptions options;
