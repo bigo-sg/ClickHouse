@@ -142,7 +142,7 @@ private:
     const DB::DataTypePtr type;
     const DB::DataTypePtr type_without_nullable;
     const DB::WhichDataType which;
-    
+    size_t value_size;
 };
 class SparkRowReader
 {

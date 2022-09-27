@@ -115,10 +115,7 @@ static void BM_SparkRowToCHColumn_Lineitem(benchmark::State& state)
     CHColumnToSparkRow spark_row_converter;
     auto spark_row_info = spark_row_converter.convertCHColumnToSparkRow(in_block);
     for (auto _ : state)
-    {
-        auto out_block = SparkRowToCHColumn::convertSparkRowInfoToCHColumn(*spark_row_info, header);
-        std::cerr << out_block->rows() << std::endl;
-    }
+        [[maybe_unused]] auto out_block = SparkRowToCHColumn::convertSparkRowInfoToCHColumn(*spark_row_info, header);
 }
 
 BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);

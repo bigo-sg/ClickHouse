@@ -53,15 +53,14 @@ void bitSet(char * bitmap, int32_t index)
     memcpy(bitmap + word_offset, &value, sizeof(int64_t));
 }
 
-bool isBitSet(const char * bitmap, int32_t index)
+ALWAYS_INLINE bool isBitSet(const char * bitmap, int32_t index)
 {
     assert(index >= 0);
     int64_t mask = 1 << (index & 63);
     int64_t word_offset = static_cast<int64_t>(index >> 6) * 8L;
     int64_t word = *reinterpret_cast<const int64_t *>(bitmap + word_offset);
-    return (word & mask) != 0;
+    return word & mask;
 }
-
 
 static void setNullAt(char * buffer_address, int64_t row_offset, int64_t /*field_offset*/, int32_t col_index)
 {

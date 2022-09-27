@@ -23,7 +23,7 @@ jclass SparkRowToCHColumn::spark_row_interator_class = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_hasNext = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_next = nullptr;
 
-static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const SparkRowReader & spark_row_reader)
+ALWAYS_INLINE static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const SparkRowReader & spark_row_reader)
 {
     auto num_fields = columns.size();
     const auto & field_types = spark_row_reader.getFieldTypes();
@@ -270,16 +270,15 @@ Field VariableLengthDataReader::readStruct(const char * buffer, size_t  /*length
 FixedLengthDataReader::FixedLengthDataReader(const DataTypePtr & type_)
     : type(type_), type_without_nullable(removeNullable(type)), which(type_without_nullable)
 {
-    if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
+    if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable) || !type_without_nullable->isValueRepresentedByNumber())
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "VariableLengthDataReader doesn't support type {}", type->getName());
+    
+    value_size = type_without_nullable->getSizeOfValueInMemory();
 }
 
 StringRef FixedLengthDataReader::unsafeRead(const char * buffer) const
 {
-    if (!type_without_nullable->isValueRepresentedByNumber())
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataReader doesn't support type {}", type->getName());
-    
-    return {buffer, type_without_nullable->getSizeOfValueInMemory()};
+    return {buffer, value_size};
 }
 
 
