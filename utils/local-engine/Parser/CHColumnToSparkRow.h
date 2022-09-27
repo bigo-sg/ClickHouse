@@ -121,7 +121,7 @@ public:
     virtual int64_t write(size_t row_idx, const DB::Field & field, int64_t parent_offset);
 
     /// Only support String/FixedString/Decimal32/Decimal64
-    int64_t writeUnalignedBytes(size_t row_idx, const char * src, size_t size, int64_t parent_offset);
+    ALWAYS_INLINE int64_t writeUnalignedBytes(size_t row_idx, const char * src, size_t size, int64_t parent_offset);
 private:
     int64_t writeArray(size_t row_idx, const DB::Array & array, int64_t parent_offset);
     int64_t writeMap(size_t row_idx, const DB::Map & map, int64_t parent_offset);
@@ -147,15 +147,15 @@ public:
 
     /// Write value of fixed-length to values region of structure(struct or array)
     /// It's caller's duty to make sure that struct fields or array elements are written in order
-    virtual void write(const DB::Field & field, char * buffer);
+    ALWAYS_INLINE virtual void write(const DB::Field & field, char * buffer);
 
     /// Copy memory chunk of Fixed length typed CH Column directory to buffer for performance.
     /// It is unsafe unless you know what you are doing.
-    virtual void unsafeWrite(const StringRef & str, char * buffer);
+    ALWAYS_INLINE virtual void unsafeWrite(const StringRef & str, char * buffer);
 
     /// Copy memory chunk of in fixed length typed Field directory to buffer for performance.
     /// It is unsafe unless you know what you are doing.
-    virtual void unsafeWrite(const char * __restrict src, char * __restrict buffer);
+    ALWAYS_INLINE virtual void unsafeWrite(const char * __restrict src, char * __restrict buffer);
 
 private:
     // const DB::DataTypePtr type;

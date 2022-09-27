@@ -182,35 +182,6 @@ static void writeVariableLengthNullableValue(
 }
 
 
-static void writeValue(
-    char * buffer_address,
-    int64_t field_offset,
-    const ColumnWithTypeAndName & col,
-    int32_t col_index,
-    int64_t num_rows,
-    const std::vector<int64_t> & offsets,
-    std::vector<int64_t> & buffer_cursor)
-{
-    const auto type_without_nullable{std::move(removeNullable(col.type))};
-    const auto is_nullable = isColumnNullable(*col.column);
-    if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
-    {
-        if (is_nullable)
-            writeFixedLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets);
-        else
-            writeFixedLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets);
-    }
-    else if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
-    {
-        if (is_nullable)
-            writeVariableLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets, buffer_cursor);
-        else
-            writeVariableLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets, buffer_cursor);
-    }
-    else
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
-}
-
 SparkRowInfo::SparkRowInfo(const Block & block)
     : types(std::move(block.getDataTypes()))
     , num_rows(block.rows())
@@ -347,16 +318,143 @@ int64_t SparkRowInfo::getTotalBytes() const
     return total_bytes;
 }
 
+
+static void writeValue(
+    char * buffer_address,
+    int64_t field_offset,
+    const ColumnWithTypeAndName & col,
+    int32_t col_index,
+    int64_t num_rows,
+    const std::vector<int64_t> & offsets,
+    std::vector<int64_t> & buffer_cursor)
+{
+    const auto type_without_nullable{std::move(removeNullable(col.type))};
+    const auto is_nullable = isColumnNullable(*col.column);
+    if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
+    {
+        if (is_nullable)
+            writeFixedLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets);
+        else
+            writeFixedLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets);
+    }
+    else if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
+    {
+        if (is_nullable)
+            writeVariableLengthNullableValue(buffer_address, field_offset, col, col_index, num_rows, offsets, buffer_cursor);
+        else
+            writeVariableLengthNonNullableValue(buffer_address, field_offset, col, num_rows, offsets, buffer_cursor);
+    }
+    else
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
+}
+
+
+ALWAYS_INLINE static void writeRow(
+    size_t row_idx,
+    char * buffer_address,
+    const ColumnsWithTypeAndName & cols,
+    const std::vector<int64_t> & offsets,
+    const std::vector<int64_t> & field_offsets,
+    const std::vector<bool> & is_fixed_lengths,
+    std::vector<std::shared_ptr<FixedLengthDataWriter>> & fixed_length_writers,
+    std::vector<std::shared_ptr<VariableLengthDataWriter>> & variable_length_writers)
+{
+    // std::cerr << "row_idx:" << row_idx << ",offset:" << offsets[row_idx] << std::endl;
+    for (size_t col_idx = 0; col_idx < cols.size(); ++col_idx)
+    {
+        const auto & col = cols[col_idx];
+        const auto & field_offset = field_offsets[col_idx];
+        if (is_fixed_lengths[col_idx])
+        {
+            fixed_length_writers[col_idx]->unsafeWrite(col.column->getDataAt(row_idx), buffer_address + offsets[row_idx] + field_offset);
+        }
+        else
+        {
+            StringRef str = col.column->getDataAt(row_idx);
+            int64_t offset_and_size = variable_length_writers[col_idx]->writeUnalignedBytes(row_idx, str.data, str.size, 0);
+            memcpy(buffer_address + offsets[row_idx] + field_offset, &offset_and_size, 8);
+        }
+    }
+
+    /*
+    for (size_t col_idx = 0; col_idx < cols.size(); ++col_idx)
+    {
+        const auto & col = cols[col_idx];
+        const auto type_without_nullable{std::move(removeNullable(col.type))};
+        const int64_t field_offset = spark_row_info->getFieldOffset(col_idx);
+        if (BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
+        {
+            FixedLengthDataWriter writer(col.type);
+            if (col.column->isNullAt(row_idx))
+                bitSet(buffer_address + offsets[row_idx], col_idx);
+            else
+                writer.unsafeWrite(col.column->getDataAt(row_idx), buffer_address + offsets[row_idx] + field_offset);
+        }
+        else if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
+        {
+            VariableLengthDataWriter writer(col.type, buffer_address, offsets, buffer_cursor);
+            const bool use_raw_data = BackingDataLengthCalculator::isDataTypeSupportRawData(type_without_nullable);
+            if (col.column->isNullAt(row_idx))
+                bitSet(buffer_address + offsets[row_idx], col_idx);
+            else if (use_raw_data)
+            {
+                StringRef str = col.column->getDataAt(row_idx);
+                int64_t offset_and_size = writer.writeUnalignedBytes(row_idx, str.data, str.size, 0);
+                memcpy(buffer_address + offsets[row_idx] + field_offset, &offset_and_size, 8);
+            }
+            else
+            {
+                const auto field{std::move((*col.column)[row_idx])};
+                int64_t offset_and_size = writer.write(row_idx, field, 0);
+                memcpy(buffer_address + offsets[row_idx] + field_offset, &offset_and_size, 8);
+            }
+        }
+        else
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
+    }
+    */
+}
+
 std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(const Block & block)
 {
     if (!block.rows() || !block.columns())
         return {};
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    // spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
     spark_row_info->setBufferAddress(alignedAlloc(spark_row_info->getTotalBytes(), 64));
-    // memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
-    std::cerr << "total bytes:" << spark_row_info->getTotalBytes() << std::endl;
+    memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
+
+    // std::cerr << "total bytes:" << spark_row_info->getTotalBytes() << std::endl;
+    // std::cerr << "offsets_size:" << spark_row_info->getOffsets().size() << std::endl;
+    const int64_t num_rows = spark_row_info->getNumRows();
+    const int64_t num_cols = spark_row_info->getNumCols();
+    char * buffer_address = spark_row_info->getBufferAddress();
+    const auto & cols = block.getColumnsWithTypeAndName();
+    const auto & offsets = spark_row_info->getOffsets();
+    auto & buffer_cursor = spark_row_info->getBufferCursor();
+    std::vector<int64_t> field_offsets(num_cols);
+    std::vector<bool> is_fixed_lengths(num_cols);
+    std::vector<std::shared_ptr<FixedLengthDataWriter>> fixed_length_writers(num_cols);
+    std::vector<std::shared_ptr<VariableLengthDataWriter>> variable_length_writers(num_cols);
+    for (size_t col_idx = 0; col_idx < static_cast<size_t>(spark_row_info->getNumCols()); ++col_idx)
+    {
+        field_offsets[col_idx] = spark_row_info->getFieldOffset(col_idx);
+        is_fixed_lengths[col_idx] = BackingDataLengthCalculator::isFixedLengthDataType(removeNullable(cols[col_idx].type));
+        if (is_fixed_lengths[col_idx])
+            fixed_length_writers[col_idx] = std::make_shared<FixedLengthDataWriter>(cols[col_idx].type);
+        else
+            variable_length_writers[col_idx]
+                = std::make_shared<VariableLengthDataWriter>(cols[col_idx].type, buffer_address, offsets, buffer_cursor);
+    }
+
+    int64_t row_idx = 0;
+    while (row_idx++ < num_rows)
+    {
+        std::cout << "row_idx:" << row_idx << ", num_rows:" << num_rows << std::endl;
+        writeRow(row_idx, buffer_address, cols, offsets, field_offsets, is_fixed_lengths, fixed_length_writers, variable_length_writers);
+    }
+
+    /*
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
         const auto & col = block.getByPosition(col_idx);
@@ -371,6 +469,7 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
             spark_row_info->getBufferCursor());
     }
     return spark_row_info;
+    */
 }
 
 void CHColumnToSparkRow::freeMem(char * /*address*/, size_t size)

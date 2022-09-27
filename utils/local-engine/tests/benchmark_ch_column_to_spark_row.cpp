@@ -50,6 +50,7 @@ static void readParquetFile(const Block & header, const String & file, Block & b
 
 static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
 {
+    /*
     const NameTypes name_types = {
         {"l_orderkey", "Nullable(Int64)"},
         {"l_partkey", "Nullable(Int64)"},
@@ -68,6 +69,26 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
         {"l_shipmode", "Nullable(String)"},
         {"l_comment", "Nullable(String)"},
     };
+    */
+    const NameTypes name_types = {
+        {"l_orderkey", "Int64"},
+        {"l_partkey", "Int64"},
+        {"l_suppkey", "Int64"},
+        {"l_linenumber", "Int64"},
+        {"l_quantity", "Float64"},
+        {"l_extendedprice", "Float64"},
+        {"l_discount", "Float64"},
+        {"l_tax", "Float64"},
+        {"l_returnflag", "String"},
+        {"l_linestatus", "String"},
+        {"l_shipdate", "Date32"},
+        {"l_commitdate", "Date32"},
+        {"l_receiptdate", "Date32"},
+        {"l_shipinstruct", "String"},
+        {"l_shipmode", "String"},
+        {"l_comment", "String"},
+    };
+
 
     const Block header = std::move(getLineitemHeader(name_types));
     const String file = "/data1/liyang/cppproject/gluten/jvm/src/test/resources/tpch-data/lineitem/"
@@ -83,4 +104,4 @@ static void BM_CHColumnToSparkRow_Lineitem(benchmark::State& state)
     }
 }
 
-BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(10);
+BENCHMARK(BM_CHColumnToSparkRow_Lineitem)->Unit(benchmark::kMillisecond)->Iterations(1);
