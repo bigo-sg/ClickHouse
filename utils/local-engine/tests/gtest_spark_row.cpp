@@ -26,14 +26,17 @@ struct DataTypeAndField
 };
 using DataTypeAndFields = std::vector<DataTypeAndField>;
 
+using SparkRowAndBlock = std::pair<SparkRowInfoPtr, BlockPtr>;
 
-static std::unique_ptr<SparkRowInfo> mockSparkRowInfo(const DataTypeAndFields & type_and_fields)
+static SparkRowAndBlock mockSparkRowInfoAndBlock(const DataTypeAndFields & type_and_fields)
 {
-    EXPECT_TRUE(true);
     /// Initialize types
     ColumnsWithTypeAndName columns(type_and_fields.size());
     for (size_t i=0; i<type_and_fields.size(); ++i)
+    {
         columns[i].type = type_and_fields[i].type;
+        columns[i].name = String(1, 'a' + i);
+    }
     Block block(columns);
 
     /// Initialize columns
@@ -44,7 +47,7 @@ static std::unique_ptr<SparkRowInfo> mockSparkRowInfo(const DataTypeAndFields & 
 
     auto converter = CHColumnToSparkRow();
     auto spark_row_info = converter.convertCHColumnToSparkRow(block);
-    return std::move(spark_row_info);
+    return std::make_tuple(std::move(spark_row_info), std::make_shared<Block>(std::move(block)));
 }
 
 static Int32 getDayNum(const String & date)
@@ -63,24 +66,45 @@ static DateTime64 getDateTime64(const String & datetime64, UInt32 scale)
     return res;
 }
 
-static void assertReadConsistentWithWritten(std::unique_ptr<SparkRowInfo> & spark_row_info, const DataTypeAndFields type_and_fields)
+static void assertReadConsistentWithWritten(const SparkRowInfo & spark_row_info, const Block & in, const DataTypeAndFields type_and_fields)
 {
-    auto reader = SparkRowReader(spark_row_info->getNumCols(), spark_row_info->getDataTypes());
-    reader.pointTo(spark_row_info->getBufferAddress(), spark_row_info->getTotalBytes());
-    for (size_t i=0; i<type_and_fields.size(); ++i)
+    /// Check if output of SparkRowReader is consistent with types_and_fields
     {
-        /*
-        const auto read_field{std::move(reader.getField(i))};
-        const auto & written_field = type_and_fields[i].field;
-        std::cout << "read_field:" << read_field.getType() << "," << toString(read_field) << std::endl;
-        std::cout << "written_field:" << written_field.getType() << "," << toString(written_field) << std::endl;
-        */
-        EXPECT_TRUE(reader.getField(i) == type_and_fields[i].field);
+        auto reader = SparkRowReader(spark_row_info.getNumCols(), spark_row_info.getDataTypes());
+        reader.pointTo(spark_row_info.getBufferAddress(), spark_row_info.getTotalBytes());
+        for (size_t i = 0; i < type_and_fields.size(); ++i)
+        {
+            /*
+            const auto read_field{std::move(reader.getField(i))};
+            const auto & written_field = type_and_fields[i].field;
+            std::cout << "read_field:" << read_field.getType() << "," << toString(read_field) << std::endl;
+            std::cout << "written_field:" << written_field.getType() << "," << toString(written_field) << std::endl;
+            */
+            EXPECT_TRUE(reader.getField(i) == type_and_fields[i].field);
+        }
+    }
+
+    /// check if output of SparkRowToCHColumn is consistents with initial block.
+    {
+        auto block = SparkRowToCHColumn::convertSparkRowInfoToCHColumn(spark_row_info, in.cloneEmpty());
+        const auto & out = *block;
+        EXPECT_TRUE(in.rows() == out.rows());
+        EXPECT_TRUE(in.columns() == out.columns());
+        for (size_t col_idx = 0; col_idx < in.columns(); ++col_idx)
+        {
+            const auto & in_col = in.getByPosition(col_idx);
+            const auto & out_col = out.getByPosition(col_idx);
+            for (size_t row_idx = 0; row_idx < in.rows(); ++row_idx)
+            {
+                const auto in_field = (*in_col.column)[row_idx];
+                const auto out_field = (*out_col.column)[row_idx];
+                EXPECT_TRUE(in_field == out_field);
+            }
+        }
     }
 }
 
-
-TEST(CHColumnToSparkRow, BitSetWidthCalculation)
+TEST(SparkRow, BitSetWidthCalculation)
 {
     EXPECT_TRUE(calculateBitSetWidthInBytes(0) == 0);
     EXPECT_TRUE(calculateBitSetWidthInBytes(1) == 8);
@@ -90,7 +114,7 @@ TEST(CHColumnToSparkRow, BitSetWidthCalculation)
     EXPECT_TRUE(calculateBitSetWidthInBytes(128) == 16);
 }
 
-TEST(CHColumnToSparkRow, GetArrayElementSize)
+TEST(SparkRow, GetArrayElementSize)
 {
     const std::map<DataTypePtr, int64_t> type_to_size = {
         {std::make_shared<DataTypeInt8>(), 1},
@@ -127,7 +151,7 @@ TEST(CHColumnToSparkRow, GetArrayElementSize)
     }
 }
 
-TEST(CHColumnToSparkRow, PrimitiveTypes)
+TEST(SparkRow, PrimitiveTypes)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeInt64>(), -1},
@@ -136,12 +160,14 @@ TEST(CHColumnToSparkRow, PrimitiveTypes)
         {std::make_shared<DataTypeUInt32>(), UInt32(2)},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + 4 * 8);
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, PrimitiveStringTypes)
+TEST(SparkRow, PrimitiveStringTypes)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeInt64>(), -1},
@@ -149,12 +175,14 @@ TEST(CHColumnToSparkRow, PrimitiveStringTypes)
         {std::make_shared<DataTypeString>(), "Hello World"},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * 3) + roundNumberOfBytesToNearestWord(strlen("Hello World")));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, PrimitiveStringDateTimestampTypes)
+TEST(SparkRow, PrimitiveStringDateTimestampTypes)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeInt64>(), -1},
@@ -164,12 +192,14 @@ TEST(CHColumnToSparkRow, PrimitiveStringDateTimestampTypes)
         {std::make_shared<DataTypeDateTime64>(0), getDateTime64("2015-05-08 08:10:25", 0)},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * 5) + roundNumberOfBytesToNearestWord(strlen("Hello World")));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, NullHandling)
+TEST(SparkRow, NullHandling)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeNullable>(std::make_shared<DataTypeUInt8>()), Null{}},
@@ -185,12 +215,14 @@ TEST(CHColumnToSparkRow, NullHandling)
         {std::make_shared<DataTypeNullable>(std::make_shared<DataTypeString>()), Null{}},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * type_and_fields.size()));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, StructTypes)
+TEST(SparkRow, StructTypes)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeTuple>(DataTypes{std::make_shared<DataTypeInt32>()}), Tuple{Int32(1)}},
@@ -211,15 +243,18 @@ TEST(CHColumnToSparkRow, StructTypes)
     }
     */
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
         + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, ArrayTypes)
+TEST(SparkRow, ArrayTypes)
 {
     DataTypeAndFields type_and_fields = {
         {std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt32>()), Array{Int32(1), Int32(2)}},
@@ -232,16 +267,18 @@ TEST(CHColumnToSparkRow, ArrayTypes)
          }()},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8
             + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
-TEST(CHColumnToSparkRow, MapTypes)
+TEST(SparkRow, MapTypes)
 {
     const auto map_type = std::make_shared<DataTypeMap>(std::make_shared<DataTypeInt32>(), std::make_shared<DataTypeInt32>());
     DataTypeAndFields type_and_fields = {
@@ -266,16 +303,19 @@ TEST(CHColumnToSparkRow, MapTypes)
          }()},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
 
-TEST(CHColumnToSparkRow, StructMapTypes)
+TEST(SparkRow, StructMapTypes)
 {
     const auto map_type = std::make_shared<DataTypeMap>(std::make_shared<DataTypeInt32>(), std::make_shared<DataTypeInt32>());
     const auto tuple_type = std::make_shared<DataTypeTuple>(DataTypes{std::make_shared<DataTypeInt64>()});
@@ -298,16 +338,19 @@ TEST(CHColumnToSparkRow, StructMapTypes)
          }()},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }
 
 
-TEST(CHColumnToSparkRow, StructArrayTypes)
+TEST(SparkRow, StructArrayTypes)
 {
     const auto array_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt32>());
     const auto tuple_type = std::make_shared<DataTypeTuple>(DataTypes{std::make_shared<DataTypeInt64>()});
@@ -330,17 +373,18 @@ TEST(CHColumnToSparkRow, StructArrayTypes)
          }()},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
+
 }
 
-
-
-TEST(CHColumnToSparkRow, ArrayMapTypes)
+TEST(SparkRow, ArrayMapTypes)
 {
     const auto map_type = std::make_shared<DataTypeMap>(std::make_shared<DataTypeInt32>(), std::make_shared<DataTypeInt32>());
     const auto array_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt32>());
@@ -370,10 +414,13 @@ TEST(CHColumnToSparkRow, ArrayMapTypes)
          }()},
     };
 
-    auto spark_row_info = mockSparkRowInfo(type_and_fields);
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+
     EXPECT_TRUE(
         spark_row_info->getTotalBytes()
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
-    assertReadConsistentWithWritten(spark_row_info, type_and_fields);
 }

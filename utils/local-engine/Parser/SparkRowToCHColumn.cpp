@@ -32,7 +32,7 @@ static void writeRowToColumns(std::vector<MutableColumnPtr> & columns, const Spa
         if (BackingDataLengthCalculator::isDataTypeSupportRawData(removeNullable(field_types[i])))
         {
             const StringRef str{std::move(spark_row_reader.getStringRef(i))};
-            columns[i]->insertData(str.data, str.size);
+            columns[i]->insertData(str != EMPTY_STRING_REF ? str.data : nullptr, str.size);
         }
         else
             columns[i]->insert(spark_row_reader.getField(i));
