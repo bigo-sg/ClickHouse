@@ -135,6 +135,8 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
         = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "hasNext", "()Z");
     local_engine::SparkRowToCHColumn::spark_row_interator_next
         = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "next", "()[B");
+    local_engine::SparkRowToCHColumn::spark_row_iterator_nextBuf
+        = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "nextBuf", "()Ljava/nio/ByteBuffer;");
 
     local_engine::JNIUtils::vm = vm;
     return JNI_VERSION_1_8;
