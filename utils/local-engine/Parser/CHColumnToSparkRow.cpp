@@ -62,13 +62,6 @@ ALWAYS_INLINE bool isBitSet(const char * bitmap, int32_t index)
     return word & mask;
 }
 
-static void setNullAt(char * buffer_address, int64_t row_offset, int64_t /*field_offset*/, int32_t col_index)
-{
-    bitSet(buffer_address + row_offset, col_index);
-    // set the value to 0
-    // memset(buffer_address + row_offset + field_offset, 0, sizeof(int64_t));
-}
-
 static void writeFixedLengthNonNullableValue(
     char * buffer_address,
     int64_t field_offset,
@@ -378,11 +371,8 @@ void CHColumnToSparkRow::freeMem(char * /*address*/, size_t size)
 }
 
 BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_)
-    // : type(type_)
     : type_without_nullable(removeNullable(type_)), which(type_without_nullable)
 {
-    assert(type);
-
     if (!isFixedLengthDataType(type_without_nullable) && !isVariableLengthDataType(type_without_nullable))
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for BackingDataLengthCalculator", type_without_nullable->getName());
 }
@@ -516,14 +506,12 @@ bool BackingDataLengthCalculator::isDataTypeSupportRawData(const DB::DataTypePtr
 
 VariableLengthDataWriter::VariableLengthDataWriter(
     const DataTypePtr & type_, char * buffer_address_, const std::vector<int64_t> & offsets_, std::vector<int64_t> & buffer_cursor_)
-    // : type(type_)
     : type_without_nullable(removeNullable(type_))
     , which(type_without_nullable)
     , buffer_address(buffer_address_)
     , offsets(offsets_)
     , buffer_cursor(buffer_cursor_)
 {
-    assert(type);
     assert(buffer_address);
     assert(!offsets.empty());
     assert(!buffer_cursor.empty());
@@ -751,11 +739,8 @@ int64_t VariableLengthDataWriter::writeUnalignedBytes(size_t row_idx, const char
 
 
 FixedLengthDataWriter::FixedLengthDataWriter(const DB::DataTypePtr & type_)
-    // : type(type_),
     : type_without_nullable(removeNullable(type_)), which(type_without_nullable)
 {
-    assert(type);
-
     if (!BackingDataLengthCalculator::isFixedLengthDataType(type_without_nullable))
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthWriter doesn't support type {}", type_without_nullable->getName());
 }

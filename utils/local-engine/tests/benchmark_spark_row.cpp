@@ -9,7 +9,7 @@
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
 #include <QueryPipeline/QueryPipeline.h>
 #include <Parser/CHColumnToSparkRow.h>
-#include <Parser/SparkRowToCHColumn.cpp>
+#include <Parser/SparkRowToCHColumn.h>
 
 #include <string>
 #include <vector>
