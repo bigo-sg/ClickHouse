@@ -769,13 +769,13 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
         auto * name = static_cast<jstring>(env->GetObjectArrayElement(names, i));
         c_names.emplace_back(std::move(jstring2string(env, name)));
 
-
         auto * type = static_cast<jbyteArray>(env->GetObjectArrayElement(types, i));
         auto type_length = env->GetArrayLength(type);
         jbyte * type_ptr = env->GetByteArrayElements(type, nullptr);
         string str_type(reinterpret_cast<const char *>(type_ptr), type_length);
         c_types.emplace_back(std::move(str_type));
 
+        env->ReleaseByteArrayElements(type, type_ptr, JNI_ABORT);
         env->DeleteLocalRef(name);
         env->DeleteLocalRef(type);
     }
