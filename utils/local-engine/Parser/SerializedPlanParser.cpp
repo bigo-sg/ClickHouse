@@ -444,7 +444,6 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     }
     else if (substrait_type.has_map())
     {
-        assert(substrait_type.map().key().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
         assert(substrait_type.map().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
 
         auto ch_key_type = parseType(substrait_type.map().key());
