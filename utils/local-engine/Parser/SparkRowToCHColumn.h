@@ -45,7 +45,6 @@ struct SparkRowToCHColumnHelper
 
     ~SparkRowToCHColumnHelper() = default;
 
-
     void resetMutableColumns()
     {
         mutable_columns = std::move(header.mutateColumns());
@@ -220,7 +219,6 @@ public:
         return *reinterpret_cast<const uint8_t *>(getFieldOffset(ordinal));
     }
 
-
     int16_t getShort(int ordinal) const
     {
         assertIndexIsValid(ordinal);
@@ -348,7 +346,5 @@ private:
     const char * buffer;
     int32_t length;
 };
-
-
 
 }
