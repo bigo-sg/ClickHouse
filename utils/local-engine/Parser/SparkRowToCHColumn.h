@@ -156,6 +156,8 @@ public:
                 rows_buf_ptr += len;
                 len = *(reinterpret_cast<int*>(rows_buf_ptr));
             }
+            // Try to release reference.
+            env->DeleteLocalRef(rows_buf);
         }
         return getWrittenBlock(helper);
     }
