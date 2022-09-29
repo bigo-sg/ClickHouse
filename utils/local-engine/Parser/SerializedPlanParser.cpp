@@ -31,7 +31,6 @@
 #include <Processors/QueryPlan/ReadFromPreparedSource.h>
 #include <Processors/Transforms/AggregatingTransform.h>
 #include <QueryPipeline/Pipe.h>
-#include <Storages/BatchParquetFileSource.h>
 #include <Storages/CustomStorageMergeTree.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageMergeTreeFactory.h>
