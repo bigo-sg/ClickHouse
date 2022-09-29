@@ -49,7 +49,8 @@ public:
     readMergeTree(std::string database, std::string table, std::string relative_path, int min_block, int max_block, SchemaPtr schema);
     std::unique_ptr<substrait::Plan> build();
 
-    static std::unique_ptr<substrait::Type> buildType(const DB::DataTypePtr & ch_type);
+    static std::shared_ptr<substrait::Type> buildType(const DB::DataTypePtr & ch_type);
+    static void buildType(const DB::DataTypePtr & ch_type, String & substrait_type);
 
 private:
     void setInputToPrev(substrait::Rel * input);

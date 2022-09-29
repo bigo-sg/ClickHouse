@@ -3,6 +3,7 @@
 #include <string>
 #include <jni.h>
 #include <Builder/BroadCastJoinBuilder.h>
+#include <Builder/SerializedPlanBuilder.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <Operator/BlockCoalesceOperator.h>
 #include <Parser/CHColumnToSparkRow.h>
@@ -471,80 +472,15 @@ jint Java_io_glutenproject_vectorized_CHNativeBlock_nativeNumColumns(JNIEnv * en
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }
 
-jstring Java_io_glutenproject_vectorized_CHNativeBlock_nativeColumnType(JNIEnv * env, jobject /*obj*/, jlong block_address, jint position)
+jbyteArray Java_io_glutenproject_vectorized_CHNativeBlock_nativeColumnType(JNIEnv * env, jobject /*obj*/, jlong block_address, jint position)
 {
     LOCAL_ENGINE_JNI_METHOD_START
     auto * block = reinterpret_cast<DB::Block *>(block_address);
-    DB::WhichDataType which(block->getByPosition(position).type);
-    std::string type;
-    if (which.isNullable())
-    {
-        const auto * nullable = checkAndGetDataType<DB::DataTypeNullable>(block->getByPosition(position).type.get());
-        which = DB::WhichDataType(nullable->getNestedType());
-    }
-
-    if (which.isDate32())
-    {
-        type = "Date";
-    }
-    else if (which.isDateTime64())
-    {
-        type = "Timestamp";
-    }
-    else if (which.isFloat32())
-    {
-        type = "Float";
-    }
-    else if (which.isFloat64())
-    {
-        type = "Double";
-    }
-    else if (which.isInt32())
-    {
-        type = "Integer";
-    }
-    else if (which.isInt64())
-    {
-        type = "Long";
-    }
-    else if (which.isUInt64())
-    {
-        type = "Long";
-    }
-    else if (which.isInt8())
-    {
-        type = "Byte";
-    }
-    else if (which.isInt16())
-    {
-        type = "Short";
-    }
-    else if (which.isUInt16())
-    {
-        type = "Integer";
-    }
-    else if (which.isUInt8())
-    {
-        type = "Boolean";
-    }
-    else if (which.isString())
-    {
-        type = "String";
-    }
-    else if (which.isAggregateFunction())
-    {
-        type = "Binary";
-    }
-    else
-    {
-        auto type_name = std::string(block->getByPosition(position).type->getName());
-        auto col_name = block->getByPosition(position).name;
-        LOG_ERROR(&Poco::Logger::get("jni"), "column {}, unsupported datatype {}", col_name, type_name);
-        throw std::runtime_error("unsupported datatype " + type_name);
-    }
-
-    return local_engine::charTojstring(env, type.c_str());
-    LOCAL_ENGINE_JNI_METHOD_END(env, local_engine::charTojstring(env, ""))
+    const auto & col = block->getByPosition(position);
+    std::string substrait_type;
+    dbms::SerializedPlanBuilder::buildType(col.type, substrait_type);
+    return local_engine::stringTojbyteArray(env, substrait_type);
+    LOCAL_ENGINE_JNI_METHOD_END(env, local_engine::stringTojbyteArray(env, ""))
 }
 
 jlong Java_io_glutenproject_vectorized_CHNativeBlock_nativeTotalBytes(JNIEnv * env, jobject /*obj*/, jlong block_address)

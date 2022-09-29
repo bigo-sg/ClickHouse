@@ -212,7 +212,7 @@ SerializedPlanBuilder & SerializedPlanBuilder::project(std::vector<substrait::Ex
     return *this;
 }
 
-std::shared_ptr<substrait::Type> buildType(const DB::DataTypePtr & ch_type)
+std::shared_ptr<substrait::Type> SerializedPlanBuilder::buildType(const DB::DataTypePtr & ch_type)
 {
     const auto * ch_type_nullable = checkAndGetDataType<DataTypeNullable>(ch_type.get());
     const bool is_nullable = (ch_type_nullable != nullptr);
@@ -291,6 +291,12 @@ std::shared_ptr<substrait::Type> buildType(const DB::DataTypePtr & ch_type)
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
     
     return std::move(res);
+}
+
+void SerializedPlanBuilder::buildType(const DB::DataTypePtr & ch_type, String & substrait_type)
+{
+    auto pb = buildType(ch_type);
+    substrait_type = pb->SerializeAsString();
 }
 
 

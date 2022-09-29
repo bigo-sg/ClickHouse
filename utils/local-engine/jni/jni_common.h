@@ -1,5 +1,6 @@
 #pragma once
 #include <jni.h>
+#include <string>
 
 namespace local_engine
 {
@@ -12,5 +13,7 @@ jmethodID GetMethodID(JNIEnv* env, jclass this_class, const char* name, const ch
 jmethodID GetStaticMethodID(JNIEnv * env, jclass this_class, const char * name, const char * sig);
 
 jstring charTojstring(JNIEnv* env, const char* pat);
+
+jbyteArray stringTojbyteArray(JNIEnv* env, const std::string & str);
 
 }
