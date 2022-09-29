@@ -130,7 +130,7 @@ public:
     static jclass spark_row_interator_class;
     static jmethodID spark_row_interator_hasNext;
     static jmethodID spark_row_interator_next;
-    static jmethodID spark_row_iterator_nextBuf;
+    static jmethodID spark_row_iterator_nextBatch;
 
     // case 1: rows are batched (this is often directly converted from Block)
     static std::unique_ptr<Block> convertSparkRowInfoToCHColumn(SparkRowInfo & spark_row_info, Block & header);
@@ -144,7 +144,7 @@ public:
         JNIEnv * env = JNIUtils::getENV(&attached);
         while (env->CallBooleanMethod(java_iter, spark_row_interator_hasNext))
         {
-            jobject rows_buf = env->CallObjectMethod(java_iter, spark_row_iterator_nextBuf);
+            jobject rows_buf = env->CallObjectMethod(java_iter, spark_row_iterator_nextBatch);
             auto * rows_buf_ptr = static_cast<char*>(env->GetDirectBufferAddress(rows_buf));
             int len = *(reinterpret_cast<int*>(rows_buf_ptr));
 
