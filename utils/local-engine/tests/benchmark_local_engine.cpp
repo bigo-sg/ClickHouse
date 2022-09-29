@@ -176,7 +176,6 @@ DB::ContextMutablePtr global_context;
         file->set_uri_file(file_path);
         substrait::ReadRel::LocalFiles::FileOrFiles::ParquetReadOptions parquet_format;
         file->mutable_parquet()->CopyFrom(parquet_format);
-        
         auto builder = std::make_unique<QueryPipelineBuilder>();
         builder->init(Pipe(std::make_shared<SubstraitFileSource>(SerializedPlanParser::global_context, header, files)));
 
