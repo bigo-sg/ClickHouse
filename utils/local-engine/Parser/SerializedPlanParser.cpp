@@ -381,7 +381,7 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         ch_type = factory.get("Int64");
         ch_type = wrapNullableType(substrait_type.i64().nullability(), ch_type);
     }
-    else if (substrait_type.has_string())
+    else if (substrait_type.has_string() || substrait_type.has_binary())
     {
         ch_type = factory.get("String");
         ch_type = wrapNullableType(substrait_type.string().nullability(), ch_type);
@@ -394,11 +394,6 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     else if (substrait_type.has_fp64())
     {
         ch_type = factory.get("Float64");
-        ch_type = wrapNullableType(substrait_type.fp64().nullability(), ch_type);
-    }
-    else if (substrait_type.has_string() || substrait_type.has_binary())
-    {
-        ch_type = factory.get("String");
         ch_type = wrapNullableType(substrait_type.fp64().nullability(), ch_type);
     }
     else if (substrait_type.has_timestamp())
@@ -451,7 +446,7 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         ch_type = std::make_shared<DataTypeMap>(ch_key_type, ch_val_type);
     }
     else
-        throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support type {}", substrait_type.DebugString());
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support type {}", substrait_type.DebugString());
 
     /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/FixedChar/VarChar/FixedBinary/UserDefined
     return std::move(ch_type);
