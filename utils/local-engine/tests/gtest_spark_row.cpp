@@ -199,6 +199,23 @@ TEST(SparkRow, PrimitiveStringDateTimestampTypes)
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * 5) + roundNumberOfBytesToNearestWord(strlen("Hello World")));
 }
 
+
+TEST(SparkRow, DecimalTypes)
+{
+    DataTypeAndFields type_and_fields = {
+        {std::make_shared<DataTypeDecimal32>(9, 2), DecimalField<Decimal32>(1234, 2)},
+        {std::make_shared<DataTypeDecimal64>(18, 2), DecimalField<Decimal64>(5678, 2)},
+        {std::make_shared<DataTypeDecimal128>(38, 2), DecimalField<Decimal128>(Decimal128(Int128(12345678)), 2)},
+    };
+
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+    EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * 3) + 16);
+}
+
+
 TEST(SparkRow, NullHandling)
 {
     DataTypeAndFields type_and_fields = {

@@ -5,6 +5,8 @@
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypesDecimal.h>
+#include <DataTypes/DataTypeDateTime64.h>
 #include <Functions/FunctionHelpers.h>
 
 namespace DB
@@ -115,7 +117,9 @@ Field VariableLengthDataReader::readDecimal(const char * buffer, size_t length) 
 
     Decimal128 value;
     memcpy(&value, buffer, length);
-    return DecimalField<Decimal128>(value);
+
+    const auto * decimal128_type = typeid_cast<const DataTypeDecimal128 *>(type_without_nullable.get());
+    return std::move(DecimalField<Decimal128>(value, decimal128_type->getScale()));
 }
 
 Field VariableLengthDataReader::readString(const char * buffer, size_t length) const
@@ -358,14 +362,19 @@ Field FixedLengthDataReader::read(const char * buffer) const
     {
         Decimal32 value = 0;
         memcpy(&value, buffer, 4);
-        return value;
+
+        const auto * decimal32_type = typeid_cast<const DataTypeDecimal32 *>(type_without_nullable.get());
+        return std::move(DecimalField{value, decimal32_type->getScale()});
     }
 
     if (which.isDecimal64() || which.isDateTime64())
     {
         Decimal64 value = 0;
         memcpy(&value, buffer, 8);
-        return value;
+
+        UInt32 scale = which.isDecimal64() ? typeid_cast<const DataTypeDecimal64 *>(type_without_nullable.get())->getScale()
+                                           : typeid_cast<const DataTypeDateTime64 *>(type_without_nullable.get())->getScale();
+        return std::move(DecimalField{value, scale});
     }
     throw Exception(ErrorCodes::UNKNOWN_TYPE, "FixedLengthDataReader doesn't support type {}", type->getName());
 }
