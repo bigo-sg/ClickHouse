@@ -183,9 +183,11 @@ std::unique_ptr<substrait::Plan> SerializedPlanBuilder::build()
 {
     return std::move(this->plan);
 }
+
 SerializedPlanBuilder::SerializedPlanBuilder() : plan(std::make_unique<substrait::Plan>())
 {
 }
+
 SerializedPlanBuilder & SerializedPlanBuilder::aggregate(std::vector<int32_t>  /*keys*/, std::vector<substrait::AggregateRel_Measure *> aggregates)
 {
     substrait::Rel * rel = new substrait::Rel();
@@ -200,6 +202,7 @@ SerializedPlanBuilder & SerializedPlanBuilder::aggregate(std::vector<int32_t>  /
     this->prev_rel = rel;
     return *this;
 }
+
 SerializedPlanBuilder & SerializedPlanBuilder::project(std::vector<substrait::Expression *> projections)
 {
     substrait::Rel * project = new substrait::Rel();

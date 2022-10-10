@@ -134,6 +134,8 @@ private:
     void wrapNullable(std::vector<String> columns, ActionsDAGPtr actionsDag);
     std::string getUniqueName(std::string name) { return name + "_" + std::to_string(name_no++); }
 
+    static std::pair<DataTypePtr, Field> parseLiteral(const substrait::Expression_Literal & literal);
+
     static Aggregator::Params getAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
     {
         Settings settings;

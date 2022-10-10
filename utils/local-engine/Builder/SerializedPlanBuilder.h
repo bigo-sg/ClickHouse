@@ -71,6 +71,7 @@ class SerializedSchemaBuilder
 public:
     SerializedSchemaBuilder();
     SchemaPtr build();
+    /// TODO transform string type to substrait type
     SerializedSchemaBuilder & column(std::string name, std::string type, bool nullable = false);
 
 private:
