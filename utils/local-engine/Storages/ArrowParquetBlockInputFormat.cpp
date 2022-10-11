@@ -6,15 +6,16 @@
 #include <boost/range/irange.hpp>
 #include <DataTypes/NestedUtils.h>
 
-#include "ch_parquet/ArrowColumnToCHColumn.h"
+#include "ch_parquet/OptimizedArrowColumnToCHColumn.h"
 
 using namespace DB;
 
 namespace local_engine
 {
 ArrowParquetBlockInputFormat::ArrowParquetBlockInputFormat(
-    DB::ReadBuffer & in_, const DB::Block & header, const DB::FormatSettings & formatSettings)
-    : ParquetBlockInputFormat(in_, header, formatSettings)
+    DB::ReadBuffer & in_, const DB::Block & header, const DB::FormatSettings & formatSettings, const std::vector<int> & row_group_indices_)
+    : OptimizedParquetBlockInputFormat(in_, header, formatSettings)
+    , row_group_indices(row_group_indices_)
 {
 }
 
@@ -74,8 +75,11 @@ DB::Chunk ArrowParquetBlockInputFormat::generate()
             }
             index += indexes_count;
         }
-        auto row_group_range = boost::irange(0, file_reader->num_row_groups());
-        auto row_group_indices = std::vector(row_group_range.begin(), row_group_range.end());
+        if (row_group_indices.empty())
+        {
+            auto row_group_range = boost::irange(0, file_reader->num_row_groups());
+            row_group_indices = std::vector(row_group_range.begin(), row_group_range.end());
+        }
         auto read_status = file_reader->GetRecordBatchReader(row_group_indices, column_indices, &current_record_batch_reader);
         if (!read_status.ok())
             throw std::runtime_error{"Error while reading Parquet data: " + read_status.ToString()};
@@ -111,13 +115,5 @@ DB::Chunk ArrowParquetBlockInputFormat::generate()
                 block_missing_values.setBit(column_idx, row_idx);
     return res;
 }
-//ArrowParquetBlockInputFormat::~ArrowParquetBlockInputFormat()
-//{
-//    std::cerr<<"convert time: " << convert_time / 1000000.0 <<" ms"<<std::endl;
-//    std::cerr<<"non-convert time: " << non_convert_time / 1000000.0 <<" ms"<<std::endl;
-//    std::cerr<<"convert/non-convert " << 1.0 * convert_time / non_convert_time <<" "<<std::endl;
-//    std::cerr<<"real convert " << 1.0 * arrow_column_to_ch_column->real_convert/ 1000000.0 <<" ms"<<std::endl;
-//    std::cerr<<"cast time " << 1.0 * arrow_column_to_ch_column->cast_time/ 1000000.0 <<" ms"<<std::endl;
-//}
 
 }

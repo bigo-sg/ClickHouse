@@ -25,6 +25,7 @@ class SerializedPlanBuilder
 {
 public:
     SerializedPlanBuilder();
+
     SerializedPlanBuilder & registerSupportedFunctions()
     {
         this->registerFunction(IS_NOT_NULL, "is_not_null")
@@ -34,7 +35,7 @@ public:
             .registerFunction(LESS_THAN, "lt")
             .registerFunction(MULTIPLY, "multiply")
             .registerFunction(SUM, "sum")
-            .registerFunction(TO_DATE, "TO_DATE")
+            .registerFunction(TO_DATE, "to_date")
             .registerFunction(EQUAL_TO, "equal");
         return *this;
     }

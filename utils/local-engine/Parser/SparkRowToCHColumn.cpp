@@ -19,6 +19,7 @@ namespace local_engine
 jclass SparkRowToCHColumn::spark_row_interator_class = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_hasNext = nullptr;
 jmethodID SparkRowToCHColumn::spark_row_interator_next = nullptr;
+jmethodID SparkRowToCHColumn::spark_row_iterator_nextBatch = nullptr;
 
 int64_t getStringColumnTotalSize(int ordinal, SparkRowInfo & spark_row_info)
 {
@@ -36,7 +37,7 @@ int64_t getStringColumnTotalSize(int ordinal, SparkRowInfo & spark_row_info)
 void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataTypePtr>& types, SparkRowReader & spark_row_reader)
 {
     int32_t num_fields = columns.size();
-    bool is_nullable = false;
+    [[maybe_unused]] bool is_nullable = false;
     for (int32_t i = 0; i < num_fields; i++)
     {
         WhichDataType which(columns[i]->getDataType());
@@ -70,7 +71,7 @@ void writeRowToColumns(std::vector<MutableColumnPtr> & columns,std::vector<DataT
         {
             columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int32_t));
         }
-        else if (which.isInt64())
+        else if (which.isInt64() || which.isDateTime64())
         {
             columns[i]->insertData(spark_row_reader.getRawDataForFixedNumber(i), sizeof(int64_t));
         }

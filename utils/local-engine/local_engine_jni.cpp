@@ -21,6 +21,7 @@
 #include <Poco/Logger.h>
 #include <jni/jni_common.h>
 #include <jni/jni_error.h>
+#include <Storages/SubstraitSource/ReadBufferBuilder.h>
 
 bool inside_main = true;
 
@@ -57,7 +58,7 @@ std::string jstring2string(JNIEnv * env, jstring jStr)
 
         jclass string_class = env->GetObjectClass(jStr);
         jmethodID get_bytes = env->GetMethodID(string_class, "getBytes", "(Ljava/lang/String;)[B");
-        jbyteArray string_jbytes = static_cast<jbyteArray>(env->CallObjectMethod(jStr, get_bytes, env->NewStringUTF("UTF-8")));
+        jbyteArray string_jbytes = static_cast<jbyteArray>(local_engine::safeCallObjectMethod(env, jStr, get_bytes, env->NewStringUTF("UTF-8")));
 
         size_t length = static_cast<size_t>(env->GetArrayLength(string_jbytes));
         jbyte * p_bytes = env->GetByteArrayElements(string_jbytes, nullptr);
@@ -135,8 +136,11 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
         = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "hasNext", "()Z");
     local_engine::SparkRowToCHColumn::spark_row_interator_next
         = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "next", "()[B");
+    local_engine::SparkRowToCHColumn::spark_row_iterator_nextBatch
+        = local_engine::GetMethodID(env, local_engine::SparkRowToCHColumn::spark_row_interator_class, "nextBatch", "()Ljava/nio/ByteBuffer;");
 
     local_engine::JNIUtils::vm = vm;
+    local_engine::registerReadBufferBuildes(local_engine::ReadBufferBuilderFactory::instance());
     return JNI_VERSION_1_8;
 }
 
@@ -186,7 +190,7 @@ jlong Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeCreat
 {
     LOCAL_ENGINE_JNI_METHOD_START
     auto context = Coordination::Context::createCopy(local_engine::SerializedPlanParser::global_context);
-    
+
     local_engine::SerializedPlanParser parser(context);
     jsize iter_num = env->GetArrayLength(iter_arr);
     for (jsize i = 0; i < iter_num; i++)
@@ -482,9 +486,14 @@ jstring Java_io_glutenproject_vectorized_CHNativeBlock_nativeColumnType(JNIEnv *
         const auto * nullable = checkAndGetDataType<DB::DataTypeNullable>(block->getByPosition(position).type.get());
         which = DB::WhichDataType(nullable->getNestedType());
     }
+
     if (which.isDate32())
     {
         type = "Date";
+    }
+    else if (which.isDateTime64())
+    {
+        type = "Timestamp";
     }
     else if (which.isFloat32())
     {
@@ -762,8 +771,8 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
     jboolean * p_booleans = env->GetBooleanArrayElements(is_nullables, nullptr);
     for (int i = 0; i < column_size; i++)
     {
-        jstring name = reinterpret_cast<jstring>(env->GetObjectArrayElement(names, i));
-        jstring type = reinterpret_cast<jstring>(env->GetObjectArrayElement(types, i));
+        auto * name = static_cast<jstring>(env->GetObjectArrayElement(names, i));
+        auto * type = static_cast<jstring>(env->GetObjectArrayElement(types, i));
         c_names.push_back(jstring2string(env, name));
         c_types.push_back(jstring2string(env, type));
         c_isnullables.push_back(p_booleans[i] == JNI_TRUE);
@@ -777,7 +786,7 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }
 
-void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv * env, jobject, jlong block_address)
+void Java_io_glutenproject_vectorized_BlockNativeConverter_freeBlock(JNIEnv *  env, jobject, jlong block_address)
 {
     LOCAL_ENGINE_JNI_METHOD_START
     local_engine::SparkRowToCHColumn converter;
