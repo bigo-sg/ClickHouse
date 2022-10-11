@@ -25,19 +25,25 @@ void registerAllFunctions()
     registerAggregateFunctions();
 }
 
-/// If spark need to access hdfs, the environment variable `HADOOP_CONF_DIR` should have been set.
-/// For clickhosue, environment variable `LIBHDFS3_CONF` need to be set to initialize libhdfs3.
-/// So we use`HADOOP_CONF_DIR` from spark to setup `LIBHDFS3_CONF`.
-///
-/// TODO : Maybe initialize libhdfs3 by configure map but not a configure file path. Need to modify
-/// clickhouse.
 void setupHDFSConf(DB::Context::ConfigurationPtr context_config)
 {
+    /// for spark-submit, we can use --files to add a file under the working directory.
+    std::filesystem::path conf_path = "./hdfs-site.xml";
+    if (std::filesystem::exists(conf_path))
+    {
+        LOG_INFO(&Poco::Logger::get("local_engine"), "Try to use local hdfs-site.xml");
+        context_config->setString("hdfs.libhdfs3_conf", conf_path.string());
+        return;
+    }
+
+    /// If spark need to access hdfs, the environment variable `HADOOP_CONF_DIR` should have been set.
+    /// For clickhosue, environment variable `LIBHDFS3_CONF` need to be set to initialize libhdfs3.
+    /// So we use`HADOOP_CONF_DIR` from spark to setup `LIBHDFS3_CONF`.
     const char * env_var = getenv("HADOOP_CONF_DIR");
     if (env_var)
     {
         std::filesystem::path conf_dir(env_var);
-        auto conf_path = conf_dir / "hdfs-site.xml";
+        conf_path = conf_dir / "hdfs-site.xml";
         if (!std::filesystem::exists(conf_path))
         {
             LOG_WARNING(&Poco::Logger::get("local_engine"), "Not found hdfs configure file:{}", conf_path.string());
@@ -50,7 +56,10 @@ void setupHDFSConf(DB::Context::ConfigurationPtr context_config)
     }
     else
     {
-        LOG_INFO(&Poco::Logger::get("local_engine"), "HADOOP_CONF_DIR is not set, hdfs access may fail");
+        else
+        {
+            LOG_INFO(&Poco::Logger::get("local_engine"), "HADOOP_CONF_DIR is not set, hdfs access may fail");
+        }
     }
 
 }
