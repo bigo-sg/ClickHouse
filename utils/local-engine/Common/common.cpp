@@ -16,7 +16,7 @@ namespace DB
 {
 namespace ErrorCodes
 {
-    extern const int BAD_ARGUMENTS;
+extern const int BAD_ARGUMENTS;
 }
 }
 using namespace DB;
@@ -41,7 +41,7 @@ constexpr auto CH_RUNTIME_CONF = "runtime_conf";
 static std::map<std::string, std::string> getBackendConf(const std::string & plan)
 {
     std::map<std::string, std::string> ch_backend_conf;
-    
+
     /// parse backend configs from plan extensions
     do
     {
@@ -49,32 +49,32 @@ static std::map<std::string, std::string> getBackendConf(const std::string & pla
         auto success = plan_ptr->ParseFromString(plan);
         if (!success)
             break;
-        
+
         if (!plan_ptr->has_advanced_extensions() || !plan_ptr->advanced_extensions().has_enhancement())
             break;
         const auto & enhancement = plan_ptr->advanced_extensions().enhancement();
 
         if (!enhancement.Is<substrait::Expression>())
             break;
-        
+
         substrait::Expression expression;
         if (!enhancement.UnpackTo(&expression) || !expression.has_literal() || !expression.literal().has_map())
             break;
-        
+
         const auto & key_values = expression.literal().map().key_values();
         for (const auto & key_value : key_values)
         {
              if (!key_value.has_key() || !key_value.has_value())
                 continue;
-            
+
             const auto & key = key_value.key();
             const auto & value = key_value.value();
             if (!key.has_string() || !value.has_string())
                 continue;
-            
+
             if (!key.string().starts_with(CH_BACKEND_CONF_PREFIX))
                 continue;
-            
+
             ch_backend_conf[key.string()] = value.string();
         }
     } while (false);
@@ -91,7 +91,6 @@ static std::map<std::string, std::string> getBackendConf(const std::string & pla
     }
     return ch_backend_conf;
 }
-
 
 void initCHRuntimeConfig(const std::map<std::string, std::string> & conf)
 {}
@@ -142,7 +141,7 @@ void init(const std::string & plan)
                     }
                 }
             }
-          
+
             /// Initialize Loggers
             auto & config = local_engine::SerializedPlanParser::config;
             auto level = config->getString("logger.level", "trace");
@@ -155,7 +154,7 @@ void init(const std::string & plan)
                 local_engine::Logger::initConsoleLogger(level);
             }
             LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init logger.");
-            
+
             /// Initialize settings
             const std::string prefix = "local_engine.";
             auto settings = Settings();
@@ -210,8 +209,6 @@ bool executorHasNext(char * executor_address)
     local_engine::LocalExecutor * executor = reinterpret_cast<local_engine::LocalExecutor *>(executor_address);
     return executor->hasNext();
 }
-
-
 
 #ifdef __cplusplus
 }
