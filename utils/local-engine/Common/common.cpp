@@ -12,6 +12,13 @@
 #include <jni.h>
 #include <filesystem>
 
+namespace DB
+{
+namespace ErrorCodes
+{
+    extern const int BAD_ARGUMENTS;
+}
+}
 using namespace DB;
 namespace fs = std::filesystem;
 
@@ -24,10 +31,18 @@ void registerAllFunctions()
     registerFunctions();
     registerAggregateFunctions();
 }
+constexpr auto CH_BACKEND_CONF_PREFIX = "spark.gluten.sql.columnar.backend.ch";
+constexpr auto CH_RUNTIME_CONF = "runtime_conf";
 
-static std::string getConfigFile(const std::string & plan)
+/// For using gluten, we recommend to pass clickhouse runtime configure by using --files in spark-submit.
+/// And set the parameter CH_BACKEND_CONF_PREFIX.CH_RUNTIME_CONF.conf_file
+/// You can also set a specified configuration with prefix CH_BACKEND_CONF_PREFIX.CH_RUNTIME_CONF, and this
+/// will overwrite the configuration from CH_BACKEND_CONF_PREFIX.CH_RUNTIME_CONF.conf_file .
+static std::map<std::string, std::string> getBackendConf(const std::string & plan)
 {
-    /// 1. Try to get config file from spark config
+    std::map<std::string, std::string> ch_backend_conf;
+    
+    /// parse backend configs from plan extensions
     do
     {
         auto plan_ptr = std::make_unique<substrait::Plan>();
@@ -57,19 +72,29 @@ static std::string getConfigFile(const std::string & plan)
             if (!key.has_string() || !value.has_string())
                 continue;
             
-            if (key.string() != "spark.gluten.sql.columnar.backend.ch.config.file" || value.string().empty())
+            if (!key.string().starts_with(CH_BACKEND_CONF_PREFIX))
                 continue;
             
-            return value.string();
+            ch_backend_conf[key.string()] = value.string();
         }
     } while (false);
 
-    /// 2. Try to get config path from environment variable
-    const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
-    if (!config_path || !*config_path)
-        return "config.xml";
-    return config_path;
+    std::string ch_runtime_conf_file = std::string(CH_BACKEND_CONF_PREFIX) + "." + std::string(CH_RUNTIME_CONF) + ".conf_file";
+    if (!ch_backend_conf.count(ch_runtime_conf_file))
+    {
+        /// Try to get config path from environment variable
+        const char * config_path = std::getenv("CLICKHOUSE_BACKEND_CONFIG");
+        if (config_path)
+        {
+            ch_backend_conf[ch_runtime_conf_file] = config_path;
+        }
+    }
+    return ch_backend_conf;
 }
+
+
+void initCHRuntimeConfig(const std::map<std::string, std::string> & conf)
+{}
 
 void init(const std::string & plan)
 {
@@ -79,23 +104,45 @@ void init(const std::string & plan)
         [&plan]()
         {
             /// Load Config
+            std::map<std::string, std::string> ch_backend_conf;
+            std::string ch_runtime_conf_prefix = std::string(CH_BACKEND_CONF_PREFIX) + "." + std::string(CH_RUNTIME_CONF);
+            std::string ch_runtime_conf_file = ch_runtime_conf_prefix + ".conf_file";
             if (!local_engine::SerializedPlanParser::config)
             {
-                auto config_path = getConfigFile(plan);
-                if (fs::exists(config_path) && fs::is_regular_file(config_path)) 
+                ch_backend_conf = getBackendConf(plan);
+
+                /// If we have a configuration file, use it at first
+                if (ch_backend_conf.count(ch_runtime_conf_file))
                 {
-                    DB::ConfigProcessor config_processor(config_path, false, true);
-                    config_processor.setConfigPath(fs::path(config_path).parent_path());
-                    auto loaded_config = config_processor.loadConfig(false);
-                    local_engine::SerializedPlanParser::config = loaded_config.configuration;
+                    if (fs::exists(ch_runtime_conf_file) && fs::is_regular_file(ch_runtime_conf_file))
+                    {
+                        DB::ConfigProcessor config_processor(ch_runtime_conf_file, false, true);
+                        config_processor.setConfigPath(fs::path(ch_runtime_conf_file).parent_path());
+                        auto loaded_config = config_processor.loadConfig(false);
+                        local_engine::SerializedPlanParser::config = loaded_config.configuration;
+                    }
+                    else
+                    {
+                        throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "{} is not a valid configure file.", ch_runtime_conf_file);
+                    }
                 }
                 else
                 {
                     local_engine::SerializedPlanParser::config = Poco::AutoPtr(new Poco::Util::MapConfiguration());
                 }
+
+                /// Update specified settings
+                for (const auto & kv : ch_backend_conf)
+                {
+                    if (kv.first.starts_with(ch_runtime_conf_prefix) && kv.first != ch_runtime_conf_file)
+                    {
+                        /// Notice, you can set a conf by setString(), but get it by getInt()
+                        local_engine::SerializedPlanParser::config->setString(
+                            kv.first.substr(ch_runtime_conf_prefix.size() + 1), kv.second);
+                    }
+                }
             }
           
-
             /// Initialize Loggers
             auto & config = local_engine::SerializedPlanParser::config;
             auto level = config->getString("logger.level", "trace");
@@ -109,7 +156,6 @@ void init(const std::string & plan)
             }
             LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init logger.");
             
-
             /// Initialize settings
             const std::string prefix = "local_engine.";
             auto settings = Settings();
