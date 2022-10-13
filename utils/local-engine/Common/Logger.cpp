@@ -1,19 +1,26 @@
 #include "Logger.h"
+
+#include <loggers/Loggers.h>
 #include <Poco/ConsoleChannel.h>
 #include <Poco/AutoPtr.h>
 #include <Poco/AsyncChannel.h>
+#include <Poco/SimpleFileChannel.h>
 
 
 using Poco::ConsoleChannel;
 using Poco::AutoPtr;
 using Poco::AsyncChannel;
 
-void local_engine::Logger::initConsoleLogger()
+void local_engine::Logger::initConsoleLogger(const std::string & level)
 {
-    AutoPtr<ConsoleChannel> p_cons(new ConsoleChannel);
-    AutoPtr<AsyncChannel> p_async(new AsyncChannel(p_cons));
-    Poco::Logger::root().setChannel(p_async);
-    Poco::Logger::root().setLevel("debug");
-    Poco::Logger::root().debug("init logger success");
+    AutoPtr<ConsoleChannel> chan(new ConsoleChannel);
+    AutoPtr<AsyncChannel> async_chann(new AsyncChannel(chan));
+    Poco::Logger::root().setChannel(async_chann);
+    Poco::Logger::root().setLevel(level);
 }
 
+void local_engine::Logger::initFileLogger(Poco::Util::AbstractConfiguration & config, const std::string & cmd_name)
+{
+    static Loggers loggers;
+    loggers.buildLoggers(config, Poco::Logger::root(), cmd_name);
+}
