@@ -144,7 +144,7 @@ void init(const std::string & plan)
 
             /// Initialize Loggers
             auto & config = local_engine::SerializedPlanParser::config;
-            auto level = config->getString("logger.level", "trace");
+            auto level = config->getString("logger.level", "error");
             if (config->has("logger.log"))
             {
                 local_engine::Logger::initFileLogger(*config, "ClickHouseBackend");
