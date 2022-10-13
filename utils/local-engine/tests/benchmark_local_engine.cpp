@@ -1504,7 +1504,7 @@ int main(int argc, char ** argv)
     SharedContextHolder shared_context = Context::createShared();
     global_context = Context::createGlobal(shared_context.get());
     global_context->makeGlobalContext();
-    
+
     auto config = Poco::AutoPtr(new Poco::Util::MapConfiguration());
     global_context->setConfig(config);
     const std::string path = "/";
