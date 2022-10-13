@@ -38,7 +38,10 @@ struct SparkRowToCHColumnHelper
 
         ColumnsWithTypeAndName columns(names.size());
         for (size_t i = 0; i < names.size(); ++i)
-            columns[i] = std::move(ColumnWithTypeAndName(parseType(types[i]), names[i]));
+        {
+            data_types[i] = parseType(types[i]);
+            columns[i] = std::move(ColumnWithTypeAndName(data_types[i], names[i]));
+        }
 
         header = std::move(Block(columns));
         resetMutableColumns();
