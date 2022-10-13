@@ -1,5 +1,6 @@
 #include <fstream>
 #include <iostream>
+#include <Poco/Util/MapConfiguration.h>
 #include <Builder/SerializedPlanBuilder.h>
 #include <Columns/ColumnVector.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -20,9 +21,9 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/SelectQueryInfo.h>
+#include <Storages/CustomStorageMergeTree.h>
 #include <gtest/gtest.h>
 #include <substrait/plan.pb.h>
-#include "Storages/CustomStorageMergeTree.h"
 #include "testConfig.h"
 
 using namespace local_engine;
@@ -320,7 +321,8 @@ int main(int argc, char ** argv)
     SharedContextHolder shared_context = Context::createShared();
     local_engine::SerializedPlanParser::global_context = Context::createGlobal(shared_context.get());
     local_engine::SerializedPlanParser::global_context->makeGlobalContext();
-    local_engine::SerializedPlanParser::global_context->setConfig(local_engine::SerializedPlanParser::config);
+    auto config = Poco::AutoPtr(new Poco::Util::MapConfiguration());
+    local_engine::SerializedPlanParser::global_context->setConfig(config);
     local_engine::SerializedPlanParser::global_context->setPath("/tmp");
     local_engine::SerializedPlanParser::global_context->getDisksMap().emplace();
     local_engine::SerializedPlanParser::initFunctionEnv();

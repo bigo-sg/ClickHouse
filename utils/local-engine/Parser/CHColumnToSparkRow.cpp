@@ -345,8 +345,8 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
         return {};
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
-    // spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
-    spark_row_info->setBufferAddress(alignedAlloc(spark_row_info->getTotalBytes(), 64));
+    spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
+    // spark_row_info->setBufferAddress(alignedAlloc(spark_row_info->getTotalBytes(), 64));
     memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
@@ -364,10 +364,10 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
     return spark_row_info;
 }
 
-void CHColumnToSparkRow::freeMem(char * /*address*/, size_t size)
+void CHColumnToSparkRow::freeMem(char * address, size_t size)
 {
-    // free(address, size));
-    rollback(size);
+    free(address, size);
+    // rollback(size);
 }
 
 BackingDataLengthCalculator::BackingDataLengthCalculator(const DataTypePtr & type_)

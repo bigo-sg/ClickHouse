@@ -60,8 +60,8 @@ private:
 
 using SparkRowInfoPtr = std::unique_ptr<local_engine::SparkRowInfo>;
 
-// class CHColumnToSparkRow : private Allocator<false, true>
-class CHColumnToSparkRow : public DB::Arena
+class CHColumnToSparkRow : private Allocator<false, true>
+// class CHColumnToSparkRow : public DB::Arena
 {
 public:
     std::unique_ptr<SparkRowInfo> convertCHColumnToSparkRow(const DB::Block & block);
