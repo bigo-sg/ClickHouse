@@ -43,7 +43,10 @@
 #include <google/protobuf/util/json_util.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
 
+#include <Processors/QueryPlan/QueryPlan.h>
+#include <Processors/QueryPlan/UnionStep.h>
 #include "SerializedPlanParser.h"
+#include <Storages/IStorage.h>
 
 namespace DB
 {
@@ -629,6 +632,18 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             auto right_plan = parseOp(join.right());
 
             query_plan = parseJoin(join, std::move(left_plan), std::move(right_plan));
+            break;
+        }
+        case substrait::Rel::RelTypeCase::kSet: {
+            const auto & set_rel = rel.set();
+            if (set_rel.op() == substrait::SetRel_SetOp_SET_OP_UNION_ALL)
+            {
+                query_plan = parseUnionAll(set_rel);
+            }
+            else
+            {
+                throw DB::Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support set relation op:{}", set_rel.op());
+            }
             break;
         }
         default:
@@ -1594,6 +1609,23 @@ void SerializedPlanParser::wrapNullable(std::vector<String> columns, ActionsDAGP
         const auto & node = actionsDag->addFunction(function_builder, args, item);
         actionsDag->addOrReplaceInIndex(node);
     }
+}
+
+DB::QueryPlanPtr SerializedPlanParser::parseUnionAll(const substrait::SetRel & set_rel)
+{
+    int inputs_size = set_rel.inputs_size();
+    std::vector<DB::QueryPlanPtr> plans(inputs_size);
+    DB::DataStreams data_streams(inputs_size);
+    for (int i = 0; i < inputs_size; ++i)
+    {
+        auto child_plan = parseOp(set_rel.inputs(i));
+        plans[i] = std::move(child_plan);
+        data_streams[i] = plans[i]->getCurrentDataStream();
+    }
+    auto unite_plan = std::make_unique<DB::QueryPlan>();
+    auto union_step = std::make_unique<DB::UnionStep>(std::move(data_streams), context->getSettingsRef().max_threads);
+    unite_plan->unitePlans(std::move(union_step), std::move(plans));
+    return unite_plan;
 }
 
 SharedContextHolder SerializedPlanParser::shared_context;

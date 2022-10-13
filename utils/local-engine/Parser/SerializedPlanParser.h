@@ -160,6 +160,7 @@ private:
         return Aggregator::Params(header, keys, aggregates, false, settings.max_threads);
     }
 
+    DB::QueryPlanPtr parseUnionAll(const substrait::SetRel & set_rel);
 
     int name_no = 0;
     std::unordered_map<std::string, std::string> function_mapping;
