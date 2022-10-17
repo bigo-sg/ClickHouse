@@ -340,7 +340,8 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     }
     else if (substrait_type.has_struct_())
     {
-        assert(substrait_type.struct_().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+        if (substrait_type.struct_().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support struct type with nullable");
 
         DataTypes ch_field_types(substrait_type.struct_().types().size());
         for (size_t i = 0; i < ch_field_types.size(); ++i)
@@ -349,14 +350,16 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     }
     else if (substrait_type.has_list())
     {
-        assert(substrait_type.struct_().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+        if (substrait_type.struct_().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support list type with nullable");
 
         auto ch_nested_type = parseType(substrait_type.list().type());
         ch_type = std::make_shared<DataTypeArray>(ch_nested_type);
     }
     else if (substrait_type.has_map())
     {
-        assert(substrait_type.map().nullability() == substrait::Type_Nullability_NULLABILITY_REQUIRED);
+        if (substrait_type.map().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support map type with nullable");
 
         auto ch_key_type = parseType(substrait_type.map().key());
         auto ch_val_type = parseType(substrait_type.map().value());
@@ -368,6 +371,7 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/FixedChar/VarChar/FixedBinary/UserDefined
     return std::move(ch_type);
 }
+
 QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 {
     auto * logger = &Poco::Logger::get("SerializedPlanParser");
