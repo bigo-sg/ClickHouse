@@ -441,3 +441,22 @@ TEST(SparkRow, ArrayMapTypes)
         == 8 + 2 * 8 + BackingDataLengthCalculator(type_and_fields[0].type).calculate(type_and_fields[0].field)
             + BackingDataLengthCalculator(type_and_fields[1].type).calculate(type_and_fields[1].field));
 }
+
+
+TEST(SparkRow, NullableComplexTypes)
+{
+    const auto map_type = std::make_shared<DataTypeMap>(std::make_shared<DataTypeInt32>(), std::make_shared<DataTypeInt32>());
+    const auto tuple_type = std::make_shared<DataTypeTuple>(DataTypes{std::make_shared<DataTypeInt64>()});
+    const auto array_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeInt64>());
+    DataTypeAndFields type_and_fields = {
+        {std::make_shared<DataTypeNullable>(map_type), Null{}},
+        {std::make_shared<DataTypeNullable>(tuple_type), Null{}},
+        {std::make_shared<DataTypeNullable>(array_type), Null{}},
+    };
+
+    SparkRowInfoPtr spark_row_info;
+    BlockPtr block;
+    std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
+    assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
+    EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + 3 * 8);
+}

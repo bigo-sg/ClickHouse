@@ -340,30 +340,24 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     }
     else if (substrait_type.has_struct_())
     {
-        if (substrait_type.struct_().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support struct type with nullable");
-
         DataTypes ch_field_types(substrait_type.struct_().types().size());
         for (size_t i = 0; i < ch_field_types.size(); ++i)
             ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i]));
         ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+        ch_type = wrapNullableType(substrait_type.struct_().nullability(), ch_type);
     }
     else if (substrait_type.has_list())
     {
-        if (substrait_type.struct_().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support list type with nullable");
-
         auto ch_nested_type = parseType(substrait_type.list().type());
         ch_type = std::make_shared<DataTypeArray>(ch_nested_type);
+        ch_type = wrapNullableType(substrait_type.list().nullability(), ch_type);
     }
     else if (substrait_type.has_map())
     {
-        if (substrait_type.map().nullability() != substrait::Type_Nullability_NULLABILITY_REQUIRED)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "ClickHouse Backend doesn't support map type with nullable");
-
         auto ch_key_type = parseType(substrait_type.map().key());
         auto ch_val_type = parseType(substrait_type.map().value());
         ch_type = std::make_shared<DataTypeMap>(ch_key_type, ch_val_type);
+        ch_type = wrapNullableType(substrait_type.map().nullability(), ch_type);
     }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support type {}", substrait_type.DebugString());
