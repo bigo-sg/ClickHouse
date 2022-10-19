@@ -1628,10 +1628,10 @@ DB::QueryPlanPtr SerializedPlanParser::parseSort(const substrait::SortRel & sort
 DB::SortDescription SerializedPlanParser::parseSortDescription(const substrait::SortRel & sort_rel)
 {
     static std::map<int, std::pair<int, int>> direction_map = {
-        {1, {1, 1}},
-        {2, {1, -1}},
-        {3, {-1, 1}},
-        {4, {-1, -1}}
+        {1, {1, -1}},
+        {2, {1, 1}},
+        {3, {-1, -1}},
+        {4, {-1, 1}}
     };
 
     DB::SortDescription sort_descr;
