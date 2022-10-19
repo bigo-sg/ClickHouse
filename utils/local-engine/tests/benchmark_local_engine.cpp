@@ -28,6 +28,7 @@
 #include <Storages/CustomStorageMergeTree.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/SelectQueryInfo.h>
+#include <Storages/SubstraitSource/ReadBufferBuilder.h>
 #include <base/logger_useful.h>
 #include <benchmark/benchmark.h>
 #include <Common/DebugUtils.h>
@@ -1511,6 +1512,10 @@ int main(int argc, char ** argv)
     global_context->setPath(path);
     SerializedPlanParser::global_context = global_context;
     local_engine::SerializedPlanParser::initFunctionEnv();
+
+    auto & factory = local_engine::ReadBufferBuilderFactory::instance();
+    registerReadBufferBuildes(factory);
+
     ::benchmark::Initialize(&argc, argv);
     if (::benchmark::ReportUnrecognizedArguments(argc, argv))
         return 1;

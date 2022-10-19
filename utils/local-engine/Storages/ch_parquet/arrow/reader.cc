@@ -626,10 +626,12 @@ class ListReader : public ColumnReaderImpl {
 
     std::vector<std::shared_ptr<Buffer>> buffers{
         validity_io.null_count > 0 ? validity_buffer : nullptr, offsets_buffer};
+    std::cout << "fieldtype:" << field_->ToString() << std::endl;
     auto data = std::make_shared<ArrayData>(
         field_->type(),
         /*length=*/validity_io.values_read, std::move(buffers),
         std::vector<std::shared_ptr<ArrayData>>{item_chunk}, validity_io.null_count);
+    std::cout << "datachildtype:" << data->child_data[0]->type->ToString() << std::endl;
 
     ARROW_ASSIGN_OR_RAISE(*out, AssembleArray(std::move(data)));
     return Status::OK();

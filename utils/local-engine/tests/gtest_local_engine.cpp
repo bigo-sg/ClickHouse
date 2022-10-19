@@ -326,6 +326,9 @@ int main(int argc, char ** argv)
     local_engine::SerializedPlanParser::global_context->setPath("/tmp");
     local_engine::SerializedPlanParser::global_context->getDisksMap().emplace();
     local_engine::SerializedPlanParser::initFunctionEnv();
+    auto & factory = local_engine::ReadBufferBuilderFactory::instance();
+    registerReadBufferBuildes(factory);
+
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
