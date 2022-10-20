@@ -237,8 +237,8 @@ QueryPlanPtr SerializedPlanParser::parseMergeTreeTable(const substrait::ReadRel 
 
 Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struct_)
 {
-    auto internal_cols = std::make_unique<std::vector<ColumnWithTypeAndName>>();
-    internal_cols->reserve(struct_.names_size());
+    ColumnsWithTypeAndName internal_cols;
+    internal_cols.reserve(struct_.names_size());
     for (int i = 0; i < struct_.names_size(); ++i)
     {
         const auto & name = struct_.names(i);
@@ -252,9 +252,10 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
             auto tmp = AggregateFunctionFactory::instance().get(name_parts[3], {data_type}, {}, properties);
             data_type = tmp->getStateType();
         }
-        internal_cols->push_back(ColumnWithTypeAndName(data_type, name));
+        internal_cols.push_back(ColumnWithTypeAndName(data_type, name));
     }
-    return Block(*std::move(internal_cols));
+    Block res(std::move(internal_cols));
+    return std::move(res);
 }
 
 DataTypePtr wrapNullableType(substrait::Type_Nullability nullable, DataTypePtr nested_type)
@@ -298,10 +299,15 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         ch_type = std::make_shared<DataTypeInt64>();
         ch_type = wrapNullableType(substrait_type.i64().nullability(), ch_type);
     }
-    else if (substrait_type.has_string() || substrait_type.has_binary())
+    else if (substrait_type.has_string())
     {
         ch_type = std::make_shared<DataTypeString>();
         ch_type = wrapNullableType(substrait_type.string().nullability(), ch_type);
+    }
+    else if (substrait_type.has_binary())
+    {
+        ch_type = std::make_shared<DataTypeString>();
+        ch_type = wrapNullableType(substrait_type.binary().nullability(), ch_type);
     }
     else if (substrait_type.has_fp32())
     {
