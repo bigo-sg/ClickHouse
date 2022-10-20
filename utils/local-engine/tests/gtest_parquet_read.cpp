@@ -103,7 +103,7 @@ static void readData(const String & path, const std::map<String, Field> & fields
             const auto & column = block.getByName(name);
             auto field = (*column.column)[0];
             auto expect_field = it->second;
-            std::cout << "field:" << toString(field) << ", expect_field:" << toString(expect_field) << std::endl;
+            // std::cout << "field:" << toString(field) << ", expect_field:" << toString(expect_field) << std::endl;
             EXPECT_TRUE(field == expect_field);
         }
     }

@@ -512,7 +512,6 @@ Block ArrowColumnToCHColumn::arrowSchemaToCHHeader(const arrow::Schema & schema,
         auto arrow_column = std::make_shared<arrow::ChunkedArray>(array_vector);
         std::unordered_map<std::string, std::shared_ptr<ColumnWithTypeAndName>> dict_values;
         ColumnWithTypeAndName sample_column = readColumnFromArrowColumn(field, arrow_column, format_name, dict_values, false);
-        std::cerr << "field:" << field->ToString() << ", datatype:" << sample_column.type->getName() << std::endl;
 
         sample_columns.emplace_back(std::move(sample_column));
     }
