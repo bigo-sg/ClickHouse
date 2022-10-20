@@ -24,11 +24,11 @@
 
 using namespace DB;
 
-TEST(ParquetRead, ReadSchema)
+template <class SchemaReader>
+static void readSchema(const String & path)
 {
-    const String path = "/data1/liyang/cppproject/kyli/ClickHouse/utils/local-engine/tests/data/alltypes/part-00000-f352a2d1-97fd-4244-85bc-eb6fcd8c9da3-c000.snappy.parquet";
-    auto in = std::make_shared<ReadBufferFromFile>(path);
     FormatSettings settings;
+    auto in = std::make_shared<ReadBufferFromFile>(path);
     ParquetSchemaReader schema_reader(*in, settings);
     auto name_and_types = schema_reader.readSchema();
     auto & factory = DataTypeFactory::instance();
@@ -40,7 +40,7 @@ TEST(ParquetRead, ReadSchema)
         auto name_and_type = name_and_types.tryGetByName(column);
         EXPECT_TRUE(name_and_type);
 
-        std::cout << "real_type:" << name_and_type->type->getName() << ", expect_type:" << expect_type->getName() << std::endl;
+        // std::cout << "real_type:" << name_and_type->type->getName() << ", expect_type:" << expect_type->getName() << std::endl;
         EXPECT_TRUE(name_and_type->type->equals(*expect_type));
     };
 
@@ -70,17 +70,58 @@ TEST(ParquetRead, ReadSchema)
     check_type("f_struct_map", "Nullable(Tuple(a Nullable(String), b Nullable(Int64), c Nullable(Map(String, Nullable(Int64)))))");
 }
 
-TEST(ParquetRead, ReadData)
+template <class SchemaReader, class InputFormat>
+static void readData(const String & path, const std::map<String, Field> & fields)
 {
-    const String path = "/data1/liyang/cppproject/kyli/ClickHouse/utils/local-engine/tests/data/alltypes/part-00000-f352a2d1-97fd-4244-85bc-eb6fcd8c9da3-c000.snappy.parquet";
     auto in = std::make_shared<ReadBufferFromFile>(path);
     FormatSettings settings;
-    ParquetSchemaReader schema_reader(*in, settings);
+    SchemaReader schema_reader(*in, settings);
     auto name_and_types = schema_reader.readSchema();
 
     ColumnsWithTypeAndName columns;
     columns.reserve(name_and_types.size());
-    std::map<String, Field> fields{
+    for (const auto & name_and_type : name_and_types)
+        if (fields.count(name_and_type.name))
+            columns.emplace_back(name_and_type.type, name_and_type.name);
+
+    Block header(columns);
+    in = std::make_shared<ReadBufferFromFile>(path);
+    auto format = std::make_shared<InputFormat>(*in, header, settings);
+    auto pipeline = QueryPipeline(std::move(format));
+    auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
+
+    Block block;
+    EXPECT_TRUE(reader->pull(block));
+    EXPECT_TRUE(block.rows() == 1);
+
+    for (const auto & name_and_type : name_and_types)
+    {
+        const auto & name = name_and_type.name;
+        auto it = fields.find(name);
+        if (it != fields.end())
+        {
+            const auto & column = block.getByName(name);
+            auto field = (*column.column)[0];
+            auto expect_field = it->second;
+            std::cout << "field:" << toString(field) << ", expect_field:" << toString(expect_field) << std::endl;
+            EXPECT_TRUE(field == expect_field);
+        }
+    }
+}
+
+TEST(ParquetRead, ReadSchema)
+{
+    readSchema<ParquetSchemaReader>("./utils/local-engine/tests/data/alltypes/alltypes_notnull.parquet");
+    readSchema<ParquetSchemaReader>("./utils/local-engine/tests/data/alltypes/alltypes_null.parquet");
+    readSchema<OptimizedParquetSchemaReader>("./utils/local-engine/tests/data/alltypes/alltypes_null.parquet");
+    readSchema<OptimizedParquetSchemaReader>("./utils/local-engine/tests/data/alltypes/alltypes_null.parquet");
+}
+
+TEST(ParquetRead, ReadDataNotNull)
+{
+    const String path = "./utils/local-engine/tests/data/alltypes/alltypes_notnull.parquet";
+    const std::map<String, Field> fields{
+        {"f_array", Array{"hello", "world"}},
         {"f_bool", UInt8(1)},
         {"f_byte", Int8(1)},
         {"f_short", Int16(2)},
@@ -94,7 +135,9 @@ TEST(ParquetRead, ReadData)
         {"f_date", Int32(18262)},
         {"f_timestamp", DecimalField<DateTime64>(1666162060000000L, 6)},
         {"f_array", Array{"hello", "world"}},
-        {"f_array_array", []() -> Field
+        {
+            "f_array_array",
+            []() -> Field
             {
                 Array res;
                 res.push_back(Array{"hello"});
@@ -102,14 +145,16 @@ TEST(ParquetRead, ReadData)
                 return std::move(res);
             }(),
         },
-        {"f_array_map", []() -> Field
+        {
+            "f_array_map",
+            []() -> Field
             {
                 Array res;
 
                 Map map;
                 map.push_back(Tuple{"hello", Int64(1)});
                 res.push_back(map);
-                
+
                 map.clear();
                 map.push_back(Tuple{"world", Int64(2)});
                 res.push_back(map);
@@ -117,17 +162,20 @@ TEST(ParquetRead, ReadData)
                 return std::move(res);
             }(),
         },
-        {"f_array_struct", []() -> Field
+        {
+            "f_array_struct",
+            []() -> Field
             {
                 Array res;
                 res.push_back(Tuple{"hello", Int64(1)});
                 res.push_back(Tuple{"world", Int64(2)});
 
                 return std::move(res);
-                
             }(),
         },
-        {"f_map", []() -> Field
+        {
+            "f_map",
+            []() -> Field
             {
                 Map res;
                 res.push_back(Tuple{"hello", Int64(1)});
@@ -135,7 +183,9 @@ TEST(ParquetRead, ReadData)
                 return std::move(res);
             }(),
         },
-        {"f_map_map", []() -> Field
+        {
+            "f_map_map",
+            []() -> Field
             {
                 Map nested_map;
                 nested_map.push_back(Tuple{"world", Int64(3)});
@@ -145,16 +195,20 @@ TEST(ParquetRead, ReadData)
                 return std::move(res);
             }(),
         },
-        {"f_map_array", []() -> Field
+        {
+            "f_map_array",
+            []() -> Field
             {
-                Array array{Int64(1),Int64(2),Int64(3)};
-                
+                Array array{Int64(1), Int64(2), Int64(3)};
+
                 Map res;
                 res.push_back(Tuple{"hello", std::move(array)});
                 return std::move(res);
             }(),
         },
-        {"f_map_struct", []() -> Field
+        {
+            "f_map_struct",
+            []() -> Field
             {
                 Tuple tuple{"world", Int64(4)};
 
@@ -163,27 +217,35 @@ TEST(ParquetRead, ReadData)
                 return std::move(res);
             }(),
         },
-        {"f_struct", []() -> Field
+        {
+            "f_struct",
+            []() -> Field
             {
                 Tuple res{"hello world", Int64(5)};
                 return std::move(res);
             }(),
         },
-        {"f_struct_struct", []() -> Field
+        {
+            "f_struct_struct",
+            []() -> Field
             {
                 Tuple tuple{"world", Int64(6)};
                 Tuple res{"hello", Int64(6), std::move(tuple)};
                 return std::move(res);
             }(),
         },
-        {"f_struct_array", []() -> Field
+        {
+            "f_struct_array",
+            []() -> Field
             {
                 Array array{Int64(1), Int64(2), Int64(3)};
                 Tuple res{"hello", Int64(7), std::move(array)};
                 return std::move(res);
             }(),
         },
-        {"f_struct_map", []() -> Field
+        {
+            "f_struct_map",
+            []() -> Field
             {
                 Map map;
                 map.push_back(Tuple{"world", Int64(9)});
@@ -194,32 +256,25 @@ TEST(ParquetRead, ReadData)
         },
     };
 
-    for (const auto & name_and_type : name_and_types)
-        if (fields.count(name_and_type.name))
-            columns.emplace_back(name_and_type.type, name_and_type.name);
+    readData<ParquetSchemaReader, ParquetBlockInputFormat>(path, fields);
+    readData<OptimizedParquetSchemaReader, OptimizedParquetBlockInputFormat>(path, fields);
+}
 
-    Block header(columns);
-    in = std::make_shared<ReadBufferFromFile>(path);
-    auto format = std::make_shared<ParquetBlockInputFormat>(*in, header, settings);
-    auto pipeline = QueryPipeline(std::move(format));
-    auto reader = std::make_unique<PullingPipelineExecutor>(pipeline);
 
-    Block block;
-    EXPECT_TRUE(reader->pull(block));
-    EXPECT_TRUE(block.rows() == 1);
+TEST(ParquetRead, ReadDataNull)
+{
+    const String path = "./utils/local-engine/tests/data/alltypes/alltypes_null.parquet";
+    std::map<String, Field> fields{
+        {"f_array", Null{}},        {"f_bool", Null{}},   {"f_byte", Null{}},          {"f_short", Null{}},
+        {"f_int", Null{}},          {"f_long", Null{}},   {"f_float", Null{}},         {"f_double", Null{}},
+        {"f_string", Null{}},       {"f_binary", Null{}}, {"f_decimal", Null{}},       {"f_date", Null{}},
+        {"f_timestamp", Null{}},    {"f_array", Null{}},  {"f_array_array", Null{}},   {"f_array_map", Null{}},
+        {"f_array_struct", Null{}}, {"f_map", Null{}},    {"f_map_map", Null{}},       {"f_map_array", Null{}},
+        {"f_map_struct", Null{}},   {"f_struct", Null{}}, {"f_struct_struct", Null{}}, {"f_struct_array", Null{}},
+        {"f_struct_map", Null{}},
+    };
 
-    for (const auto & name_and_type : name_and_types)
-    {
-        if (fields.count(name_and_type.name))
-        {
-            const auto & name = name_and_type.name;
-            const auto & column = block.getByName(name);
-            auto field = (*column.column)[0];
-            auto expect_field = fields[name];
-            std::cout << "field:" << toString(field) << ", expect_field:" << toString(expect_field) << std::endl;
-            EXPECT_TRUE(field == expect_field);
-        }
-    }
-
+    readData<ParquetSchemaReader, ParquetBlockInputFormat>(path, fields);
+    readData<OptimizedParquetSchemaReader, OptimizedParquetBlockInputFormat>(path, fields);
 }
 
