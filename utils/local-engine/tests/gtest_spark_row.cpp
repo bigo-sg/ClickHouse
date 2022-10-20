@@ -460,3 +460,4 @@ TEST(SparkRow, NullableComplexTypes)
     assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
     EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + 3 * 8);
 }
+

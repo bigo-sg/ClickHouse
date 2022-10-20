@@ -1782,6 +1782,7 @@ namespace internal {
 
             void ReadValuesDense(int64_t values_to_read) override
             {
+                std::cout << "ReadValuesDense" << std::endl;
                 if (unlikely(!inited)) {initialize();}
 
                 ::arrow::internal::BitmapWriter bitmap_writer(
@@ -1800,6 +1801,7 @@ namespace internal {
 
             void ReadValuesSpaced(int64_t values_to_read, int64_t null_count) override
             {
+                std::cout << "ReadValuesSpaced" << std::endl;
                 if (unlikely(!inited)) {initialize();}
 
                 ::arrow::internal::BitmapWriter bitmap_writer(
