@@ -12,6 +12,7 @@
 #include <Common/JNIUtils.h>
 #include <substrait/type.pb.h>
 #include <jni/jni_common.h>
+#include "base/types.h"
 
 namespace DB
 {
@@ -30,6 +31,7 @@ struct SparkRowToCHColumnHelper
     DataTypes data_types;
     Block header;
     MutableColumns mutable_columns;
+    UInt64 rows;
 
     SparkRowToCHColumnHelper(vector<string> & names, vector<string> & types)
         : data_types(names.size())
@@ -51,6 +53,7 @@ struct SparkRowToCHColumnHelper
 
     void resetMutableColumns()
     {
+        rows = 0;
         mutable_columns = std::move(header.mutateColumns());
     }
 

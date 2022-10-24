@@ -1,7 +1,7 @@
 #include "NativeSplitter.h"
 #include <Functions/FunctionFactory.h>
 #include <Parser/SerializedPlanParser.h>
-#include "Common/Exception.h"
+#include <Common/Exception.h>
 #include <Common/JNIUtils.h>
 #include <jni/jni_common.h>
 

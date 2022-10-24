@@ -1,4 +1,5 @@
 #include "SparkRowToCHColumn.h"
+#include <memory>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnVector.h>
 #include <Columns/ColumnNullable.h>
@@ -8,6 +9,9 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypeDateTime64.h>
 #include <Functions/FunctionHelpers.h>
+#include <Common/Exception.h>
+#include <Core/ColumnsWithTypeAndName.h>
+#include <DataTypes/DataTypesNumber.h>
 
 namespace DB
 {
@@ -69,13 +73,27 @@ void SparkRowToCHColumn::appendSparkRowToCHColumn(SparkRowToCHColumnHelper & hel
     SparkRowReader row_reader(helper.data_types);
     row_reader.pointTo(buffer, length);
     writeRowToColumns(helper.mutable_columns, row_reader);
+    ++helper.rows;
 }
 
 Block * SparkRowToCHColumn::getBlock(SparkRowToCHColumnHelper & helper)
 {
     auto * block = new Block();
-    *block = std::move(helper.header.cloneEmpty());
-    block->setColumns(std::move(helper.mutable_columns));
+    if (helper.header.columns())
+    {
+        *block = std::move(helper.header.cloneEmpty());
+        block->setColumns(std::move(helper.mutable_columns));
+    }
+    else
+    {
+        // In some cases, there is no required columns in spark plan, E.g. count(*).
+        // In these cases, the rows is the only needed information, so we try to create
+        // a block with a const column which will not be really used any where.
+        auto uint8_ty = std::make_shared<DB::DataTypeUInt8>();
+        auto col = uint8_ty->createColumnConst(helper.rows, 0);
+        ColumnWithTypeAndName named_col(col, uint8_ty, "__anonymous_col__");
+        block->insert(named_col);
+    }
     return block;
 }
 
