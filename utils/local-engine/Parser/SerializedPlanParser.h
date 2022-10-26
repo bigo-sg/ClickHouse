@@ -17,7 +17,7 @@
 #include <arrow/ipc/writer.h>
 #include <substrait/plan.pb.h>
 #include <Common/BlockIterator.h>
-#include "Core/SortDescription.h"
+#include <Core/SortDescription.h>
 
 namespace local_engine
 {
@@ -90,6 +90,8 @@ public:
     DB::QueryPlanPtr parseReadRealWithLocalFile(const substrait::ReadRel & rel);
     DB::QueryPlanPtr parseReadRealWithJavaIter(const substrait::ReadRel & rel);
     DB::QueryPlanPtr parseMergeTreeTable(const substrait::ReadRel & rel);
+    DB::Block parseSchemeFromMergeTreeFile(const std::string & path);
+
 
     static bool isReadRelFromJava(const substrait::ReadRel & rel);
     static DB::Block parseNameStruct(const substrait::NamedStruct & struct_);
@@ -204,5 +206,6 @@ private:
     Block header;
     std::unique_ptr<CHColumnToSparkRow> ch_column_to_spark_row;
     std::unique_ptr<SparkBuffer> spark_buffer;
+    DB::QueryPlanPtr current_query_plan;
 };
 }
