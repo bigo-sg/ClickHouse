@@ -90,8 +90,6 @@ public:
     DB::QueryPlanPtr parseReadRealWithLocalFile(const substrait::ReadRel & rel);
     DB::QueryPlanPtr parseReadRealWithJavaIter(const substrait::ReadRel & rel);
     DB::QueryPlanPtr parseMergeTreeTable(const substrait::ReadRel & rel);
-    DB::Block parseSchemeFromMergeTreeFile(const std::string & path);
-
 
     static bool isReadRelFromJava(const substrait::ReadRel & rel);
     static DB::Block parseNameStruct(const substrait::NamedStruct & struct_);

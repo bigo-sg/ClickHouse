@@ -10,14 +10,6 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <Common/CHUtil.h>
 
-namespace DB
-{
-namespace ErrorCodes
-{
-    extern const int LOGICAL_ERROR;
-}
-}
-
 namespace local_engine
 {
 jclass SourceFromJavaIter::serialized_record_batch_iterator_class = nullptr;
