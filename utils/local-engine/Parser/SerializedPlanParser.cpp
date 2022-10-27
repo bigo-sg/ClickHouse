@@ -251,7 +251,7 @@ QueryPlanPtr SerializedPlanParser::parseMergeTreeTable(const substrait::ReadRel 
         {
             throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Empty mergetree directory: {}", merge_tree_table.relative_path);
         }
-        auto part_names_types_list = MergeTreeUtil::getSchemaFromMergeTreePartFiles(all_parts_dir[0]);
+        auto part_names_types_list = MergeTreeUtil::getSchemaFromMergeTreePart(all_parts_dir[0]);
         NamesAndTypesList one_column_name_type;
         one_column_name_type.push_back(part_names_types_list.front());
         header = BlockUtil::buildHeader(one_column_name_type);

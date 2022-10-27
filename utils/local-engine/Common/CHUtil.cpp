@@ -19,7 +19,7 @@ namespace ErrorCodes
 }
 namespace local_engine
 {
-constexpr auto VIRTUAL_ROW_COUNT_COL = "__virtual_row_count_col__";
+constexpr auto VIRTUAL_ROW_COUNT_COLOUMN = "__VIRTUAL_ROW_COUNT_COLOUMNOUMN__";
 
 namespace fs = std::filesystem;
 
@@ -28,7 +28,7 @@ DB::Block BlockUtil::buildRowCountHeader()
     DB::Block header;
     auto uint8_ty = std::make_shared<DB::DataTypeUInt8>();
     auto col = uint8_ty->createColumn();
-    DB::ColumnWithTypeAndName named_col(std::move(col), uint8_ty, VIRTUAL_ROW_COUNT_COL);
+    DB::ColumnWithTypeAndName named_col(std::move(col), uint8_ty, VIRTUAL_ROW_COUNT_COLOUMN);
     header.insert(named_col);
     return header.cloneEmpty();
 }
@@ -47,7 +47,7 @@ DB::Block BlockUtil::buildRowCountBlock(UInt64 rows)
     DB::Block block;
     auto uint8_ty = std::make_shared<DB::DataTypeUInt8>();
     auto col = uint8_ty->createColumnConst(rows, 0);
-    DB::ColumnWithTypeAndName named_col(col, uint8_ty, VIRTUAL_ROW_COUNT_COL);
+    DB::ColumnWithTypeAndName named_col(col, uint8_ty, VIRTUAL_ROW_COUNT_COLOUMN);
     block.insert(named_col);
     return block;
 }
@@ -93,7 +93,7 @@ std::vector<MergeTreeUtil::Path> MergeTreeUtil::getAllMergeTreeParts(const Path 
     return res;
 }
 
-DB::NamesAndTypesList MergeTreeUtil::getSchemaFromMergeTreePartFiles(const fs::path & part_path)
+DB::NamesAndTypesList MergeTreeUtil::getSchemaFromMergeTreePart(const fs::path & part_path)
 {
     DB::NamesAndTypesList names_types_list;
     if (!fs::exists(part_path))
