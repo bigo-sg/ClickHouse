@@ -70,6 +70,12 @@ Calculates the remainder when dividing `a` by `b`. Similiar to function `modulo`
 ## positive_modulo(a, b)
 Calculates the remainder when dividing `a` by `b`. Similiar to function `modulo` except that `positive_modulo` always return non-negative number.
 
+## positive_modulo(a, b)
+Calculates the remainder when dividing `a` by `b`. Similiar to function `modulo` except that `positive_modulo` always return non-negative number.
+
+## positive_modulo(a, b)
+Calculates the remainder when dividing `a` by `b`. Similiar to function `modulo` except that `positive_modulo` always return non-negative number.
+
 ## negate(a), -a operator {#negatea-a-operator}
 
 Calculates a number with the reverse sign. The result is always signed.
