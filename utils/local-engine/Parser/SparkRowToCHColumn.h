@@ -84,8 +84,7 @@ public:
     {
         SparkRowToCHColumnHelper helper(names, types);
 
-        int attached;
-        JNIEnv * env = JNIUtils::getENV(&attached);
+        GET_JNIENV(env)
         while (safeCallBooleanMethod(env, java_iter, spark_row_interator_hasNext))
         {
             jobject rows_buf = safeCallObjectMethod(env, java_iter, spark_row_iterator_nextBatch);
