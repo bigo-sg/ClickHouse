@@ -817,8 +817,11 @@ jlong Java_io_glutenproject_vectorized_BlockSplitIterator_nativeCreate(
     options.partition_nums = partition_num;
     options.buffer_size = buffer_size;
     auto expr_str = jstring2string(env, expr);
+    /*
     Poco::StringTokenizer exprs(expr_str, ",");
     options.exprs.insert(options.exprs.end(), exprs.begin(), exprs.end());
+    */
+    options.exprs_buffer.swap(expr_str);
     local_engine::NativeSplitter::Holder * splitter = new local_engine::NativeSplitter::Holder{
         .splitter = local_engine::NativeSplitter::create(jstring2string(env, name), options, in)};
     return reinterpret_cast<jlong>(splitter);

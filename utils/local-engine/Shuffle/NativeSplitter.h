@@ -3,6 +3,7 @@
 #include <stack>
 #include <Shuffle/ShuffleSplitter.h>
 #include <Common/BlockIterator.h>
+#include "DataTypes/Serializations/ISerialization.h"
 
 namespace local_engine
 {
@@ -13,7 +14,8 @@ public:
     {
         size_t buffer_size = 8192;
         size_t partition_nums;
-        std::vector<std::string> exprs;
+        std::string exprs_buffer;
+        //std::vector<std::string> exprs;
     };
 
     struct Holder
@@ -57,9 +59,10 @@ class HashNativeSplitter : public NativeSplitter
     void computePartitionId(DB::Block & block) override;
 
 public:
-    HashNativeSplitter(NativeSplitter::Options options_, jobject input) : NativeSplitter(options_, input) { }
+    HashNativeSplitter(NativeSplitter::Options options_, jobject input);
 
 private:
+    std::vector<std::string> hash_fields;
     DB::FunctionBasePtr hash_function;
 };
 
@@ -72,6 +75,23 @@ public:
 
 private:
     int32_t pid_selection = 0;
+};
+
+class RangePartitionNativeSplitter : public NativeSplitter
+{
+    void computePartitionId(DB::Block & block) override;
+public:
+    RangePartitionNativeSplitter(NativeSplitter::Options options_, jobject input);
+private:
+    struct SortDescription
+    {
+        std::string expression_str;
+        DB::DataTypePtr data_type;
+        int sort_direction;
+    };
+    std::vector<SortDescription> sorting_descrs;
+
+    static DB::DataTypePtr getCHType(const std::string & spark_type_name);
 };
 
 }

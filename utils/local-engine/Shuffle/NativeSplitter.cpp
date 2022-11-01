@@ -1,10 +1,32 @@
 #include "NativeSplitter.h"
+#include <functional>
 #include <Functions/FunctionFactory.h>
 #include <Parser/SerializedPlanParser.h>
 #include <Common/Exception.h>
 #include <jni/jni_common.h>
+#include <Common/Exception.h>
 #include <Common/JNIUtils.h>
+#include "DataTypes/DataTypeFactory.h"
+#include "IO/WriteBufferFromString.h"
+#include <Poco/JSON/Array.h>
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
+#include <Poco/StringTokenizer.h>
+#include <Poco/JSON/JSON.h>
+#include <Poco/JSON/Parser.h>
+#include <Interpreters/ActionsDAG.h>
+#include <Interpreters/ActionsVisitor.h>
+#include <Interpreters/ExpressionActions.h>
+#include <Parsers/ExpressionListParsers.h>
 
+
+namespace DB
+{
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
+}
 namespace local_engine
 {
 jclass NativeSplitter::iterator_class = nullptr;
@@ -126,6 +148,7 @@ int64_t NativeSplitter::inputNext()
 }
 std::unique_ptr<NativeSplitter> NativeSplitter::create(const std::string & short_name, Options options_, jobject input)
 {
+    LOG_ERROR(&Poco::Logger::get("NativeSplitter"), "name:{}, expr:{}", short_name, options_.exprs_buffer);
     if (short_name == "rr")
     {
         return std::make_unique<RoundRobinNativeSplitter>(options_, input);
@@ -139,16 +162,26 @@ std::unique_ptr<NativeSplitter> NativeSplitter::create(const std::string & short
         options_.partition_nums = 1;
         return std::make_unique<RoundRobinNativeSplitter>(options_, input);
     }
+    else if (short_name == "range")
+    {
+        return std::make_unique<RangePartitionNativeSplitter>(options_, input);
+    }
     else
     {
+        LOG_ERROR(&Poco::Logger::get("NativeSplitter"), "unsupported splitter. name: {}, expr:{}", short_name, options_.exprs_buffer);
         throw std::runtime_error("unsupported splitter " + short_name);
     }
 }
-
+HashNativeSplitter::HashNativeSplitter(NativeSplitter::Options options_, jobject input)
+    : NativeSplitter(options_, input)
+{
+    Poco::StringTokenizer exprs_list(options_.exprs_buffer, ",");
+    hash_fields.insert(hash_fields.end(), exprs_list.begin(), exprs_list.end());
+}
 void HashNativeSplitter::computePartitionId(Block & block)
 {
     ColumnsWithTypeAndName args;
-    for (auto & name : options.exprs)
+    for (auto & name : hash_fields)
     {
         args.emplace_back(block.getByName(name));
     }
@@ -176,4 +209,58 @@ void RoundRobinNativeSplitter::computePartitionId(Block & block)
         pid_selection = (pid_selection + 1) % options.partition_nums;
     }
 }
+
+RangePartitionNativeSplitter::RangePartitionNativeSplitter(NativeSplitter::Options options_, jobject input)
+    : NativeSplitter(options_, input)
+{
+    Poco::JSON::Parser parser;
+    auto info = parser.parse(options_.exprs_buffer).extract<Poco::JSON::Object::Ptr>();
+
+
+    auto ordering_infos = info->get("ordering").extract<Poco::JSON::Array::Ptr>();
+    for (size_t i = 0; i < ordering_infos->size(); ++i)
+    {
+        SortDescription sorting_descr;
+        auto ordering_info = ordering_infos->get(i).extract<Poco::JSON::Object::Ptr>();
+        sorting_descr.expression_str = ordering_info->get("expression").convert<std::string>();
+        auto type_name = ordering_info->get("data_type").convert<std::string>();
+        if (type_name == "IntegerType")
+        {
+            sorting_descr.data_type = DB::DataTypeFactory::instance().get("Int32");
+        }
+        else if (type_name == "StringType")
+        {
+            sorting_descr.data_type = DB::DataTypeFactory::instance().get("String");
+        }
+        else
+        {
+            LOG_ERROR(&Poco::Logger::get("RangePartitionNativeSplitter"), "unknow type: {}", type_name);
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "unknow type: {}", type_name);   
+        }
+        sorting_descr.sort_direction = ordering_info->get("direction").convert<int>();
+        sorting_descrs.push_back(sorting_descr);
+        LOG_ERROR(
+            &Poco::Logger::get("RangePartitionNativeSplitter"),
+            "XXXX add sort descr: {}; {}; {}",
+            sorting_descr.expression_str,
+            sorting_descr.data_type->getName(),
+            sorting_descr.sort_direction);
+    }
+
+
+}
+
+void RangePartitionNativeSplitter::computePartitionId(DB::Block & /*block*/)
+{
+    throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Not implemented");
+    /*
+    std::vector<std::string> sorting_columns_names;
+    DB::ParserExpressionList sorting_expr_parser(true);
+    DB::WriteBufferFromOwnString write_buf;
+
+    for ()
+    DB::ASTPtr func_ast = parseQuery(sorting_expr_parser, , "Parse Block hash expression", settings.max_query_size, settings.max_parser_depth);
+    */
+}
+
 }
