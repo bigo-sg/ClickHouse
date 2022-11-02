@@ -3,7 +3,9 @@
 #include <stack>
 #include <Shuffle/ShuffleSplitter.h>
 #include <Common/BlockIterator.h>
-#include "DataTypes/Serializations/ISerialization.h"
+#include "Processors/Chunk.h"
+#include <Core/SortDescription.h>
+#include <DataTypes/Serializations/ISerialization.h>
 
 namespace local_engine
 {
@@ -83,15 +85,16 @@ class RangePartitionNativeSplitter : public NativeSplitter
 public:
     RangePartitionNativeSplitter(NativeSplitter::Options options_, jobject input);
 private:
-    struct SortDescription
-    {
-        std::string expression_str;
-        DB::DataTypePtr data_type;
-        int sort_direction;
-    };
-    std::vector<SortDescription> sorting_descrs;
+    DB::SortDescription sort_descriptions;
+    std::vector<DB::DataTypePtr> sort_columns_types;
+    DB::Block range_block;
 
     static DB::DataTypePtr getCHType(const std::string & spark_type_name);
+
+    void initSortDescriptions(Poco::JSON::Array::Ptr orderings);
+    void initRangeBlock(Poco::JSON::Array::Ptr range_bounds);
+
+    static int compareRow(const DB::Columns & columns, const std::vector<size_t> & required_columns, size_t row, const DB::Columns & bound_columns, size_t bound_row);
 };
 
 }

@@ -17,6 +17,7 @@
 #include <arrow/ipc/writer.h>
 #include <substrait/plan.pb.h>
 #include <Common/BlockIterator.h>
+#include "DataTypes/Serializations/ISerialization.h"
 #include <Core/SortDescription.h>
 
 namespace local_engine
@@ -143,6 +144,8 @@ public:
     static bool isReadRelFromJava(const substrait::ReadRel & rel);
     static DB::Block parseNameStruct(const substrait::NamedStruct & struct_);
     static DB::DataTypePtr parseType(const substrait::Type & type);
+    // This is used for construct a data type from spark type name;
+    static DB::DataTypePtr parseType(const std::string & type);
 
     void addInputIter(jobject iter) { input_iters.emplace_back(iter); }
 
@@ -151,7 +154,8 @@ public:
     static SharedContextHolder shared_context;
     QueryContext query_context;
 
-private:
+//private:
+public:
     static DB::NamesAndTypesList blockToNameAndTypeList(const DB::Block & header);
     DB::QueryPlanPtr parseOp(const substrait::Rel & rel);
     void

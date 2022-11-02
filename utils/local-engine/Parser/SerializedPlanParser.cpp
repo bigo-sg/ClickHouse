@@ -54,6 +54,9 @@
 
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/SortingStep.h>
+#include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/Serializations/ISerialization.h>
+#include <SerializedPlanParser.h>
 #include <Storages/IStorage.h>
 #include <Common/CHUtil.h>
 #include "SerializedPlanParser.h"
@@ -456,6 +459,21 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
 
     /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/FixedChar/VarChar/FixedBinary/UserDefined
     return std::move(ch_type);
+}
+
+DB::DataTypePtr SerializedPlanParser::parseType(const std::string & type)
+{
+    static std::map<std::string, std::string> type2type = {
+        {"IntegerType", "Int32"},
+        {"StringType", "String"}
+    };
+
+    auto it = type2type.find(type);
+    if (it == type2type.end())
+    {
+        throw DB::Exception(DB::ErrorCodes::UNKNOWN_TYPE, "Unknow spark type: {}", type);
+    }
+    return DB::DataTypeFactory::instance().get(it->second);
 }
 
 QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
@@ -1747,6 +1765,13 @@ bool LocalExecutor::hasNext()
         LOG_ERROR(
             &Poco::Logger::get("LocalExecutor"), "run query plan failed. {}\n{}", e.message(), PlanUtil::explainPlan(*current_query_plan));
         throw e;
+    }
+    catch (...)
+    {
+
+        LOG_ERROR(
+            &Poco::Logger::get("LocalExecutor"), "run query plan failed. {}", PlanUtil::explainPlan(*current_query_plan));
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "what happend here");
     }
     return has_next;
 }
