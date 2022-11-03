@@ -30,7 +30,7 @@ DataTypePtr FunctionArrayStringConcat::getReturnTypeImpl(const DataTypes & argum
 void registerFunctionsStringArray(FunctionFactory & factory)
 {
     factory.registerFunction<FunctionExtractAll>();
-    factory.registerFunction<FunctionAlphaTokens>();
+    factory.registerFunction<FunctionSplitByAlpha>();
     factory.registerFunction<FunctionSplitByNonAlpha>();
     factory.registerFunction<FunctionSplitByWhitespace>();
     factory.registerFunction<FunctionSplitByChar>();
