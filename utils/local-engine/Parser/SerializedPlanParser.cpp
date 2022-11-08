@@ -1286,8 +1286,17 @@ QueryPlanPtr SerializedPlanParser::parse(const std::string & plan)
     if (!ok)
         throw Exception(ErrorCodes::CANNOT_PARSE_PROTOBUF_SCHEMA, "Parse substrait::Plan from string failed");
 
-    return std::move(parse(std::move(plan_ptr)));
+    auto res = std::move(parse(std::move(plan_ptr)));
+
+    auto * logger = &Poco::Logger::get("SerializedPlanParser");
+    if (logger->debug())
+    {
+        auto out = PlanUtil::explainPlan(*res);
+        LOG_DEBUG(logger, "clickhouse plan:{}", out);
+    }
+    return std::move(res);
 }
+
 void SerializedPlanParser::initFunctionEnv()
 {
     registerFunctions();
