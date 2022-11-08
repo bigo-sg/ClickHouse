@@ -8,14 +8,14 @@
 #include <jni/jni_common.h>
 #include <Common/Exception.h>
 #include <Common/JNIUtils.h>
-#include "Columns/IColumn.h"
-#include "Core/Block.h"
-#include "Core/ColumnsWithTypeAndName.h"
-#include "Core/iostream_debug_helpers.h"
-#include "DataTypes/DataTypeNullable.h"
-#include "DataTypes/Serializations/ISerialization.h"
-#include "Processors/Transforms/SortingTransform.h"
-#include "base/types.h"
+#include <Columns/IColumn.h>
+#include <Core/Block.h>
+#include <Core/ColumnsWithTypeAndName.h>
+#include <Core/iostream_debug_helpers.h>
+#include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/Serializations/ISerialization.h>
+#include <Processors/Transforms/SortingTransform.h>
+#include <base/types.h>
 #include <Core/Names.h>
 #include <Core/SortDescription.h>
 #include <DataTypes/DataTypeFactory.h>
@@ -29,9 +29,6 @@
 #include <Poco/JSON/Parser.h>
 #include <Parsers/parseQuery.h>
 #include <Parsers/queryToString.h>
-#include <Interpreters/ActionsDAG.h>
-#include <Interpreters/ActionsVisitor.h>
-#include <Interpreters/ExpressionActions.h>
 #include <Parsers/ExpressionListParsers.h>
 #include <substrait/plan.pb.h>
 #include <google/protobuf/text_format.h>
@@ -105,12 +102,14 @@ NativeSplitter::NativeSplitter(Options options_, jobject input_) : options(optio
     }
     CLEAN_JNIENV
 }
+
 NativeSplitter::~NativeSplitter()
 {
     GET_JNIENV(env)
     env->DeleteGlobalRef(input);
     CLEAN_JNIENV
 }
+
 bool NativeSplitter::hasNext()
 {
     if (begin_ts == 0)
@@ -153,6 +152,7 @@ bool NativeSplitter::hasNext()
     }
     return !output_buffer.empty();
 }
+
 DB::Block * NativeSplitter::next()
 {
     if (!output_buffer.empty())
@@ -162,6 +162,7 @@ DB::Block * NativeSplitter::next()
     consume();
     return &currentBlock();
 }
+
 int32_t NativeSplitter::nextPartitionId()
 {
     return next_partition_id;
@@ -210,12 +211,14 @@ std::unique_ptr<NativeSplitter> NativeSplitter::create(const std::string & short
         throw std::runtime_error("unsupported splitter " + short_name);
     }
 }
+
 HashNativeSplitter::HashNativeSplitter(NativeSplitter::Options options_, jobject input)
     : NativeSplitter(options_, input)
 {
     Poco::StringTokenizer exprs_list(options_.exprs_buffer, ",");
     hash_fields.insert(hash_fields.end(), exprs_list.begin(), exprs_list.end());
 }
+
 void HashNativeSplitter::computePartitionId(Block & block)
 {
     ColumnsWithTypeAndName args;
@@ -238,6 +241,7 @@ void HashNativeSplitter::computePartitionId(Block & block)
         partition_ids.emplace_back(static_cast<UInt64>(hash_column->get64(i) % options.partition_nums));
     }
 }
+
 void RoundRobinNativeSplitter::computePartitionId(Block & block)
 {
     partition_ids.resize(block.rows());
@@ -248,42 +252,25 @@ void RoundRobinNativeSplitter::computePartitionId(Block & block)
     }
 }
 
-
 static std::map<int, std::pair<int, int>> direction_map = {
         {1, {1, -1}},
         {2, {1, 1}},
         {3, {-1, 1}},
         {4, {-1, -1}}
 };
+
 RangePartitionNativeSplitter::RangePartitionNativeSplitter(NativeSplitter::Options options_, jobject input)
     : NativeSplitter(options_, input)
 {
     Poco::JSON::Parser parser;
     auto info = parser.parse(options_.exprs_buffer).extract<Poco::JSON::Object::Ptr>();
 
-
     auto ordering_infos = info->get("ordering").extract<Poco::JSON::Array::Ptr>();
-    initSortDescriptions(ordering_infos);
-    initSortFieldTypes(ordering_infos);
+    initSortInformation(ordering_infos);
     initRangeBlock(info->get("range_bounds").extract<Poco::JSON::Array::Ptr>());
-    for (size_t i = 0; i < range_bounds_block.rows() + 1; ++i)
-    {
-        part_counts.emplace_back(std::make_shared<std::atomic<int>>(0));
-    }
 }
 
-RangePartitionNativeSplitter::~RangePartitionNativeSplitter()
-{
-    DB::WriteBufferFromOwnString buf;
-    for (size_t i = 0; i < part_counts.size(); ++i)
-    {
-        int x = *part_counts[i];
-        buf << "part:" << i << ", rows: " << x << ";";
-    }
-    LOG_ERROR(&Poco::Logger::get("RangePartitionNativeSplitter"), "dispatch metrics. {}", buf.str());
-}
-
-void RangePartitionNativeSplitter::initSortDescriptions(Poco::JSON::Array::Ptr orderings)
+void RangePartitionNativeSplitter::initSortInformation(Poco::JSON::Array::Ptr orderings)
 {
     for (size_t i = 0; i < orderings->size(); ++i)
     {
@@ -298,25 +285,16 @@ void RangePartitionNativeSplitter::initSortDescriptions(Poco::JSON::Array::Ptr o
         }
         DB::SortColumnDescription ch_col_sort_descr(col_pos, d_iter->second.first, d_iter->second.second);
         sort_descriptions.emplace_back(ch_col_sort_descr);
-        sorting_key_columns.emplace_back(col_pos);
-    }
-}
-
-void RangePartitionNativeSplitter::initSortFieldTypes(Poco::JSON::Array::Ptr orderings)
-{
-    sort_field_types.clear();
-    for (size_t i = 0; i < orderings->size(); ++i)
-    {
-        auto ordering = orderings->get(i).extract<Poco::JSON::Object::Ptr>();
+        
         auto type_name = ordering->get("data_type").convert<std::string>();
         auto type = SerializedPlanParser::parseType(type_name);
         SortFieldTypeInfo info;
         info.inner_type = type;
         info.is_nullable = ordering->get("is_nullable").convert<bool>();
         sort_field_types.emplace_back(info);
+        sorting_key_columns.emplace_back(col_pos);
     }
 }
-
 
 void RangePartitionNativeSplitter::initRangeBlock(Poco::JSON::Array::Ptr range_bounds)
 {
@@ -340,7 +318,15 @@ void RangePartitionNativeSplitter::initRangeBlock(Poco::JSON::Array::Ptr range_b
             {
                 const auto & type_name = type_info.inner_type->getName();
                 const auto & field_value = field_info->get("value");
-                if (type_name == "Int16")
+                if (type_name == "UInt8")
+                {
+                    col->insert(static_cast<DB::UInt8>(field_value.convert<DB::Int16>()));
+                }
+                else if (type_name == "Int8")
+                {
+                    col->insert(field_value.convert<DB::Int8>());
+                }
+                else if (type_name == "Int16")
                 {
                     col->insert(field_value.convert<DB::Int16>());
                 }
@@ -362,7 +348,12 @@ void RangePartitionNativeSplitter::initRangeBlock(Poco::JSON::Array::Ptr range_b
                 }
                 else if (type_name == "String")
                 {
-                    col->insert(field_info->get("value").convert<std::string>());
+                    col->insert(field_value.convert<std::string>());
+                }
+                else if (type_name == "Date")
+                {
+                    int val = field_value.convert<DB::UInt16>();
+                    col->insert(val);
                 }
                 else
                 {
@@ -394,16 +385,16 @@ void RangePartitionNativeSplitter::computePartitionIdByBinarySearch(DB::Block & 
     partition_ids.reserve(block.rows());
     auto input_columns = block.getColumns();
     auto total_rows = block.rows();
+    const auto & bounds_columns = range_bounds_block.getColumns();
+    auto max_part = bounds_columns[0]->size();
     for (size_t r = 0; r < total_rows; ++r)
     {
         size_t selected_partition = 0;
-        const auto & bounds = range_bounds_block.getColumns();
-        auto ret = binarySearchBound(bounds, 0, bounds[0]->size() - 1, input_columns, sorting_key_columns, r);
+        auto ret = binarySearchBound(bounds_columns, 0, max_part - 1, input_columns, sorting_key_columns, r);
         if (ret >= 0)
             selected_partition = ret;
         else
-            selected_partition = bounds[0]->size();
-        *part_counts[selected_partition] += 1;
+            selected_partition = max_part;
         partition_ids.emplace_back(selected_partition);
     }
 
@@ -436,8 +427,8 @@ int RangePartitionNativeSplitter::compareRow(
 // the return the min element's index. otherwise return -1
 int RangePartitionNativeSplitter::binarySearchBound(
     const DB::Columns & bound_columns,
-    size_t l,
-    size_t r,
+    Int64 l,
+    Int64 r,
     const DB::Columns & columns,
     const std::vector<size_t> & used_cols,
     size_t row)
@@ -460,7 +451,7 @@ int RangePartitionNativeSplitter::binarySearchBound(
         return static_cast<int>(m);
     if (cmp_ret < 0)
     {
-        cmp_ret = binarySearchBound(bound_columns, l, m, columns, used_cols, row);
+        cmp_ret = binarySearchBound(bound_columns, l, m - 1, columns, used_cols, row);
         if (cmp_ret < 0)
         {
             // m is the upper bound
@@ -469,7 +460,7 @@ int RangePartitionNativeSplitter::binarySearchBound(
         return cmp_ret;
 
     }
-    else 
+    else
     {
         cmp_ret = binarySearchBound(bound_columns, m + 1, r, columns, used_cols, row);
         if (cmp_ret < 0)
@@ -480,139 +471,5 @@ int RangePartitionNativeSplitter::binarySearchBound(
     __builtin_unreachable();
 }
 
-std::string RangePartitionNativeSplitter::getUniqueName()
-{
-    size_t id = id_count;
-    id_count += 1;
-    return "unique_" + std::to_string(id);
-}
-
-DB::ColumnWithTypeAndName RangePartitionNativeSplitter::buildCompareRightValueColumn(size_t row_pos, size_t col_pos)
-{
-    auto cols = range_bounds_block.getColumns();
-    auto field = (*cols[col_pos])[row_pos];
-    auto type = sort_field_types[col_pos].inner_type;
-    auto name = getUniqueName();
-    return DB::ColumnWithTypeAndName(type->createColumnConst(1, field), type, name);
-}
-
-const DB::ActionsDAG::Node * RangePartitionNativeSplitter::buildColumnCompareExpression(
-        std::shared_ptr<DB::ActionsDAG> action_dag,
-        int direction,
-        size_t left_value_pos,
-        DB::ColumnWithTypeAndName right_values,
-        std::string & result_name)
-{
-    const auto * const_col = &action_dag->addColumn(right_values);
-    const auto * field = action_dag->getInputs()[left_value_pos];
-    DB::ActionsDAG::NodeRawConstPtrs args;
-    args.emplace_back(field);
-    args.emplace_back(const_col);
-
-    auto function_alias = getUniqueName();
-    result_name = function_alias;
-    std::string function_name;
-    if (direction > 0)
-    {
-        function_name = "lessOrEquals";
-    }
-    else
-    {
-        function_name = "greaterOrEquals";
-    }
-    auto function_builder = DB::FunctionFactory::instance().get(function_name, local_context);
-    const auto * function_node = &action_dag->addFunction(function_builder, args, function_alias);
-    return function_node;
-    
-}
-
-const DB::ActionsDAG::Node * RangePartitionNativeSplitter::combindTwoCompareExpression(
-    std::shared_ptr<DB::ActionsDAG> action_dag,
-    const DB::ActionsDAG::Node * left_arg,
-    const DB::ActionsDAG::Node * right_arg,
-    std::string & result_name)
-{
-    result_name = getUniqueName();
-    DB::ActionsDAG::NodeRawConstPtrs args;
-    args.emplace_back(left_arg);
-    args.emplace_back(right_arg);
-    auto function_builder = DB::FunctionFactory::instance().get("and", local_context);
-    return &action_dag->addFunction(function_builder, args, result_name);
-}
-void RangePartitionNativeSplitter::initActionsDag(const DB::Block & block)
-{
-    if (has_init_dag)
-        return;
-    std::lock_guard lock(init_dag_mutex);
-    if (has_init_dag)
-        return;
-    local_context = DB::Context::createCopy(local_engine::SerializedPlanParser::global_context);
-    auto actions_dag = std::make_shared<DB::ActionsDAG>(block.getNamesAndTypesList());
-    DB::NamesWithAliases project_columns;
-    for (size_t r = 0, bounds_num = range_bounds_block.rows(); r < bounds_num; ++r)
-    {
-        std::string result_name;
-        const DB::ActionsDAG::Node * last_expr = nullptr;
-        for (size_t c = 0, cols_num = range_bounds_block.columns(); c < cols_num; ++c)
-        {
-            auto right_value_col = buildCompareRightValueColumn(r, c);
-            const auto * current_expr = buildColumnCompareExpression(
-                actions_dag, sort_descriptions[c].direction, sorting_key_columns[c], right_value_col, result_name);
-            actions_dag->addOrReplaceInIndex(*current_expr);
-            if (c)
-            {
-                last_expr = combindTwoCompareExpression(actions_dag, last_expr, current_expr, result_name);
-                actions_dag->addOrReplaceInIndex(*last_expr);
-            }
-            else
-            {
-                last_expr = current_expr;
-            }
-        }
-        project_columns.emplace_back(NameWithAlias(result_name, result_name));
-    }
-    actions_dag->project(project_columns);
-    LOG_ERROR(&Poco::Logger::get("RangePart"), "init actions dag: {}", actions_dag->dumpDAG());
-    compare_sort_keys_expression = std::make_shared<ExpressionActions>(actions_dag);
-    has_init_dag = true;
-}
-
-void RangePartitionNativeSplitter::computePartitionIdByActionDag(DB::Block & block)
-{
-    // LOG_ERROR(&Poco::Logger::get("RangePartitionNativeSplitter"), "xxx input one block. rows:{}", block.rows());
-    auto copy_block = block;
-    initActionsDag(copy_block);
-    compare_sort_keys_expression->execute(copy_block, block.rows());
-    // LOG_ERROR(&Poco::Logger::get("RangePartitionNativeSplitter"), "xxx headers. {} | {}", copy_block.dumpNames(), block.dumpNames());
-    auto total_rows = block.rows();
-    auto result_columns = copy_block.getColumns();
-    // auto original_cols = block.getColumns();
-    // auto range_cols = range_bounds_block.getColumns();
-    partition_ids.clear();
-    partition_ids.reserve(block.rows());
-    for (size_t r = 0; r < total_rows; ++r)
-    {
-        size_t selected_part = 0;
-        for (size_t n = range_bounds_block.columns(); selected_part < n; ++selected_part)
-        {
-            auto compare_result = result_columns[selected_part]->getBool(r);
-            /*
-            LOG_ERROR(
-                &Poco::Logger::get("RangePartitionNativeSplitter"),
-                "compare result: row:{}, pos:{}, {} vs {}, res:{}",
-                r,
-                selected_part,
-                (*original_cols[sorting_key_columns[selected_part]])[r],
-                (*range_cols[selected_part])[r],
-                (*result_columns[selected_part])[r]);
-            */
-            if (compare_result)
-            {
-                break;
-            }
-        }
-        partition_ids.emplace_back(selected_part);
-    }
-}
 
 }

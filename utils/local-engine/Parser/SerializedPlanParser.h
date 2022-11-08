@@ -17,7 +17,8 @@
 #include <arrow/ipc/writer.h>
 #include <substrait/plan.pb.h>
 #include <Common/BlockIterator.h>
-#include "DataTypes/Serializations/ISerialization.h"
+#include <DataTypes/Serializations/ISerialization.h>
+#include <base/types.h>
 #include <Core/SortDescription.h>
 
 namespace local_engine
@@ -154,8 +155,7 @@ public:
     static SharedContextHolder shared_context;
     QueryContext query_context;
 
-//private:
-public:
+private:
     static DB::NamesAndTypesList blockToNameAndTypeList(const DB::Block & header);
     DB::QueryPlanPtr parseOp(const substrait::Rel & rel);
     void
@@ -250,14 +250,7 @@ public:
     SparkRowInfoPtr next();
     Block * nextColumnar();
     bool hasNext();
-    ~LocalExecutor()
-    {
-        if (this->spark_buffer)
-        {
-            this->ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
-            this->spark_buffer.reset();
-        }
-    }
+    ~LocalExecutor();
 
     Block & getHeader();
 

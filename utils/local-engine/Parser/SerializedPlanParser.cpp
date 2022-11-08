@@ -1,3 +1,4 @@
+#include "SerializedPlanParser.h"
 #include <memory>
 #include <base/logger_useful.h>
 #include <base/Decimal.h>
@@ -57,7 +58,9 @@
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/Serializations/ISerialization.h>
 #include <SerializedPlanParser.h>
+#include <base/types.h>
 #include <Storages/IStorage.h>
+#include <sys/select.h>
 #include <Common/CHUtil.h>
 #include "SerializedPlanParser.h"
 
@@ -464,8 +467,15 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
 DB::DataTypePtr SerializedPlanParser::parseType(const std::string & type)
 {
     static std::map<std::string, std::string> type2type = {
+        {"BooleanType", "UInt8"},
+        {"ByteType", "Int8"},
+        {"ShortType", "Int16"},
         {"IntegerType", "Int32"},
-        {"StringType", "String"}
+        {"LongType", "Int64"},
+        {"FloatType", "Float32"},
+        {"DoubleType", "Float64"},
+        {"StringType", "String"},
+        {"DateType", "Date"}
     };
 
     auto it = type2type.find(type);
@@ -1715,6 +1725,16 @@ DB::SortDescription SerializedPlanParser::parseSortDescription(const substrait::
 }
 SharedContextHolder SerializedPlanParser::shared_context;
 
+LocalExecutor::~LocalExecutor()
+{
+    if (this->spark_buffer)
+    {
+        this->ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
+        this->spark_buffer.reset();
+    }
+}
+
+
 void LocalExecutor::execute(QueryPlanPtr query_plan)
 {
     current_query_plan = std::move(query_plan);
@@ -1738,6 +1758,7 @@ void LocalExecutor::execute(QueryPlanPtr query_plan)
         t_executor / 1000.0);
     this->header = current_query_plan->getCurrentDataStream().header.cloneEmpty();
     this->ch_column_to_spark_row = std::make_unique<CHColumnToSparkRow>();
+
 }
 std::unique_ptr<SparkRowInfo> LocalExecutor::writeBlockToSparkRow(Block & block)
 {
@@ -1765,13 +1786,6 @@ bool LocalExecutor::hasNext()
         LOG_ERROR(
             &Poco::Logger::get("LocalExecutor"), "run query plan failed. {}\n{}", e.message(), PlanUtil::explainPlan(*current_query_plan));
         throw e;
-    }
-    catch (...)
-    {
-
-        LOG_ERROR(
-            &Poco::Logger::get("LocalExecutor"), "run query plan failed. {}", PlanUtil::explainPlan(*current_query_plan));
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "what happend here");
     }
     return has_next;
 }
