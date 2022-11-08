@@ -112,12 +112,6 @@ NativeSplitter::~NativeSplitter()
 
 bool NativeSplitter::hasNext()
 {
-    if (begin_ts == 0)
-    {
-        timeval tv;
-        gettimeofday(&tv, nullptr);
-        begin_ts = tv.tv_sec * 1000 + tv.tv_usec/1000;
-    }
     while (output_buffer.empty())
     {
         if (inputHasNext())
@@ -142,13 +136,6 @@ bool NativeSplitter::hasNext()
         next_partition_id = output_buffer.top().first;
         setCurrentBlock(*output_buffer.top().second);
         produce();
-    }
-    if (output_buffer.empty())
-    {
-        timeval tv;
-        gettimeofday(&tv, nullptr);
-        DB::UInt64 end_ts = tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        LOG_ERROR(&Poco::Logger::get("NativeSplitter"), "splitter metrics. total time:{}, total rows:{}", end_ts - begin_ts, total_rows);
     }
     return !output_buffer.empty();
 }
@@ -446,7 +433,7 @@ int RangePartitionNativeSplitter::binarySearchBound(
         else
             return -1;
     }
-    
+
     if (cmp_ret == 0)
         return static_cast<int>(m);
     if (cmp_ret < 0)
