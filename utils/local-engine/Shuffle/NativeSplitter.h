@@ -22,7 +22,6 @@ public:
         size_t buffer_size = 8192;
         size_t partition_nums;
         std::string exprs_buffer;
-        //std::vector<std::string> exprs;
     };
 
     struct Holder
@@ -59,9 +58,6 @@ private:
     std::stack<std::pair<int32_t, std::unique_ptr<DB::Block>>> output_buffer;
     int32_t next_partition_id = -1;
     jobject input;
-    std::atomic<UInt64> total_time = 0;
-    std::atomic<UInt64> begin_ts = 0;
-    std::atomic<UInt64> total_rows = 0;
 };
 
 class HashNativeSplitter : public NativeSplitter

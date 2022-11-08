@@ -54,7 +54,6 @@ jmethodID NativeSplitter::iterator_next = nullptr;
 
 void NativeSplitter::split(DB::Block & block)
 {
-    total_rows += block.rows();
     computePartitionId(block);
     DB::IColumn::Selector selector;
     selector = DB::IColumn::Selector(block.rows());
@@ -172,7 +171,6 @@ int64_t NativeSplitter::inputNext()
 }
 std::unique_ptr<NativeSplitter> NativeSplitter::create(const std::string & short_name, Options options_, jobject input)
 {
-    LOG_ERROR(&Poco::Logger::get("NativeSplitter"), "name:{}, part num:{}, expr:{}", short_name, options_.partition_nums, options_.exprs_buffer);
     if (short_name == "rr")
     {
         return std::make_unique<RoundRobinNativeSplitter>(options_, input);
@@ -186,15 +184,12 @@ std::unique_ptr<NativeSplitter> NativeSplitter::create(const std::string & short
         options_.partition_nums = 1;
         return std::make_unique<RoundRobinNativeSplitter>(options_, input);
     }
-    #if 1
     else if (short_name == "range")
     {
         return std::make_unique<RangePartitionNativeSplitter>(options_, input);
     }
-    #endif
     else
     {
-        LOG_ERROR(&Poco::Logger::get("NativeSplitter"), "unsupported splitter. name: {}, part num:{}, expr:{}", short_name, options_.partition_nums, options_.exprs_buffer);
         throw std::runtime_error("unsupported splitter " + short_name);
     }
 }
