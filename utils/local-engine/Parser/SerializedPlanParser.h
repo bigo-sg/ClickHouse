@@ -79,7 +79,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"log10", "log10"},
     {"log1p", "log1p"},
     {"log2", "log2"},
-    {"ln", "ln"},
+    {"log", "log"},
     {"radians", "radians"},
 
     /// string functions
