@@ -30,13 +30,8 @@
 #include <Parsers/parseQuery.h>
 #include <Parsers/queryToString.h>
 #include <Parsers/ExpressionListParsers.h>
-#include <substrait/plan.pb.h>
-#include <google/protobuf/text_format.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <cstdlib>
-#include <mutex>
 #include <string>
-#include <sys/time.h>
 
 
 namespace DB
@@ -267,7 +262,7 @@ void RangePartitionNativeSplitter::initSortInformation(Poco::JSON::Array::Ptr or
         }
         DB::SortColumnDescription ch_col_sort_descr(col_pos, d_iter->second.first, d_iter->second.second);
         sort_descriptions.emplace_back(ch_col_sort_descr);
-        
+
         auto type_name = ordering->get("data_type").convert<std::string>();
         auto type = SerializedPlanParser::parseType(type_name);
         SortFieldTypeInfo info;
@@ -285,9 +280,13 @@ void RangePartitionNativeSplitter::initRangeBlock(Poco::JSON::Array::Ptr range_b
     {
         auto & type_info = sort_field_types[i];
         auto inner_col = type_info.inner_type->createColumn();
+        auto data_type = type_info.inner_type;
         DB::MutableColumnPtr col = std::move(inner_col);
         if (type_info.is_nullable)
+        {
             col = ColumnNullable::create(std::move(col), DB::ColumnUInt8::create(0, 0));
+            data_type = std::make_shared<DB::DataTypeNullable>(data_type);
+        }
         for (size_t r = 0; r < range_bounds->size(); ++r)
         {
             auto row = range_bounds->get(r).extract<Poco::JSON::Array::Ptr>();
@@ -343,11 +342,6 @@ void RangePartitionNativeSplitter::initRangeBlock(Poco::JSON::Array::Ptr range_b
                 }
             }
         }
-        auto data_type = type_info.inner_type;
-        if (type_info.is_nullable)
-        {
-            data_type = std::make_shared<DB::DataTypeNullable>(data_type);
-        }
         auto col_name = "sort_col_"  + std::to_string(i);
         columns.emplace_back(std::move(col), data_type, col_name);
     }
@@ -389,7 +383,6 @@ int RangePartitionNativeSplitter::compareRow(
     const DB::Columns & bound_columns,
     size_t bound_row)
 {
-    int result = 0;
     for(size_t i = 0, n = required_columns.size(); i < n; ++i)
     {
         auto lpos = required_columns[i];
@@ -398,11 +391,10 @@ int RangePartitionNativeSplitter::compareRow(
             * sort_descriptions[i].direction;
         if (res != 0)
         {
-            result = res;
-            break;
+            return res;
         }
     }
-    return result;
+    return 0;
 }
 
 // If there were elements in range[l,r] that are larger then the row
