@@ -89,6 +89,7 @@ bool isTypeMatched(const substrait::Type & substrait_type, const DataTypePtr & c
     return parsed_ch_type->equals(*ch_type);
 }
 
+/// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
 std::string getCastFunction(const substrait::Type & type)
 {
     std::string ch_function_name;
@@ -100,7 +101,7 @@ std::string getCastFunction(const substrait::Type & type)
     {
         ch_function_name = "toFloat32";
     }
-    else if (type.has_string())
+    else if (type.has_string() || type.has_binary())
     {
         ch_function_name = "toString";
     }
