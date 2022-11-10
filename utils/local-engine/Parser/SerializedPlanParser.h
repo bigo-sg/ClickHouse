@@ -84,6 +84,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"radians", "radians"},
     {"greatest", "greatest"},
     {"least", "least"},
+    {"quarter", "toQuarter"},
 
     /// string functions
     {"like", "like"},
