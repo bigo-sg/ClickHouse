@@ -57,7 +57,6 @@
 #include <Processors/QueryPlan/SortingStep.h>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/Serializations/ISerialization.h>
-#include <SerializedPlanParser.h>
 #include <base/types.h>
 #include <Storages/IStorage.h>
 #include <sys/select.h>
