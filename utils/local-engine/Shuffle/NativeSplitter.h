@@ -10,7 +10,6 @@
 #include <Interpreters/Context_fwd.h>
 #include <Processors/Chunk.h>
 #include <base/types.h>
-#include <Core/SortDescription.h>
 #include <DataTypes/Serializations/ISerialization.h>
 #include <Shuffle/SelectorBuilder.h>
 
