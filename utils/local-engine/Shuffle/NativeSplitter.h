@@ -1,5 +1,6 @@
 #pragma once
 #include <jni.h>
+#include <memory>
 #include <mutex>
 #include <stack>
 #include <Shuffle/ShuffleSplitter.h>
@@ -11,6 +12,7 @@
 #include <base/types.h>
 #include <Core/SortDescription.h>
 #include <DataTypes/Serializations/ISerialization.h>
+#include <Shuffle/SelectorBuilder.h>
 
 namespace local_engine
 {
@@ -68,8 +70,7 @@ public:
     HashNativeSplitter(NativeSplitter::Options options_, jobject input);
 
 private:
-    std::vector<std::string> hash_fields;
-    DB::FunctionBasePtr hash_function;
+    std::unique_ptr<HashSelectorBuilder> selector_builder;
 };
 
 class RoundRobinNativeSplitter : public NativeSplitter
@@ -77,10 +78,10 @@ class RoundRobinNativeSplitter : public NativeSplitter
     void computePartitionId(DB::Block & block) override;
 
 public:
-    RoundRobinNativeSplitter(NativeSplitter::Options options_, jobject input) : NativeSplitter(options_, input) { }
+    RoundRobinNativeSplitter(NativeSplitter::Options options_, jobject input);
 
 private:
-    int32_t pid_selection = 0;
+    std::unique_ptr<RoundRobinSelectorBuilder> selector_builder;
 };
 
 class RangePartitionNativeSplitter : public NativeSplitter
@@ -90,38 +91,7 @@ public:
     RangePartitionNativeSplitter(NativeSplitter::Options options_, jobject input);
     ~RangePartitionNativeSplitter() override = default;
 private:
-    DB::SortDescription sort_descriptions;
-    std::vector<size_t> sorting_key_columns;
-    struct SortFieldTypeInfo
-    {
-        DB::DataTypePtr inner_type;
-        bool is_nullable = false;
-    };
-    std::vector<SortFieldTypeInfo> sort_field_types;
-    DB::Block range_bounds_block;
-
-    std::vector<std::shared_ptr<std::atomic<int>>> part_counts;
-
-    static DB::DataTypePtr getCHType(const std::string & spark_type_name);
-
-    void initSortInformation(Poco::JSON::Array::Ptr orderings);
-    void initRangeBlock(Poco::JSON::Array::Ptr range_bounds);
-
-    void computePartitionIdByBinarySearch(DB::Block & block);
-    int compareRow(
-        const DB::Columns & columns,
-        const std::vector<size_t> & required_columns,
-        size_t row,
-        const DB::Columns & bound_columns,
-        size_t bound_row);
-
-    int binarySearchBound(
-        const DB::Columns & bound_columns,
-        Int64 l,
-        Int64 r,
-        const DB::Columns & columns,
-        const std::vector<size_t> & used_cols,
-        size_t row);
+    std::unique_ptr<RangeSelectorBuilder> selector_builder;
 };
 
 }
