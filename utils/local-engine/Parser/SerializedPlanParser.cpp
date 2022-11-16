@@ -998,9 +998,8 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     bool keep_result)
 {
     if (!rel.has_scalar_function())
-    {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "the root of expression should be a scalar function:\n {}", rel.DebugString());
-    }
+
     const auto & scalar_function = rel.scalar_function();
 
     auto function_signature = this->function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
@@ -1027,6 +1026,13 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         result_name = args[0]->result_name;
         actions_dag->addOrReplaceInIndex(*args[0]);
         result_node = &actions_dag->addAlias(actions_dag->findInIndex(result_name), result_name);
+    }
+    else if (function_name == "arrayJoin")
+    {
+        result_node = &actions_dag->addArrayJoin(*args[0], "");
+        result_name = result_node->result_name;
+        if (keep_result)
+            actions_dag->addOrReplaceInIndex(*result_node);
     }
     else
     {
