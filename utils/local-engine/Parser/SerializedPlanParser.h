@@ -115,6 +115,9 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
 
     // array functions
     {"array", "array"},
+
+    // table-valued generator function
+    {"explode", "arrayJoin"},
 };
 
 static const std::set<std::string> FUNCTION_NEED_KEEP_ARGUMENTS = {"alias"};
