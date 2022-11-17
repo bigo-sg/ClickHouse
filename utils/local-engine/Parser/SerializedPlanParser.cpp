@@ -660,7 +660,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
 
             actions_dag->project(required_columns);
             auto expression_step = std::make_unique<ExpressionStep>(query_plan->getCurrentDataStream(), actions_dag);
-            expression_step->setStepDescription("Project");
+            expression_step->setStepDescription(is_generate ? "Generate" : "Project");
             query_plan->addStep(std::move(expression_step));
             break;
         }
