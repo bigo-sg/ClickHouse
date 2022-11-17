@@ -526,8 +526,6 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 
 QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
 {
-    // static std::mutex mutex;
-
     QueryPlanPtr query_plan;
     switch (rel.rel_type_case())
     {
@@ -556,7 +554,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             addRemoveNullableStep(*query_plan, required_columns);
             break;
         }
-        case substrait::Rel::RelTypeCase::kGenerate: 
+        case substrait::Rel::RelTypeCase::kGenerate:
         case substrait::Rel::RelTypeCase::kProject: {
             const substrait::Rel * input = nullptr;
             bool is_generate = false;
@@ -567,7 +565,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 const auto & project = rel.project();
                 last_project = &project;
                 input = &project.input();
-                
+
                 expressions.reserve(project.expressions_size());
                 for (int i=0; i<project.expressions_size(); ++i)
                     expressions.emplace_back(project.expressions(i));
@@ -604,16 +602,6 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 {
                     auto position = expr.selection().direct_reference().struct_field().field();
                     const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
-
-                    /*
-                    {
-                        std::lock_guard lock{mutex};
-                        std::cout << "read schema:" << read_schema.dumpStructure() << ",expr:" << expr.DebugString() << ",pos:" << position
-                                  << "is_generate:" << is_generate << ",name:" << read_schema.getByPosition(position).name << ":actions_dag"
-                                  << actions_dag->dumpDAG() << ", field:" << field->result_name << std::endl;
-                        std::cout << std::endl;
-                    }
-                    */
 
                     if (distinct_columns.contains(field->result_name))
                     {
@@ -670,27 +658,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 }
             }
 
-            /*
-            {
-                std::lock_guard lock{mutex};
-                if (is_generate)
-                    std::cout << "before:" << actions_dag->dumpDAG() << std::endl;
-            }
-            */
-
             actions_dag->project(required_columns);
-
-            /*
-            {
-                std::lock_guard lock{mutex};
-                if (is_generate)
-                {
-                    std::cout << "after:" << actions_dag->dumpDAG() << std::endl;
-                    for (const auto & pair : required_columns)
-                        std::cout << "name:" << pair.first << ",alias" << pair.second << std::endl;
-                }
-            }
-            */
             auto expression_step = std::make_unique<ExpressionStep>(query_plan->getCurrentDataStream(), actions_dag);
             expression_step->setStepDescription("Project");
             query_plan->addStep(std::move(expression_step));

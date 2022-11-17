@@ -116,6 +116,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
 
     // array functions
     {"array", "array"},
+    {"size", "length"},
 
     // table-valued generator function
     {"explode", "arrayJoin"},
