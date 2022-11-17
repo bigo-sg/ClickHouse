@@ -6,7 +6,11 @@
 #include <Core/SortDescription.h>
 #include <Core/Block.h>
 #include <Common/BlockIterator.h>
+#include <memory>
 #include <vector>
+#include <substrait/plan.pb.h>
+#include <Interpreters/ActionsDAG.h>
+#include <Interpreters/ExpressionActions.h>
 namespace local_engine
 {
 class RoundRobinSelectorBuilder
@@ -47,8 +51,15 @@ private:
     std::vector<SortFieldTypeInfo> sort_field_types;
     DB::Block range_bounds_block;
 
+    // If the ordering keys have expressions, we caculate the expressions here.
+    std::mutex actions_dag_mutex;
+    std::unique_ptr<substrait::Plan> projection_plan_pb;
+    std::atomic<bool> has_init_actions_dag;
+    std::unique_ptr<DB::ExpressionActions> projection_expression_actions;
+
     void initSortInformation(Poco::JSON::Array::Ptr orderings);
     void initRangeBlock(Poco::JSON::Array::Ptr range_bounds);
+    void initActionsDAG(const DB::Block & block);
 
     void computePartitionIdByBinarySearch(DB::Block & block, std::vector<DB::IColumn::ColumnIndex> & selector);
     int compareRow(

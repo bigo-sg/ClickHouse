@@ -1,8 +1,16 @@
 #include "SelectorBuilder.h"
+#include <memory>
+#include <mutex>
+#include <Poco/Base64Decoder.h>
 #include <Poco/JSON/JSON.h>
 #include <Poco/JSON/Parser.h>
+#include <Poco/MemoryStream.h>
+#include <Poco/StreamCopier.h>
+#include <Common/Exception.h>
 #include <Parser/SerializedPlanParser.h>
 #include <Functions/FunctionFactory.h>
+#include <Processors/QueryPlan/QueryPlan.h>
+#include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 
 namespace DB
 {
@@ -68,6 +76,17 @@ RangeSelectorBuilder::RangeSelectorBuilder(const std::string & option)
 {
     Poco::JSON::Parser parser;
     auto info = parser.parse(option).extract<Poco::JSON::Object::Ptr>();
+    if (info->has("projection_plan"))
+    {
+        // for convenient, we use a serialzied protobuf to store the projeciton plan
+        String encoded_str = info->get("projection_plan").convert<std::string>();
+        Poco::MemoryInputStream istr(encoded_str.data(), encoded_str.size());
+        Poco::Base64Decoder decoder(istr);
+        String decoded_str;
+        Poco::StreamCopier::copyToString(decoder, decoded_str);
+        projection_plan_pb = std::make_unique<substrait::Plan>();
+        projection_plan_pb->ParseFromString(decoded_str);
+    }
     auto ordering_infos = info->get("ordering").extract<Poco::JSON::Array::Ptr>();
     initSortInformation(ordering_infos);
     initRangeBlock(info->get("range_bounds").extract<Poco::JSON::Array::Ptr>());
@@ -76,7 +95,26 @@ RangeSelectorBuilder::RangeSelectorBuilder(const std::string & option)
 std::vector<DB::IColumn::ColumnIndex> RangeSelectorBuilder::build(DB::Block & block)
 {
     std::vector<DB::IColumn::ColumnIndex> result;
-    computePartitionIdByBinarySearch(block, result);
+    if (projection_plan_pb)
+    {
+        if (!has_init_actions_dag) [[unlikely]]
+            initActionsDAG(block);
+        DB::Block copied_block = block;
+        projection_expression_actions->execute(copied_block, block.rows());
+
+        // need to append the order keys columns to the original block
+        DB::ColumnsWithTypeAndName columns = block.getColumnsWithTypeAndName();
+        for (const auto & projected_col : copied_block.getColumnsWithTypeAndName())
+        {
+            columns.push_back(projected_col);
+        }
+        DB::Block projected_block(columns);
+        computePartitionIdByBinarySearch(projected_block, result);
+    }
+    else
+    {
+        computePartitionIdByBinarySearch(block, result);
+    }
     return result;
 }
 
@@ -179,6 +217,19 @@ void RangeSelectorBuilder::initRangeBlock(Poco::JSON::Array::Ptr range_bounds)
         columns.emplace_back(std::move(col), data_type, col_name);
     }
     range_bounds_block = DB::Block(columns);
+}
+
+void RangeSelectorBuilder::initActionsDAG(const DB::Block & block)
+{
+    std::lock_guard lock(actions_dag_mutex);
+    if (has_init_actions_dag)
+        return;
+    SerializedPlanParser plan_parser(local_engine::SerializedPlanParser::global_context);
+    plan_parser.parseExtensions(projection_plan_pb->extensions());
+    auto projection_actions_dag
+        = plan_parser.expressionsToActionsDAG(projection_plan_pb->relations().at(0).root().input().project().expressions(), block, block);
+    projection_expression_actions = std::make_unique<DB::ExpressionActions>(projection_actions_dag);
+    has_init_actions_dag = true;
 }
 
 void RangeSelectorBuilder::computePartitionIdByBinarySearch(DB::Block & block, std::vector<DB::IColumn::ColumnIndex> & selector)

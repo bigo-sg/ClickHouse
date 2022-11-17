@@ -97,6 +97,91 @@ bool isTypeMatched(const substrait::Type & substrait_type, const DataTypePtr & c
     return parsed_ch_type->equals(*ch_type);
 }
 
+void SerializedPlanParser::parseExtensions(
+    const ::google::protobuf::RepeatedPtrField<substrait::extensions::SimpleExtensionDeclaration> & extensions)
+{
+    for (const auto & extension : extensions)
+    {
+        if (extension.has_extension_function())
+        {
+            this->function_mapping.emplace(
+                std::to_string(extension.extension_function().function_anchor()), extension.extension_function().name());
+        }
+    }
+}
+
+std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
+        const ::google::protobuf::RepeatedPtrField<substrait::Expression> & expressions,
+        const DB::Block & header,
+        const DB::Block & read_schema)
+{
+    auto actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(header));
+    NamesWithAliases required_columns;
+    std::set<String> distinct_columns;
+
+    for (const auto & expr : expressions)
+    {
+        if (expr.has_selection())
+        {
+            auto position = expr.selection().direct_reference().struct_field().field();
+            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
+            if (distinct_columns.contains(field->result_name))
+            {
+                auto unique_name = getUniqueName(field->result_name);
+                required_columns.emplace_back(NameWithAlias(field->result_name, unique_name));
+                distinct_columns.emplace(unique_name);
+            }
+            else
+            {
+                required_columns.emplace_back(NameWithAlias(field->result_name, field->result_name));
+                distinct_columns.emplace(field->result_name);
+            }
+        }
+        else if (expr.has_scalar_function())
+        {
+            std::string name;
+            std::vector<String> useless;
+            actions_dag = parseFunction(header, expr, name, useless, actions_dag, true);
+            if (!name.empty())
+            {
+                if (distinct_columns.contains(name))
+                {
+                    auto unique_name = getUniqueName(name);
+                    required_columns.emplace_back(NameWithAlias(name, unique_name));
+                    distinct_columns.emplace(unique_name);
+                }
+                else
+                {
+                    required_columns.emplace_back(NameWithAlias(name, name));
+                    distinct_columns.emplace(name);
+                }
+            }
+        }
+        else if (expr.has_cast() || expr.has_if_then() || expr.has_literal())
+        {
+            const auto * node = parseArgument(actions_dag, expr);
+            actions_dag->addOrReplaceInIndex(*node);
+            if (distinct_columns.contains(node->result_name))
+            {
+                auto unique_name = getUniqueName(node->result_name);
+                required_columns.emplace_back(NameWithAlias(node->result_name, unique_name));
+                distinct_columns.emplace(unique_name);
+            }
+            else
+            {
+                required_columns.emplace_back(NameWithAlias(node->result_name, node->result_name));
+                distinct_columns.emplace(node->result_name);
+            }
+        }
+        else
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported projection type {}.", magic_enum::enum_name(expr.rex_type_case()));
+        }
+    }
+    actions_dag->project(required_columns);
+    return actions_dag;
+}
+
 /// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
 std::string getCastFunction(const substrait::Type & type)
 {
@@ -496,17 +581,7 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         pb_util::MessageToJsonString(*plan, &json, options);
         LOG_DEBUG(&Poco::Logger::get("SerializedPlanParser"), "substrait plan:{}", json);
     }
-    if (plan->extensions_size() > 0)
-    {
-        for (const auto & extension : plan->extensions())
-        {
-            if (extension.has_extension_function())
-            {
-                this->function_mapping.emplace(
-                    std::to_string(extension.extension_function().function_anchor()), extension.extension_function().name());
-            }
-        }
-    }
+    parseExtensions(plan->extensions());
     if (plan->relations_size() == 1)
     {
         auto root_rel = plan->relations().at(0);
@@ -599,71 +674,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 read_schema = query_plan->getCurrentDataStream().header;
             }
             const auto & expressions = project.expressions();
-            auto actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
-            NamesWithAliases required_columns;
-            std::set<String> distinct_columns;
-
-            for (const auto & expr : expressions)
-            {
-                if (expr.has_selection())
-                {
-                    auto position = expr.selection().direct_reference().struct_field().field();
-                    const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
-                    if (distinct_columns.contains(field->result_name))
-                    {
-                        auto unique_name = getUniqueName(field->result_name);
-                        required_columns.emplace_back(NameWithAlias(field->result_name, unique_name));
-                        distinct_columns.emplace(unique_name);
-                    }
-                    else
-                    {
-                        required_columns.emplace_back(NameWithAlias(field->result_name, field->result_name));
-                        distinct_columns.emplace(field->result_name);
-                    }
-                }
-                else if (expr.has_scalar_function())
-                {
-                    std::string name;
-                    std::vector<String> useless;
-                    actions_dag = parseFunction(query_plan->getCurrentDataStream().header, expr, name, useless, actions_dag, true);
-                    if (!name.empty())
-                    {
-                        if (distinct_columns.contains(name))
-                        {
-                            auto unique_name = getUniqueName(name);
-                            required_columns.emplace_back(NameWithAlias(name, unique_name));
-                            distinct_columns.emplace(unique_name);
-                        }
-                        else
-                        {
-                            required_columns.emplace_back(NameWithAlias(name, name));
-                            distinct_columns.emplace(name);
-                        }
-                    }
-                }
-                else if (expr.has_cast() || expr.has_if_then() || expr.has_literal())
-                {
-                    const auto * node = parseArgument(actions_dag, expr);
-                    actions_dag->addOrReplaceInIndex(*node);
-                    if (distinct_columns.contains(node->result_name))
-                    {
-                        auto unique_name = getUniqueName(node->result_name);
-                        required_columns.emplace_back(NameWithAlias(node->result_name, unique_name));
-                        distinct_columns.emplace(unique_name);
-                    }
-                    else
-                    {
-                        required_columns.emplace_back(NameWithAlias(node->result_name, node->result_name));
-                        distinct_columns.emplace(node->result_name);
-                    }
-                }
-                else
-                {
-                    throw Exception(
-                        ErrorCodes::BAD_ARGUMENTS, "unsupported projection type {}.", magic_enum::enum_name(expr.rex_type_case()));
-                }
-            }
-            actions_dag->project(required_columns);
+            auto actions_dag = expressionsToActionsDAG(expressions, query_plan->getCurrentDataStream().header, read_schema);
             auto expression_step = std::make_unique<ExpressionStep>(query_plan->getCurrentDataStream(), actions_dag);
             expression_step->setStepDescription("Project");
             query_plan->addStep(std::move(expression_step));
@@ -757,7 +768,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             break;
         }
         default:
-            throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support relation type");
+            throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support relation type: {}.\n{}", rel.rel_type_case(), rel.DebugString());
     }
     return query_plan;
 }

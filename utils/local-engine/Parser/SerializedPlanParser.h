@@ -150,6 +150,12 @@ public:
 
     void addInputIter(jobject iter) { input_iters.emplace_back(iter); }
 
+    void parseExtensions(const ::google::protobuf::RepeatedPtrField<substrait::extensions::SimpleExtensionDeclaration> & extensions);
+    std::shared_ptr<DB::ActionsDAG> expressionsToActionsDAG(
+        const ::google::protobuf::RepeatedPtrField<substrait::Expression> & expressions,
+        const DB::Block & header,
+        const DB::Block & read_schema);
+
     static ContextMutablePtr global_context;
     static Context::ConfigurationPtr config;
     static SharedContextHolder shared_context;
