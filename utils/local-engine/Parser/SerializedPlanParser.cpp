@@ -526,6 +526,8 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
 
 QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
 {
+    // static std::mutex mutex;
+
     QueryPlanPtr query_plan;
     switch (rel.rel_type_case())
     {
@@ -554,22 +556,44 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             addRemoveNullableStep(*query_plan, required_columns);
             break;
         }
+        case substrait::Rel::RelTypeCase::kGenerate: 
         case substrait::Rel::RelTypeCase::kProject: {
-            const auto & project = rel.project();
-            last_project = &project;
-            query_plan = parseOp(project.input());
-            // for prewhere
-            bool is_mergetree_input = project.input().has_read() && !project.input().read().has_local_files();
-            Block read_schema;
-            if (is_mergetree_input)
+            const substrait::Rel * input = nullptr;
+            bool is_generate = false;
+            std::vector<substrait::Expression> expressions;
+
+            if (rel.has_project())
             {
-                read_schema = parseNameStruct(project.input().read().base_schema());
+                const auto & project = rel.project();
+                last_project = &project;
+                input = &project.input();
+                
+                expressions.reserve(project.expressions_size());
+                for (int i=0; i<project.expressions_size(); ++i)
+                    expressions.emplace_back(project.expressions(i));
             }
             else
             {
-                read_schema = query_plan->getCurrentDataStream().header;
+                const auto & generate = rel.generate();
+                input = &generate.input();
+                is_generate = true;
+
+                expressions.reserve(generate.child_output_size() + 1);
+                for (int i = 0; i < generate.child_output_size(); ++i)
+                    expressions.push_back(generate.child_output(i));
+                expressions.emplace_back(generate.generator());
             }
-            const auto & expressions = project.expressions();
+
+            query_plan = parseOp(*input);
+
+            // for prewhere
+            Block read_schema;
+            bool is_mergetree_input = input->has_read() && !input->read().has_local_files();
+            if (is_mergetree_input)
+                read_schema = parseNameStruct(input->read().base_schema());
+            else
+                read_schema = query_plan->getCurrentDataStream().header;
+
             auto actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
             NamesWithAliases required_columns;
             std::set<String> distinct_columns;
@@ -580,6 +604,17 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 {
                     auto position = expr.selection().direct_reference().struct_field().field();
                     const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
+
+                    /*
+                    {
+                        std::lock_guard lock{mutex};
+                        std::cout << "read schema:" << read_schema.dumpStructure() << ",expr:" << expr.DebugString() << ",pos:" << position
+                                  << "is_generate:" << is_generate << ",name:" << read_schema.getByPosition(position).name << ":actions_dag"
+                                  << actions_dag->dumpDAG() << ", field:" << field->result_name << std::endl;
+                        std::cout << std::endl;
+                    }
+                    */
+
                     if (distinct_columns.contains(field->result_name))
                     {
                         auto unique_name = getUniqueName(field->result_name);
@@ -594,21 +629,21 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 }
                 else if (expr.has_scalar_function())
                 {
-                    std::string name;
+                    std::string result_name;
                     std::vector<String> useless;
-                    actions_dag = parseFunction(query_plan->getCurrentDataStream().header, expr, name, useless, actions_dag, true);
-                    if (!name.empty())
+                    actions_dag = parseFunction(query_plan->getCurrentDataStream().header, expr, result_name, useless, actions_dag, true);
+                    if (!result_name.empty())
                     {
-                        if (distinct_columns.contains(name))
+                        if (distinct_columns.contains(result_name))
                         {
-                            auto unique_name = getUniqueName(name);
-                            required_columns.emplace_back(NameWithAlias(name, unique_name));
+                            auto unique_name = getUniqueName(result_name);
+                            required_columns.emplace_back(NameWithAlias(result_name, unique_name));
                             distinct_columns.emplace(unique_name);
                         }
                         else
                         {
-                            required_columns.emplace_back(NameWithAlias(name, name));
-                            distinct_columns.emplace(name);
+                            required_columns.emplace_back(NameWithAlias(result_name, result_name));
+                            distinct_columns.emplace(result_name);
                         }
                     }
                 }
@@ -634,7 +669,28 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                         ErrorCodes::BAD_ARGUMENTS, "unsupported projection type {}.", magic_enum::enum_name(expr.rex_type_case()));
                 }
             }
+
+            /*
+            {
+                std::lock_guard lock{mutex};
+                if (is_generate)
+                    std::cout << "before:" << actions_dag->dumpDAG() << std::endl;
+            }
+            */
+
             actions_dag->project(required_columns);
+
+            /*
+            {
+                std::lock_guard lock{mutex};
+                if (is_generate)
+                {
+                    std::cout << "after:" << actions_dag->dumpDAG() << std::endl;
+                    for (const auto & pair : required_columns)
+                        std::cout << "name:" << pair.first << ",alias" << pair.second << std::endl;
+                }
+            }
+            */
             auto expression_step = std::make_unique<ExpressionStep>(query_plan->getCurrentDataStream(), actions_dag);
             expression_step->setStepDescription("Project");
             query_plan->addStep(std::move(expression_step));
@@ -1029,8 +1085,10 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     }
     else if (function_name == "arrayJoin")
     {
-        result_node = &actions_dag->addArrayJoin(*args[0], "");
-        result_name = result_node->result_name;
+        std::string args_name;
+        join(args, ',', args_name);
+        result_name = function_name + "(" + args_name + ")";
+        result_node = &actions_dag->addArrayJoin(*args[0], result_name);
         if (keep_result)
             actions_dag->addOrReplaceInIndex(*result_node);
     }
