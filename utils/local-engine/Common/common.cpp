@@ -12,6 +12,7 @@
 #include <Poco/Util/MapConfiguration.h>
 #include <jni.h>
 #include <filesystem>
+#include <Storages/Cache/ExternalDataSourceCache.h>
 
 namespace DB
 {
@@ -42,6 +43,21 @@ void registerAllFunctions()
 }
 constexpr auto CH_BACKEND_CONF_PREFIX = "spark.gluten.sql.columnar.backend.ch";
 constexpr auto CH_RUNTIME_CONF = "runtime_conf";
+
+constexpr auto LOCAL_FILE_CACHE_DIR = "local_cache_root";
+constexpr size_t LOCAL_FILE_CACHE_CAPACITY = 10l * (1<<30);
+
+static std::string global_local_cache_dir;
+
+std::string getLocalCacheDir()
+{
+    return global_local_cache_dir;
+}
+
+void setLocalCacheDir(const std::string & p)
+{
+    global_local_cache_dir = p;
+}
 
 /// For using gluten, we recommend to pass clickhouse runtime configure by using --files in spark-submit.
 /// And set the parameter CH_BACKEND_CONF_PREFIX.CH_RUNTIME_CONF.conf_file
@@ -192,6 +208,10 @@ void init(const std::string & plan)
             }
 
             registerAllFunctions();
+            fs::path cache_dir = fs::current_path() / std::string(LOCAL_FILE_CACHE_DIR);
+            global_local_cache_dir = cache_dir.string();
+            DB::ExternalDataSourceCache::instance().initOnce(
+                local_engine::SerializedPlanParser::global_context, cache_dir.string(), LOCAL_FILE_CACHE_CAPACITY, 8096);
             LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Register all functions.");
 
 #if USE_EMBEDDED_COMPILER
