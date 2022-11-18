@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <numeric>
 #include <regex>
 #include <string>
@@ -87,7 +88,7 @@ extern "C" {
 extern void registerAllFunctions();
 extern void init(const std::string &);
 extern char * createExecutor(const std::string &);
-extern std::string getLocalCacheDir();
+extern std::string clearLocalCacheDir();
 
 namespace dbms
 {
@@ -177,6 +178,9 @@ void JNI_OnUnload(JavaVM * vm, void * /*reserved*/)
         local_engine::SerializedPlanParser::global_context.reset();
         local_engine::SerializedPlanParser::shared_context.reset();
     }
+
+    // try to clear the cached files
+    clearLocalCacheDir();
     local_engine::BroadCastJoinBuilder::clean();
 }
 
@@ -209,7 +213,6 @@ jlong Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeCreat
     JNIEnv * env, jobject /*obj*/, jlong allocator_id, jbyteArray plan, jobjectArray iter_arr)
 {
     LOCAL_ENGINE_JNI_METHOD_START
-    LOG_ERROR(&Poco::Logger::get("ExpressionEvaluatorJniWrapper"), "local cache dir:{}", getLocalCacheDir());
     auto query_context = local_engine::getAllocator(allocator_id)->query_context;
     local_engine::SerializedPlanParser parser(query_context);
     jsize iter_num = env->GetArrayLength(iter_arr);

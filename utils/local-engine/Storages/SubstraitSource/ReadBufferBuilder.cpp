@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
@@ -11,6 +12,7 @@
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
 #include <Storages/Cache/ExternalDataSourceCache.h>
 #include <Storages/Cache/IRemoteFileMetadata.h>
+#include <Storages/Cache/RemoteFileMetadataFactory.h>
 #include <Storages/HDFS/HDFSCommon.h>
 #include <IO/ReadBufferFromFile.h>
 #include <Interpreters/Context_fwd.h>
@@ -28,6 +30,7 @@
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
 #include <hdfs/hdfs.h>
+#include <filesystem>
 
 namespace DB
 {
@@ -81,7 +84,8 @@ public:
     static std::shared_ptr<HDFSFileMetadata>
     create(DB::ContextPtr context, const std::string & cluster_uri_, const std::string & remote_path_)
     {
-        auto hdfs_fs = DB::createHDFSFS(DB::createHDFSBuilder(cluster_uri_, context->getConfigRef()).get());
+        auto hdfs_builder = DB::createHDFSBuilder(cluster_uri_, context->getConfigRef());
+        auto hdfs_fs = DB::createHDFSFS(hdfs_builder.get());
         auto * hdfs_file_info = hdfsGetPathInfo(hdfs_fs.get(), remote_path_.c_str());
         if (!hdfs_file_info)
         {
@@ -130,6 +134,12 @@ public:
 private:
     std::string cluster;
 };
+
+void registerHDFSMetadata(DB::RemoteFileMetadataFactory & factory)
+{
+    auto creator = []() -> DB::IRemoteFileMetadataPtr { return std::make_shared<HDFSFileMetadata>(); };
+    factory.registerRemoteFileMatadata("HDFS", creator);
+}
 class HDFSFileReadBufferBuilder : public ReadBufferBuilder
 {
 public:
@@ -153,17 +163,37 @@ public:
         std::string uri_path = "hdfs://" + file_uri.getHost();
         if (file_uri.getPort())
             uri_path += ":" + std::to_string(file_uri.getPort());
-        read_buffer = std::make_unique<DB::ReadBufferFromHDFS>(uri_path, file_uri.getPath(), context->getGlobalContext()->getConfigRef());
         if (DB::ExternalDataSourceCache::instance().isInitialized() && context->getSettingsRef().use_local_cache_for_remote_storage)
         {
+            // FIXED ME!
+            // It seems there is a bug in the ReadBufferFromHDFS, we must specify the file size here,
+            // otherwise a coredump will happen when we reach the file's end and then try to call nextImpl()
+            // to check eof.
+            auto remote_file_metadata = HDFSFileMetadata::create(context, uri_path, file_uri.getPath());
+            read_buffer = std::make_unique<DB::ReadBufferFromHDFS>(
+                uri_path,
+                file_uri.getPath(),
+                context->getGlobalContext()->getConfigRef(),
+                DBMS_DEFAULT_BUFFER_SIZE,
+                remote_file_metadata->file_size);
+
             size_t buffer_size = read_buffer->internalBuffer().size();
             if (!buffer_size)
                 buffer_size = DBMS_DEFAULT_BUFFER_SIZE;
+
+
             read_buffer = DB::RemoteReadBuffer::create(
                 context,
-                HDFSFileMetadata::create(context, uri_path, file_uri.getPath()),
-                std::move(read_buffer), need_randome_acess);
+                remote_file_metadata,
+                std::move(read_buffer),
+                buffer_size,
+                need_randome_acess);
         }
+        else
+        {
+            read_buffer = std::make_unique<DB::ReadBufferFromHDFS>(uri_path, file_uri.getPath(), context->getConfigRef());
+        }
+
         return read_buffer;
     }
 };
