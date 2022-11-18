@@ -18,7 +18,6 @@
 #include <substrait/plan.pb.h>
 #include <Common/BlockIterator.h>
 #include <Core/SortDescription.h>
-#include <mutex>
 
 namespace local_engine
 {
