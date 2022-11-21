@@ -136,7 +136,7 @@ void initLocalCacheForRemoteFiles(const std::map<std::string, std::string> & bac
     if (conf_iter == backend_conf.end() || conf_iter->second != "true")
         return;
     local_engine::registerHDFSMetadata(DB::RemoteFileMetadataFactory::instance());
-    
+
     // If run on yarn, different executors should have different working directory?
     auto cache_dir = fs::current_path() / context_conf->getString("local_cache_for_remote_fs.root_dir", LOCAL_FILE_CACHE_DIR);
     global_local_cache_dir = cache_dir.string();
