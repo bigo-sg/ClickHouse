@@ -18,12 +18,7 @@ public:
     struct InputFormat
     {
     public:
-        explicit InputFormat(DB::InputFormatPtr input_, std::unique_ptr<DB::ReadBuffer> read_buffer_)
-            : input(input_), read_buffer(std::move(read_buffer_))
-        {
-        }
         DB::InputFormatPtr input;
-    private:
         std::unique_ptr<DB::ReadBuffer> read_buffer;
     };
     using InputFormatPtr = std::shared_ptr<InputFormat>;
