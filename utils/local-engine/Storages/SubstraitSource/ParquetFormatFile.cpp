@@ -32,7 +32,7 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
     if (auto * seekable_in = dynamic_cast<DB::SeekableReadBufferWithSize *>(res->read_buffer.get()))
     {
         // reuse the read_buffer to avoid opening the file twice.
-        // especially， the cost of opening a hdfs file is large.
+        // especially，the cost of opening a hdfs file is large.
         required_row_groups = collectRequiredRowGroups(seekable_in);
         seekable_in->seek(0, SEEK_SET);
     }
