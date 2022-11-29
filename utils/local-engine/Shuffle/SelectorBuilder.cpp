@@ -7,7 +7,7 @@
 #include <Poco/MemoryStream.h>
 #include <Poco/StreamCopier.h>
 #include <Common/Exception.h>
-#include <Parser/SerializedPlanParser.h>
+#include <Core/Block.h>
 #include <Functions/FunctionFactory.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
@@ -100,7 +100,8 @@ std::vector<DB::IColumn::ColumnIndex> RangeSelectorBuilder::build(DB::Block & bl
         if (!has_init_actions_dag) [[unlikely]]
             initActionsDAG(block);
         DB::Block copied_block = block;
-        projection_expression_actions->execute(copied_block, block.rows());
+        assert(copied_block.rows() && "block is empty");
+        projection_expression_actions->execute(copied_block);
 
         // need to append the order keys columns to the original block
         DB::ColumnsWithTypeAndName columns = block.getColumnsWithTypeAndName();
@@ -224,10 +225,10 @@ void RangeSelectorBuilder::initActionsDAG(const DB::Block & block)
     std::lock_guard lock(actions_dag_mutex);
     if (has_init_actions_dag)
         return;
-    SerializedPlanParser plan_parser(local_engine::SerializedPlanParser::global_context);
-    plan_parser.parseExtensions(projection_plan_pb->extensions());
+    plan_parser = std::make_unique<SerializedPlanParser>(local_engine::SerializedPlanParser::global_context);
+    plan_parser->parseExtensions(projection_plan_pb->extensions());
     auto projection_actions_dag
-        = plan_parser.expressionsToActionsDAG(projection_plan_pb->relations().at(0).root().input().project().expressions(), block, block);
+        = plan_parser->expressionsToActionsDAG(projection_plan_pb->relations().at(0).root().input().project().expressions(), block, block);
     projection_expression_actions = std::make_unique<DB::ExpressionActions>(projection_actions_dag);
     has_init_actions_dag = true;
 }

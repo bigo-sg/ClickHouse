@@ -23,6 +23,16 @@ jmethodID NativeSplitter::iterator_next = nullptr;
 
 void NativeSplitter::split(DB::Block & block)
 {
+    if (!block.rows())
+    {
+        for (size_t i = 0; i < options.partition_nums; ++i)
+        {
+            auto new_block = std::make_unique<Block>();
+            *new_block = block;
+            output_buffer.emplace(std::pair(i, std::move(new_block)));
+        }
+        return;
+    }
     computePartitionId(block);
     DB::IColumn::Selector selector;
     selector = DB::IColumn::Selector(block.rows());

@@ -1,16 +1,17 @@
 #pragma once
-#include <Core/ColumnWithTypeAndName.h>
-#include <Functions/IFunction.h>
-#include <Processors/Chunk.h>
-#include <base/types.h>
-#include <Core/SortDescription.h>
-#include <Core/Block.h>
-#include <Common/BlockIterator.h>
 #include <memory>
 #include <vector>
-#include <substrait/plan.pb.h>
+#include <Core/Block.h>
+#include <Core/ColumnWithTypeAndName.h>
+#include <Core/SortDescription.h>
+#include <Functions/IFunction.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/ExpressionActions.h>
+#include <Parser/SerializedPlanParser.h>
+#include <Processors/Chunk.h>
+#include <base/types.h>
+#include <substrait/plan.pb.h>
+#include <Common/BlockIterator.h>
 namespace local_engine
 {
 class RoundRobinSelectorBuilder
@@ -55,6 +56,7 @@ private:
     std::mutex actions_dag_mutex;
     std::unique_ptr<substrait::Plan> projection_plan_pb;
     std::atomic<bool> has_init_actions_dag;
+    std::unique_ptr<SerializedPlanParser> plan_parser;
     std::unique_ptr<DB::ExpressionActions> projection_expression_actions;
 
     void initSortInformation(Poco::JSON::Array::Ptr orderings);
