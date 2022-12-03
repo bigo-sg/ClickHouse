@@ -6,6 +6,7 @@
 #include <QueryPipeline/QueryPipeline.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Exception.h>
+#include <Processors/IProcessor.h>
 
 namespace DB
 {
@@ -14,31 +15,44 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+static ITransformingStep::Traits getTraits()
+{
+    return ITransformingStep::Traits
+    {
+        {
+            .preserves_distinct_columns = false, /// Actually, we may check that distinct names are in aggregation keys
+            .returns_single_stream = true,
+            .preserves_number_of_streams = false,
+            .preserves_sorting = false,
+        },
+        {
+            .preserves_number_of_rows = false,
+        }
+    };
+}
 MultiPathSelectStep::MultiPathSelectStep(
-    const Block & output_header_,
+    const DataStream & input_stream_,
+    const Block & out_header_,
     IPathSampleSelectorPtr path_selector_,
     std::vector<PathBuilder> path_builders_,
     size_t sample_blocks_num_)
-    : header(output_header_)
+    : ITransformingStep(input_stream_, out_header_, getTraits())
+    , out_header(out_header_)
     , path_selector(path_selector_)
     , path_builders(path_builders_)
     , sample_blocks_num(sample_blocks_num_)
 {}
 
 // Be carefule to connect every outport with the related inport.
-QueryPipelineBuilderPtr MultiPathSelectStep::updatePipeline(
-    QueryPipelineBuilders pipelines,
+void MultiPathSelectStep::transformPipeline(
+    QueryPipelineBuilder & pipeline,
     const BuildQueryPipelineSettings &)
 {
-    if (pipelines.size() != 1)
-    {
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected pipeline size = 1.");
-    }
-
-    auto & pipeline = pipelines.front();
+    LOG_ERROR(logger, "{} {} {}", __LINE__, reinterpret_cast<UInt64>(this), pipeline.getNumStreams());
+    QueryPipelineProcessorsCollector collector(pipeline, this);
     size_t path_num = path_builders.size();
-    size_t streams_num = pipeline->getNumStreams();
-    auto input_header = pipeline->getHeader();
+    size_t streams_num = pipeline.getNumStreams();
+    auto input_header = pipeline.getHeader();
     auto sample_share_state = std::make_shared<PathSelectState>();
 
     // Add divide phase here. Every outport from upstream node will be divided into
@@ -64,10 +78,10 @@ QueryPipelineBuilderPtr MultiPathSelectStep::updatePipeline(
             }
         }
         sample_processors = inner_processors;
-        processors.insert(processors.end(), inner_processors.begin(), inner_processors.end());
         return inner_processors;
     };
-    pipeline->transform(sample_transform_build);
+    pipeline.transform(sample_transform_build);
+    LOG_ERROR(logger, "{}", __LINE__);
 
     if (sample_transform_outputs.size() != path_num * streams_num)
     {
@@ -101,10 +115,10 @@ QueryPipelineBuilderPtr MultiPathSelectStep::updatePipeline(
             auto procs = path_pipeline_build(i);
             inner_processors.insert(inner_processors.end(), procs.begin(), procs.end());
         }
-        processors.insert(processors.end(), inner_processors.begin(), inner_processors.end());
         return inner_processors;
     };
-    pipeline->transform(paths_pipelien_build);
+    pipeline.transform(paths_pipelien_build);
+    LOG_ERROR(logger, "{}", __LINE__);
 
     auto union_transform = [&](OutputPortRawPtrs) {
         Processors inner_processors;
@@ -125,22 +139,106 @@ QueryPipelineBuilderPtr MultiPathSelectStep::updatePipeline(
                 auto offset = j * streams_num + i;
                 stream_inputs.emplace_back(paths_outports[offset]);
             }
-            auto transform = std::make_shared<UnionStreamsTransform>(header, path_num);
+            auto transform = std::make_shared<UnionStreamsTransform>(paths_outports[0]->getHeader(), path_num);
             inner_processors.emplace_back(transform);
             size_t port_idx = 0;
-            for (auto input : transform->getInputs())
+            if (transform->getInputs().size() != stream_inputs.size())
+            {
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "invalid size: {} vs. {}", transform->getInputs().size(), stream_inputs.size());
+            }
+            for (auto & input : transform->getInputs())
             {
                 connect(*stream_inputs[port_idx], input);
                 port_idx += 1;
             }
         }
-        processors.insert(processors.end(), inner_processors.begin(), inner_processors.end());
         return inner_processors;
     };
-    pipeline->transform(union_transform);
-    assert(pipeline->getNumStreams() == streams_num);
+    pipeline.transform(union_transform);
+    assert(pipeline.getNumStreams() == streams_num);
+    processors = collector.detachProcessors(0);
+    LOG_ERROR(logger, "{}", __LINE__);
+}
 
-    return std::move(pipeline);
+void MultiPathSelectStep::updateOutputStream()
+{
+    // Nothing to do.
+}
+
+void MultiPathSelectStep::describePipeline(FormatSettings & settings) const
+{
+    if (!processors.empty())
+        IQueryPlanStep::describePipeline(processors, settings);
+
+}
+
+DemoPassTransform::DemoPassTransform(const Block & header)
+    : IProcessor({header}, {header})
+{}
+
+IProcessor::Status DemoPassTransform::prepare()
+{
+    auto & output = getOutputs().front();
+    auto & input = getInputs().front();
+    if (output.isFinished())
+    {
+        input.close();
+        return Status::Finished;
+    }
+
+    if (!output.canPush())
+    {
+        return Status::PortFull;
+    }
+
+    if (has_output)
+    {
+        output.push(std::move(output_chunk));
+        has_output = false;
+        return Status::PortFull;
+    }
+
+    if (has_input)
+    {
+        return Status::Ready;
+    }
+
+    if (input.isFinished())
+    {
+        output.finish();
+        return Status::Finished;
+    }
+
+    input.setNeeded();
+    if (!input.hasData())
+    {
+        return Status::NeedData;
+    }
+    output_chunk = input.pull(true);
+    has_input = true;
+    return Status::Ready;
+}
+
+void DemoPassTransform::work()
+{
+    if (has_input)
+    {
+        has_input = false;
+        has_output = true;
+    }
+}
+
+void buildDemoPassPipeline(
+    const Block & header, size_t streams_num, const OutputPortRawPtrs & in_ports, OutputPortRawPtrs * out_ports, Processors * processors)
+{
+    assert(streams_num == in_ports.size());
+    for (auto * in_port : in_ports)
+    {
+        auto transform = std::make_shared<DemoPassTransform>(header);
+        processors->emplace_back(transform);
+        connect(*in_port, transform->getInputs().front());
+        out_ports->emplace_back(&transform->getOutputs().front());
+    }
 }
 
 }

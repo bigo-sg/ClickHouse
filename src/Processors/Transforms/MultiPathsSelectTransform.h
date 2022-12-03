@@ -20,7 +20,7 @@ public:
 
     virtual Int32 compute(const std::list<Chunk> & samples) = 0;
 
-private:
+protected:
     Block header;
 };
 using IPathSampleSelectorPtr = std::shared_ptr<IPathSampleSelector>;
@@ -32,6 +32,7 @@ public:
     {
         BEFORE_SAMPLE,
         SAMPLING,
+        WAIT_SAMPLE_FINISHED,
         AFTER_SAMPLE,
     };
 
@@ -39,6 +40,7 @@ public:
     void setStatus(Status status_);
 
     std::unique_ptr<std::lock_guard<std::mutex>> requiredSamplingLock();
+    std::mutex & getSamplingMutex() { return sampling_mutex; }
     void leaveSampling();
 
     Int32 getPath();
