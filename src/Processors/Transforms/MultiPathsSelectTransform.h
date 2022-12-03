@@ -39,18 +39,21 @@ public:
     Status getStatus();
     void setStatus(Status status_);
 
-    std::unique_ptr<std::lock_guard<std::mutex>> requiredSamplingLock();
     std::mutex & getSamplingMutex() { return sampling_mutex; }
-    void leaveSampling();
 
     Int32 getPath();
     void setPath(Int32 path);
+
+    UInt64 getHoldedBy() { return holdedby; }
+    void setHoldedBy(UInt64 hodedby_) { holdedby = hodedby_; }
+
 private:
     std::mutex sampling_mutex;
 
     std::atomic<Status> status = BEFORE_SAMPLE;
 
     std::atomic<Int32> selected_path = -1;
+    std::atomic<UInt64> holdedby;
 };
 
 using PathSelectStatePtr = std::shared_ptr<PathSelectState>;

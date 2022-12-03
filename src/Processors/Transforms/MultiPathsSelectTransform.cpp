@@ -31,11 +31,6 @@ void PathSelectState::setPath(Int32 path)
 {
     selected_path = path;
 }
-std::unique_ptr<std::lock_guard<std::mutex>> PathSelectState::requiredSamplingLock()
-{
-    auto lock = std::make_unique<std::lock_guard<std::mutex>>(sampling_mutex);
-    return lock;
-}
 
 static OutputPorts splitOutputport(size_t num_streams, const Block & header)
 {
@@ -84,10 +79,6 @@ IProcessor::Status MultiPathsSelectTransform::prepare()
 
     if (output->isFinished())
     {
-        if (local_status == PathSelectState::AFTER_SAMPLE)
-        {
-            sample_lock.reset();
-        }
         input.close();
         return Status::Finished;
     }
@@ -100,7 +91,6 @@ IProcessor::Status MultiPathsSelectTransform::prepare()
 
     if (has_output)
     {
-        LOG_ERROR(logger, "xxxx {} chunk: {} {};{} {}", __LINE__, output_chunk.getNumRows(), output_chunk.getNumColumns(), reinterpret_cast<UInt64>(this), sampled_chunks.size());
         output->push(std::move(output_chunk));
         has_output = false;
         return Status::PortFull;
@@ -143,31 +133,40 @@ IProcessor::Status MultiPathsSelectTransform::normalPrepare(InputPort & input)
 
 IProcessor::Status MultiPathsSelectTransform::samplingPrepare(InputPort & input)
 {
-    if (local_status == PathSelectState::BEFORE_SAMPLE)
-    {
-        local_status = shared_state->getStatus();
-    }
     if (local_status < PathSelectState::SAMPLING)
     {
-        LOG_ERROR(logger, "xxxx state:{}", reinterpret_cast<UInt64>(shared_state.get()));
-        sample_lock = shared_state->requiredSamplingLock();
-        // shared_state->getSamplingMutex().lock();
-        local_status = shared_state->getStatus();
-        if (local_status == PathSelectState::BEFORE_SAMPLE)
+        // Every processor enters this part once.
+        std::lock_guard lock(shared_state->getSamplingMutex());
+        auto current_status = shared_state->getStatus();
+        if (current_status == PathSelectState::BEFORE_SAMPLE)
         {
-            // only one thread do the sample. other threads will wait for this
-            // thread finishing sampling.
-            LOG_ERROR(logger, "xxxx acquired sampling. {}", reinterpret_cast<UInt64>(this));
+            // only one processor do the sample. other processors will wait for this
+            // processor finishing sampling.
             local_status = PathSelectState::SAMPLING;
+            shared_state->setStatus(local_status);
         }
-        else if (local_status == PathSelectState::AFTER_SAMPLE)
+        else if (current_status == PathSelectState::SAMPLING)
         {
-            sample_lock.reset();
+            // other processors that do not sample, just wait the previous one finished.
+            local_status = PathSelectState::WAIT_SAMPLE_FINISHED;
         }
         else
         {
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Invalid status here:{}", local_status);    
+            // has finished sample.
+            local_status = current_status;
         }
+    }
+
+    if (local_status == PathSelectState::WAIT_SAMPLE_FINISHED)
+    {
+        auto current_status = shared_state->getStatus();
+        if (current_status == PathSelectState::SAMPLING)
+        {
+            // let it run idlly
+            return Status::Ready;
+        }
+        // the status is expected to be AFTER_SAMPLE here.        
+        local_status = current_status;
     }
 
     if (selected_path < 0 && local_status == PathSelectState::AFTER_SAMPLE)
@@ -191,14 +190,11 @@ IProcessor::Status MultiPathsSelectTransform::samplingPrepare(InputPort & input)
     
     if (local_status == PathSelectState::SAMPLING) [[unlikely]]
     {
-        if (has_input)
-            return Status::Ready;
         if (input.isFinished())
         {
             input_finished = true;
             if (sampled_chunks.empty())
             {
-                LOG_ERROR(logger, "xxxx {} input finished. {}", __LINE__, reinterpret_cast<UInt64>(this), sampled_chunks.size());
                 for (auto & port : outputs)
                 {
                     if (!port.isFinished())
@@ -210,20 +206,16 @@ IProcessor::Status MultiPathsSelectTransform::samplingPrepare(InputPort & input)
                 selected_path = 0;
                 shared_state->setPath(selected_path);
                 shared_state->setStatus(PathSelectState::AFTER_SAMPLE);
-                sample_lock.reset();
                 return Status::Finished;
             }
-            LOG_ERROR(logger, "xxxx {} input finished. {}", __LINE__, reinterpret_cast<UInt64>(this), sampled_chunks.size());
             return Status::Ready;
         }
         input.setNeeded();
         if (!input.hasData())
         {
-            LOG_ERROR(logger, "xxxx {} requrie one more block. {} {}", __LINE__, reinterpret_cast<UInt64>(this), sampled_chunks.size());
             return Status::NeedData;
         }
         output_chunk = input.pull(true);
-        LOG_ERROR(logger, "xxxx {} sample one block. {} {}, chunks: {} {}", __LINE__, reinterpret_cast<UInt64>(this), sampled_chunks.size(), output_chunk.getNumRows(), output_chunk.getNumColumns());
         has_input = true;
         return Status::Ready;
     }
@@ -237,7 +229,6 @@ IProcessor::Status MultiPathsSelectTransform::samplingPrepare(InputPort & input)
 
 void MultiPathsSelectTransform::work()
 {
-    LOG_ERROR(logger, "xxxx {} {}, status:{}, has_input:{}", __LINE__, reinterpret_cast<UInt64>(this), local_status, has_input);
     if (local_status == PathSelectState::AFTER_SAMPLE) [[likely]]
     {
         normalWork();
@@ -252,7 +243,6 @@ void MultiPathsSelectTransform::normalWork()
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected has_output = false");
     }
-    LOG_ERROR(logger, "xxxx {} current sample chunks: {}. {}", __LINE__, sampled_chunks.size(), reinterpret_cast<UInt64>(this));
     if (!sampled_chunks.empty()) [[unlikely]]
     {
         output_chunk.swap(sampled_chunks.front());
@@ -273,7 +263,11 @@ void MultiPathsSelectTransform::normalWork()
 
 void MultiPathsSelectTransform::samplingWork()
 {
-    LOG_ERROR(logger, "xxxx {}, {}, chunk:{}, {}", __LINE__, reinterpret_cast<UInt64>(this), output_chunk.getNumRows(), output_chunk.getNumColumns());
+    if (local_status == PathSelectState::WAIT_SAMPLE_FINISHED)
+    {
+        // is waiting for another processor to finish the sample.
+        return;
+    }
     if (has_input)
         sampled_chunks.emplace_back(std::move(output_chunk));
     if (sampled_chunks.size() >= sample_blocks_num || input_finished)
@@ -282,7 +276,6 @@ void MultiPathsSelectTransform::samplingWork()
         local_status = PathSelectState::AFTER_SAMPLE;
         shared_state->setPath(selected_path);
         shared_state->setStatus(PathSelectState::AFTER_SAMPLE);
-        sample_lock.reset();
         LOG_INFO(logger, "{} {}Select path {} after sample {} blocks.", __LINE__, reinterpret_cast<UInt64>(this), selected_path, sampled_chunks.size());
         
         normalWork();

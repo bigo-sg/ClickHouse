@@ -14,7 +14,6 @@ public:
     using PathBuilder = std::function<void (size_t streams_num, const OutputPortRawPtrs &, OutputPortRawPtrs *, Processors *)>;
     MultiPathSelectStep(
         const DataStream & input_stream_,
-        const Block & out_header_,
         IPathSampleSelectorPtr path_selector_,
         std::vector<PathBuilder> path_builders_,
         size_t sample_blocks_num_ = 1);
@@ -28,7 +27,6 @@ public:
     void transformPipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &) override;
     void describePipeline(FormatSettings & settings) const override;
 private:
-    Block out_header;
     IPathSampleSelectorPtr path_selector;
     std::vector<PathBuilder> path_builders;
     size_t sample_blocks_num;

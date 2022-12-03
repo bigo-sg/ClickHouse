@@ -32,12 +32,10 @@ static ITransformingStep::Traits getTraits()
 }
 MultiPathSelectStep::MultiPathSelectStep(
     const DataStream & input_stream_,
-    const Block & out_header_,
     IPathSampleSelectorPtr path_selector_,
     std::vector<PathBuilder> path_builders_,
     size_t sample_blocks_num_)
-    : ITransformingStep(input_stream_, out_header_, getTraits())
-    , out_header(out_header_)
+    : ITransformingStep(input_stream_, input_stream_.header, getTraits())
     , path_selector(path_selector_)
     , path_builders(path_builders_)
     , sample_blocks_num(sample_blocks_num_)
@@ -81,7 +79,6 @@ void MultiPathSelectStep::transformPipeline(
         return inner_processors;
     };
     pipeline.transform(sample_transform_build);
-    LOG_ERROR(logger, "{}", __LINE__);
 
     if (sample_transform_outputs.size() != path_num * streams_num)
     {
@@ -118,7 +115,17 @@ void MultiPathSelectStep::transformPipeline(
         return inner_processors;
     };
     pipeline.transform(paths_pipelien_build);
-    LOG_ERROR(logger, "{}", __LINE__);
+
+    for (size_t i = 1; i < paths_outports.size(); ++i)
+    {
+        auto lheader = paths_outports[i-1]->getHeader();
+        auto rheader = paths_outports[i]->getHeader();
+        if (!blocksHaveEqualStructure(lheader, rheader))
+        {
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR, "Ports has different structure.({}) vs. ({})", lheader.dumpNames(), rheader.dumpNames());
+        }
+    }
 
     auto union_transform = [&](OutputPortRawPtrs) {
         Processors inner_processors;
@@ -156,12 +163,14 @@ void MultiPathSelectStep::transformPipeline(
     };
     pipeline.transform(union_transform);
     assert(pipeline.getNumStreams() == streams_num);
+
+    output_stream = createOutputStream(getInputStreams().front(), paths_outports[0]->getHeader(), getTraits().data_stream_traits);
     processors = collector.detachProcessors(0);
-    LOG_ERROR(logger, "{}", __LINE__);
 }
 
 void MultiPathSelectStep::updateOutputStream()
 {
+    LOG_ERROR(logger, "xxxx call updateOutputStream");
     // Nothing to do.
 }
 
