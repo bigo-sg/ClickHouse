@@ -8,7 +8,7 @@ namespace DB
 {
 struct ColumnStatMetadata
 {
-    size_t column_ref = 0;
+    size_t column_pos = 0;
     size_t rows = 0;
     size_t distinct_count = 0;
     size_t null_count = 0;

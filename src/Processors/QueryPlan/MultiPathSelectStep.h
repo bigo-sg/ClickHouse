@@ -16,7 +16,7 @@ public:
         const DataStream & input_stream_,
         IPathSampleSelectorPtr path_selector_,
         std::vector<PathBuilder> path_builders_,
-        size_t sample_blocks_num_ = 1);
+        size_t sample_rows_num_ = 1);
     ~MultiPathSelectStep() override = default;
 
     String getName() const override { return "MultiPathSelectStep"; }
@@ -29,7 +29,7 @@ public:
 private:
     IPathSampleSelectorPtr path_selector;
     std::vector<PathBuilder> path_builders;
-    size_t sample_blocks_num;
+    size_t sample_rows_num;
 
     Processors processors;
 

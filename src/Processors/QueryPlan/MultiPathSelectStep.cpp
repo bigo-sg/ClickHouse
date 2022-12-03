@@ -6,7 +6,7 @@
 #include <QueryPipeline/QueryPipeline.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Exception.h>
-#include "Analyzer/BlockStatAnalyzer.h"
+#include <Analyzer/BlockStatAnalyzer.h>
 #include <Processors/IProcessor.h>
 
 namespace DB
@@ -35,11 +35,11 @@ MultiPathSelectStep::MultiPathSelectStep(
     const DataStream & input_stream_,
     IPathSampleSelectorPtr path_selector_,
     std::vector<PathBuilder> path_builders_,
-    size_t sample_blocks_num_)
+    size_t sample_rows_num_)
     : ITransformingStep(input_stream_, input_stream_.header, getTraits())
     , path_selector(path_selector_)
     , path_builders(path_builders_)
-    , sample_blocks_num(sample_blocks_num_)
+    , sample_rows_num(sample_rows_num_)
 {}
 
 // Be carefule to connect every outport with the related inport.
@@ -47,7 +47,7 @@ void MultiPathSelectStep::transformPipeline(
     QueryPipelineBuilder & pipeline,
     const BuildQueryPipelineSettings &)
 {
-    LOG_ERROR(logger, "{} {} {}", __LINE__, reinterpret_cast<UInt64>(this), pipeline.getNumStreams());
+    LOG_DEBUG(logger, "line:{}, streams:{}", __LINE__, pipeline.getNumStreams());
     QueryPipelineProcessorsCollector collector(pipeline, this);
     size_t path_num = path_builders.size();
     size_t streams_num = pipeline.getNumStreams();
@@ -55,7 +55,7 @@ void MultiPathSelectStep::transformPipeline(
     auto sample_share_state = std::make_shared<PathSelectState>();
 
     // Add divide phase here. Every outport from upstream node will be divided into
-    // path_num outports.
+    // path_num outports. Every new outport is related to one execution path.
     Processors sample_processors;
     OutputPortRawPtrs sample_transform_outputs;
     auto sample_transform_build = [&](OutputPortRawPtrs outports) {
@@ -68,7 +68,7 @@ void MultiPathSelectStep::transformPipeline(
         for (auto & port : outports)
         {
             auto transform = std::make_shared<MultiPathsSelectTransform>(
-                input_header, path_num, sample_share_state, path_selector, sample_blocks_num);
+                input_header, path_num, sample_share_state, path_selector, sample_rows_num);
             connect(*port, transform->getInputs().front());
             inner_processors.push_back(transform);
             for (auto & output : transform->getOutputs())

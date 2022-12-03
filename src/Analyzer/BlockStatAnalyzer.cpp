@@ -3,9 +3,9 @@
 #include <base/types.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
-#include "Common/typeid_cast.h"
-#include "Columns/ColumnNullable.h"
-#include "Columns/ColumnSparse.h"
+#include <Common/typeid_cast.h>
+#include <Columns/ColumnNullable.h>
+#include <Columns/ColumnSparse.h>
 
 namespace DB
 {
@@ -13,7 +13,7 @@ String ColumnStatMetadata::debugString() const
 {
     WriteBufferFromOwnString buffer;
     buffer << "{";
-    buffer << "\"column_ref\":" << column_ref;
+    buffer << "\"column_pos\":" << column_pos;
     buffer << ", \"rows\":" << rows;
     buffer << ", \"distinct_count\":"<<distinct_count;
     buffer << ", \"null_count\":"<<null_count;
@@ -50,7 +50,7 @@ BlockStatMetadata BlockStatAnalyzer::analyze()
     for (size_t i = 0, n = first_block.columns(); i < n; ++i)
     {
         auto column_stat = std::make_shared<ColumnStatMetadata>();
-        column_stat->column_ref = i;
+        column_stat->column_pos = i;
 
         SetVariants value_set;
         Sizes key_sizes;

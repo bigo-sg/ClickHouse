@@ -66,7 +66,7 @@ public:
         size_t path_num_,
         PathSelectStatePtr shared_state_,
         IPathSampleSelectorPtr path_selector_,
-        size_t sample_blocks_num_ = 1);
+        size_t sample_rows_num_ = 1);
     ~MultiPathsSelectTransform() override = default;
 
     String getName() const override {return "MultiPathsSelectTransform"; }
@@ -82,7 +82,8 @@ private:
     PathSelectState::Status local_status = PathSelectState::BEFORE_SAMPLE;
 
     std::unique_ptr<std::lock_guard<std::mutex>> sample_lock;
-    size_t sample_blocks_num;
+    size_t sample_rows_num;
+    size_t has_sample_rows = 0;
     OutputPortRawPtrs outputs_ptrs;
     std::list<Chunk> sampled_chunks;
 

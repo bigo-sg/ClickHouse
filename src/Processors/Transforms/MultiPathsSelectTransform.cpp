@@ -58,13 +58,13 @@ MultiPathsSelectTransform::MultiPathsSelectTransform(const Block & header_,
         size_t path_num_,
         PathSelectStatePtr shared_state_,
         IPathSampleSelectorPtr path_selector_,
-        size_t sample_blocks_num_)
+        size_t sample_rows_num_)
     : IProcessor({header_}, splitOutputport(path_num_, header_))
     , header(header_)
     , path_num(path_num_)
     , shared_state(shared_state_)
     , path_selector(path_selector_)
-    , sample_blocks_num(sample_blocks_num_)
+    , sample_rows_num(sample_rows_num_)
 {
     for (auto & port : outputs)
     {
@@ -269,8 +269,11 @@ void MultiPathsSelectTransform::samplingWork()
         return;
     }
     if (has_input)
+    {
         sampled_chunks.emplace_back(std::move(output_chunk));
-    if (sampled_chunks.size() >= sample_blocks_num || input_finished)
+        has_sample_rows += output_chunk.getNumRows();
+    }
+    if (has_sample_rows >= sample_rows_num || input_finished)
     {
         selected_path = path_selector->compute(sampled_chunks);
         local_status = PathSelectState::AFTER_SAMPLE;
