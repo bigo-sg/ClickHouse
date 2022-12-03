@@ -48,7 +48,7 @@ public:
 
     ~DemoPathSelector() override = default;
 
-    Int32 compute(const std::list<Chunk> & /*samples*/) override { return selected_path; }
+    Int32 compute(const std::list<Chunk> & samples) override;
 
 private:
     Int32 selected_path;

@@ -6,6 +6,7 @@
 #include <QueryPipeline/QueryPipeline.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Exception.h>
+#include "Analyzer/BlockStatAnalyzer.h"
 #include <Processors/IProcessor.h>
 
 namespace DB
@@ -179,6 +180,30 @@ void MultiPathSelectStep::describePipeline(FormatSettings & settings) const
     if (!processors.empty())
         IQueryPlanStep::describePipeline(processors, settings);
 
+}
+
+Int32 DemoPathSelector::compute(const std::list<Chunk> & samples)
+{
+    std::vector<Block> blocks;
+    for (const auto & chunk : samples)
+    {
+        auto cols = chunk.getColumns();
+        ColumnsWithTypeAndName cols_with_name_type;
+        for (size_t i = 0; i < cols.size(); ++i)
+        {
+            auto & block_col = header.getByPosition(i);
+            ColumnWithTypeAndName col_with_name_type(cols[i],  block_col.type, block_col.name);
+            cols_with_name_type.emplace_back(col_with_name_type);
+        }
+        blocks.emplace_back(cols_with_name_type);
+    }
+    BlockStatAnalyzer analyzer(blocks);
+    auto result = analyzer.analyze();
+    for (auto & data : result.columns_metadata)
+    {
+        LOG_ERROR(&Poco::Logger::get("DemoPathSelector"), "xxxx stat: {}", data->debugString());
+    }
+    return selected_path;
 }
 
 DemoPassTransform::DemoPassTransform(const Block & header)
