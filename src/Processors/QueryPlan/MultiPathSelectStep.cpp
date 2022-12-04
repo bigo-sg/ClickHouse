@@ -34,12 +34,10 @@ static ITransformingStep::Traits getTraits()
 MultiPathSelectStep::MultiPathSelectStep(
     const DataStream & input_stream_,
     IPathSampleSelectorPtr path_selector_,
-    std::vector<PathBuilder> path_builders_,
-    size_t sample_rows_num_)
+    std::vector<PathBuilder> path_builders_)
     : ITransformingStep(input_stream_, input_stream_.header, getTraits())
     , path_selector(path_selector_)
     , path_builders(path_builders_)
-    , sample_rows_num(sample_rows_num_)
 {}
 
 // Be carefule to connect every outport with the related inport.
@@ -52,7 +50,6 @@ void MultiPathSelectStep::transformPipeline(
     size_t path_num = path_builders.size();
     size_t streams_num = pipeline.getNumStreams();
     auto input_header = pipeline.getHeader();
-    auto sample_share_state = std::make_shared<PathSelectState>();
 
     // Add divide phase here. Every outport from upstream node will be divided into
     // path_num outports. Every new outport is related to one execution path.
@@ -62,7 +59,7 @@ void MultiPathSelectStep::transformPipeline(
     auto sample_transform_build = [&](OutputPortRawPtrs outports)
     {
         auto build_multi_paths_select_transform = [&](const std::vector<Block> & /*headers*/)
-        { return std::make_shared<MultiPathsSelectTransform>(input_header, path_num, sample_share_state, path_selector, sample_rows_num); };
+        { return std::make_shared<MultiPathsSelectTransform>(input_header, path_num, path_selector); };
         auto result = QueryPipelineBuilder::connectProcessors(build_multi_paths_select_transform, outports);
         sample_processors.swap(result.first);
         sample_transform_outputs.swap(result.second);
@@ -164,27 +161,8 @@ void MultiPathSelectStep::describePipeline(FormatSettings & settings) const
 
 }
 
-Int32 DemoPathSelector::compute(const std::list<Chunk> & samples)
+Int32 DemoPathSelector::getPath()
 {
-    std::vector<Block> blocks;
-    for (const auto & chunk : samples)
-    {
-        auto cols = chunk.getColumns();
-        ColumnsWithTypeAndName cols_with_name_type;
-        for (size_t i = 0; i < cols.size(); ++i)
-        {
-            auto & block_col = header.getByPosition(i);
-            ColumnWithTypeAndName col_with_name_type(cols[i],  block_col.type, block_col.name);
-            cols_with_name_type.emplace_back(col_with_name_type);
-        }
-        blocks.emplace_back(cols_with_name_type);
-    }
-    BlockStatAnalyzer analyzer(blocks);
-    auto result = analyzer.analyze();
-    for (auto & data : result.columns_metadata)
-    {
-        LOG_ERROR(&Poco::Logger::get("DemoPathSelector"), "xxxx stat: {}", data->debugString());
-    }
     return selected_path;
 }
 

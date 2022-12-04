@@ -16,8 +16,7 @@ public:
     MultiPathSelectStep(
         const DataStream & input_stream_,
         IPathSampleSelectorPtr path_selector_,
-        std::vector<PathBuilder> path_builders_,
-        size_t sample_rows_num_ = 1);
+        std::vector<PathBuilder> path_builders_);
     ~MultiPathSelectStep() override = default;
 
     String getName() const override { return "MultiPathSelectStep"; }
@@ -30,7 +29,6 @@ public:
 private:
     IPathSampleSelectorPtr path_selector;
     std::vector<PathBuilder> path_builders;
-    size_t sample_rows_num;
 
     Processors processors;
 
@@ -42,14 +40,13 @@ private:
 class DemoPathSelector : public IPathSampleSelector
 {
 public:
-    DemoPathSelector(const Block & header_, Int32 selected_path_)
-        : IPathSampleSelector(header_)
-        , selected_path(selected_path_)
+    explicit DemoPathSelector(Int32 selected_path_)
+        : selected_path(selected_path_)
     {}
 
     ~DemoPathSelector() override = default;
 
-    Int32 compute(const std::list<Chunk> & samples) override;
+    Int32 getPath() override;
 
 private:
     Int32 selected_path;

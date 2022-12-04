@@ -8,6 +8,7 @@ namespace DB
 {
 struct ColumnStatMetadata
 {
+    String column_name;
     size_t column_pos = 0;
     size_t rows = 0;
     size_t distinct_count = 0;

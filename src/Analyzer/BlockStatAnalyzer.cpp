@@ -13,10 +13,11 @@ String ColumnStatMetadata::debugString() const
 {
     WriteBufferFromOwnString buffer;
     buffer << "{";
-    buffer << "\"column_pos\":" << column_pos;
-    buffer << ", \"rows\":" << rows;
-    buffer << ", \"distinct_count\":"<<distinct_count;
-    buffer << ", \"null_count\":"<<null_count;
+    buffer << R"("column_name":")" << column_name << "\""; 
+    buffer << R"(, "column_pos":)" << column_pos;
+    buffer << R"(, "rows":)" << rows;
+    buffer << R"(, "distinct_count":)"<<distinct_count;
+    buffer << R"(, "null_count":)"<<null_count;
     buffer << "}";
     return buffer.str();
 }
@@ -66,6 +67,7 @@ BlockStatMetadata BlockStatAnalyzer::analyze()
     for (size_t i = 0, n = first_block.columns(); i < n; ++i)
     {
         auto column_stat = std::make_shared<ColumnStatMetadata>();
+        column_stat->column_name = first_block.getByPosition(i).name;
         column_stat->column_pos = i;
 
         SetVariants value_set;
