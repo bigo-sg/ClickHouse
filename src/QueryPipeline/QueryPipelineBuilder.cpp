@@ -23,6 +23,8 @@
 #include <Common/typeid_cast.h>
 #include <Common/CurrentThread.h>
 #include "Core/SortDescription.h"
+#include "QueryPipeline/Pipe.h"
+#include "QueryPipeline/QueryPipeline.h"
 #include <QueryPipeline/narrowPipe.h>
 #include <Processors/DelayedPortsProcessor.h>
 #include <Processors/RowsBeforeLimitCounter.h>
@@ -130,6 +132,36 @@ void QueryPipelineBuilder::addSimpleTransform(const Pipe::ProcessorGetterWithStr
 {
     checkInitializedAndNotCompleted();
     pipe.addSimpleTransform(getter);
+}
+
+std::pair<Processors, OutputPortRawPtrs> 
+QueryPipelineBuilder::connectProcessors(const ProcessorGetter & getter, const OutputPortRawPtrs & outputs, size_t outputs_step)
+{
+    assert (outputs.size() % outputs_step == 0);
+    Processors processors;
+    OutputPortRawPtrs new_outputs;
+    for (size_t i = 0, steps = outputs.size()/ outputs_step; i < steps; ++i)
+    {
+        std::vector<Block> headers;
+        for (size_t j = 0; j < outputs_step; ++j)
+        {
+            headers.push_back(outputs[ i * outputs_step + j]->getHeader());
+        }
+        auto processor = getter(headers);
+        assert (processor->getInputs().size() == outputs_step);
+        size_t n = 0;
+        for (auto & input : processor->getInputs())
+        {
+            connect(*outputs[ i * outputs_step + n], input);
+            n += 1;
+        }
+        processors.push_back(processor);
+        for (auto & port : processor->getOutputs())
+        {
+            new_outputs.emplace_back(&port);
+        }
+    }
+    return {processors, new_outputs};
 }
 
 void QueryPipelineBuilder::addTransform(ProcessorPtr transform)

@@ -21,6 +21,22 @@ String ColumnStatMetadata::debugString() const
     return buffer.str();
 }
 
+String BlockStatMetadata::debugString() const
+{
+    size_t i = 0;
+    WriteBufferFromOwnString buffer;
+    buffer << "{\"columns_metadata\":[";
+    for (const auto & col : columns_metadata)
+    {
+        if (i)
+            buffer << ",";
+        i += 1;
+        buffer << col->debugString();
+    }
+    buffer << "]}";
+    return buffer.str();
+}
+
 BlockStatAnalyzer::BlockStatAnalyzer(const std::vector<Block> & sample_blocks_)
     : sample_blocks(sample_blocks_)
 {}

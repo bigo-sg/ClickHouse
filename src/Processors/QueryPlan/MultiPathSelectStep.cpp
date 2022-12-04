@@ -58,26 +58,15 @@ void MultiPathSelectStep::transformPipeline(
     // path_num outports. Every new outport is related to one execution path.
     Processors sample_processors;
     OutputPortRawPtrs sample_transform_outputs;
-    auto sample_transform_build = [&](OutputPortRawPtrs outports) {
-        if (outports.size() != streams_num)
-        {
-            throw Exception(
-                ErrorCodes::LOGICAL_ERROR, "Unexpected ports size. outports.size={}, streams_num={}", outports.size(), streams_num);
-        }
-        Processors inner_processors;
-        for (auto & port : outports)
-        {
-            auto transform = std::make_shared<MultiPathsSelectTransform>(
-                input_header, path_num, sample_share_state, path_selector, sample_rows_num);
-            connect(*port, transform->getInputs().front());
-            inner_processors.push_back(transform);
-            for (auto & output : transform->getOutputs())
-            {
-                sample_transform_outputs.emplace_back(&output);
-            }
-        }
-        sample_processors = inner_processors;
-        return inner_processors;
+    
+    auto sample_transform_build = [&](OutputPortRawPtrs outports)
+    {
+        auto build_multi_paths_select_transform = [&](const std::vector<Block> & /*headers*/)
+        { return std::make_shared<MultiPathsSelectTransform>(input_header, path_num, sample_share_state, path_selector, sample_rows_num); };
+        auto result = QueryPipelineBuilder::connectProcessors(build_multi_paths_select_transform, outports);
+        sample_processors.swap(result.first);
+        sample_transform_outputs.swap(result.second);
+        return sample_processors;
     };
     pipeline.transform(sample_transform_build);
 
@@ -129,7 +118,6 @@ void MultiPathSelectStep::transformPipeline(
     }
 
     auto union_transform = [&](OutputPortRawPtrs) {
-        Processors inner_processors;
         if (paths_outports.size() != streams_num * path_num)
         {
             throw Exception(
@@ -139,39 +127,33 @@ void MultiPathSelectStep::transformPipeline(
                 streams_num,
                 path_num);
         }
+
+        OutputPortRawPtrs rearranged_ports;
         for (size_t i = 0; i < streams_num; ++i)
         {
-            OutputPortRawPtrs stream_inputs;
             for (size_t j = 0; j < path_num; ++j)
             {
                 auto offset = j * streams_num + i;
-                stream_inputs.emplace_back(paths_outports[offset]);
-            }
-            auto transform = std::make_shared<UnionStreamsTransform>(paths_outports[0]->getHeader(), path_num);
-            inner_processors.emplace_back(transform);
-            size_t port_idx = 0;
-            if (transform->getInputs().size() != stream_inputs.size())
-            {
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "invalid size: {} vs. {}", transform->getInputs().size(), stream_inputs.size());
-            }
-            for (auto & input : transform->getInputs())
-            {
-                connect(*stream_inputs[port_idx], input);
-                port_idx += 1;
+                rearranged_ports.emplace_back(paths_outports[offset]);
             }
         }
-        return inner_processors;
+        auto [new_processors, new_outputs] = QueryPipelineBuilder::connectProcessors(
+            [&](const std::vector<Block> & blocks) { return std::make_shared<UnionStreamsTransform>(blocks[0], path_num); },
+            rearranged_ports,
+            path_num);
+        return new_processors;
+
     };
     pipeline.transform(union_transform);
     assert(pipeline.getNumStreams() == streams_num);
 
     output_stream = createOutputStream(getInputStreams().front(), paths_outports[0]->getHeader(), getTraits().data_stream_traits);
     processors = collector.detachProcessors(0);
+
 }
 
 void MultiPathSelectStep::updateOutputStream()
 {
-    LOG_ERROR(logger, "xxxx call updateOutputStream");
     // Nothing to do.
 }
 

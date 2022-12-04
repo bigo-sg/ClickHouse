@@ -20,6 +20,8 @@ using ColumnStatMetadataPtr = std::shared_ptr<ColumnStatMetadata>;
 struct BlockStatMetadata
 {
     std::vector<ColumnStatMetadataPtr> columns_metadata;
+
+    String debugString() const;
 };
 
 class BlockStatAnalyzer

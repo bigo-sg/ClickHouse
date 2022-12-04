@@ -1,9 +1,10 @@
 #pragma once
 
-#include <Processors/Transforms/MultiPathsSelectTransform.h>
+#include <Processors/IProcessor.h>
 #include <Processors/QueryPlan/IQueryPlanStep.h>
 #include <Processors/QueryPlan/ITransformingStep.h>
-#include <Processors/IProcessor.h>
+#include <Processors/Transforms/MultiPathsSelectTransform.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Poco/Logger.h>
 #include <Common/logger_useful.h>
 namespace DB

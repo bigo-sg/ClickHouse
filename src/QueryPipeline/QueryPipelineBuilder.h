@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <Processors/IProcessor.h>
 #include <QueryPipeline/Pipe.h>
 #include <QueryPipeline/QueryPipeline.h>
@@ -58,6 +59,11 @@ public:
     /// Add transform with simple input and simple output for each port.
     void addSimpleTransform(const Pipe::ProcessorGetter & getter);
     void addSimpleTransform(const Pipe::ProcessorGetterWithStreamKind & getter);
+
+    using ProcessorGetter = std::function<ProcessorPtr(const std::vector<Block> & input_headers)>;
+    static std::pair<Processors, OutputPortRawPtrs> 
+    connectProcessors(const ProcessorGetter & getter, const OutputPortRawPtrs & outputs, size_t outputs_step = 1);
+
     /// Add transform with getNumStreams() input ports.
     void addTransform(ProcessorPtr transform);
     void addTransform(ProcessorPtr transform, InputPort * totals, InputPort * extremes);
@@ -70,6 +76,7 @@ public:
     using Transformer = std::function<Processors(OutputPortRawPtrs ports)>;
     /// Transform pipeline in general way.
     void transform(const Transformer & transformer, bool check_ports = true);
+
 
     /// Add TotalsHavingTransform. Resize pipeline to single input. Adds totals port.
     void addTotalsHavingTransform(ProcessorPtr transform);
@@ -178,6 +185,7 @@ public:
     /// Convert query pipeline to pipe.
     static Pipe getPipe(QueryPipelineBuilder pipeline, QueryPlanResourceHolder & resources);
     static QueryPipeline getPipeline(QueryPipelineBuilder builder);
+
 
 private:
 
