@@ -19,6 +19,10 @@ public:
     virtual ~IPathSampleSelector() = default;
 
     virtual Int32 getPath() = 0;
+
+    void setNumStreams(size_t n ) { num_streams = n; }
+protected:
+    size_t num_streams = 0;
 };
 
 using IPathSampleSelectorPtr = std::shared_ptr<IPathSampleSelector>;
@@ -48,20 +52,5 @@ private:
     Chunk output_chunk;
 
     Poco::Logger * logger = &Poco::Logger::get("MultiPathsSelectTransform");
-};
-
-class UnionStreamsTransform : public IProcessor
-{
-public:
-    explicit UnionStreamsTransform(const Block & header_, size_t inputs_num);
-    ~UnionStreamsTransform() override = default;
-    String getName() const override {return "UnionStreamsTransform"; }
-    Status prepare() override;
-    void work() override;
-private:
-    bool has_input = false;
-    bool has_output = false;
-    Chunk output_chunk;
-    std::list<InputPort *> running_inputs;
 };
 }

@@ -1,3 +1,4 @@
+#include <memory>
 #include <Access/AccessControl.h>
 
 #include <DataTypes/DataTypeAggregateFunction.h>
@@ -93,6 +94,9 @@
 #include <Common/checkStackSize.h>
 #include <Common/scope_guard_safe.h>
 #include <Common/typeid_cast.h>
+#include "Processors/QueryPlan/AggregatingStepBaseCardinality.h"
+#include <Processors/QueryPlan/MultiPathSelectStep.h>
+#include <Processors/QueryPlan/SampleStatisticsStep.h>
 
 
 namespace DB
@@ -1306,6 +1310,26 @@ void InterpreterSelectQuery::executeImpl(QueryPlan & query_plan, std::optional<P
         executeFetchColumns(from_stage, query_plan);
 
         LOG_TRACE(log, "{} -> {}", QueryProcessingStage::toString(from_stage), QueryProcessingStage::toString(options.to_stage));
+
+        #if 0
+        LOG_ERROR(log, "Begin to add MultiPathSelectStep");
+        auto header = query_plan.getCurrentDataStream().header;
+        auto stat_result = std::make_shared<BlockStatMetadata>();
+        auto sample_stat_step = std::make_unique<SampleStatisticsStep>(query_plan.getCurrentDataStream(), stat_result, 2);
+        query_plan.addStep(std::move(sample_stat_step));
+        auto path_builder = [header](size_t streams_num, const OutputPortRawPtrs & in_ports, OutputPortRawPtrs * out_ports, Processors * processors){
+            buildDemoPassPipeline(header, streams_num, in_ports, out_ports, processors);
+        };
+        std::vector<MultiPathSelectStep::PathBuilder> path_builders;
+        for (size_t i = 0; i < 2; ++i)
+        {
+            path_builders.push_back(path_builder);
+        }
+        auto path_selector = std::make_shared<DemoPathSelector>(1);
+        auto multi_path_step = std::make_unique<MultiPathSelectStep>(query_plan.getCurrentDataStream(), path_selector, path_builders);
+        query_plan.addStep(std::move(multi_path_step));
+        LOG_ERROR(log, "After add MultiPathSelectStep");
+        #endif
     }
 
     if (query_info.projection && query_info.projection->input_order_info && query_info.input_order_info)
@@ -2493,22 +2517,62 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
     const bool should_produce_results_in_order_of_bucket_number = options.to_stage == QueryProcessingStage::WithMergeableState
         && (settings.distributed_aggregation_memory_efficient || settings.enable_memory_bound_merging_of_aggregation_results);
 
-    auto aggregating_step = std::make_unique<AggregatingStep>(
-        query_plan.getCurrentDataStream(),
-        std::move(aggregator_params),
-        std::move(grouping_sets_params),
-        final,
-        settings.max_block_size,
-        settings.aggregation_in_order_max_block_bytes,
-        merge_threads,
-        temporary_data_merge_threads,
-        storage_has_evenly_distributed_read,
-        settings.group_by_use_nulls,
-        std::move(group_by_info),
-        std::move(group_by_sort_description),
-        should_produce_results_in_order_of_bucket_number,
-        settings.enable_memory_bound_merging_of_aggregation_results);
-    query_plan.addStep(std::move(aggregating_step));
+    if (group_by_info || !grouping_sets_params.empty() || storage_has_evenly_distributed_read
+        || should_produce_results_in_order_of_bucket_number || settings.enable_memory_bound_merging_of_aggregation_results)
+    {
+        auto aggregating_step = std::make_unique<AggregatingStep>(
+            query_plan.getCurrentDataStream(),
+            std::move(aggregator_params),
+            std::move(grouping_sets_params),
+            final,
+            settings.max_block_size,
+            settings.aggregation_in_order_max_block_bytes,
+            merge_threads,
+            temporary_data_merge_threads,
+            storage_has_evenly_distributed_read,
+            settings.group_by_use_nulls,
+            std::move(group_by_info),
+            std::move(group_by_sort_description),
+            should_produce_results_in_order_of_bucket_number,
+            settings.enable_memory_bound_merging_of_aggregation_results);
+        query_plan.addStep(std::move(aggregating_step));
+    }
+    else
+    {
+        // In other cases, we try to use a more efficient algorithm for high cardinality aggregating.
+        std::shared_ptr<BlockStatMetadata> stat_info;
+        auto stat_step = std::make_unique<SampleStatisticsStep>(query_plan.getCurrentDataStream(), stat_info, settings.statistics_sample_rows);
+        query_plan.addStep(std::move(stat_step));
+
+        auto output_header_builder = [aggregator_params, final](const DataStream & input_stream){
+            return aggregator_params.getHeader(input_stream.header, final);
+        };
+
+        auto traits_builder = []()
+        {
+            return ITransformingStep::Traits{
+                {
+                    .preserves_distinct_columns = false, /// Actually, we may check that distinct names are in aggregation keys
+                    .returns_single_stream = false,
+                    .preserves_number_of_streams = false,
+                    .preserves_sorting = false,
+                    .can_enforce_sorting_properties_in_distributed_query = false,
+                },
+                {
+                    .preserves_number_of_rows = false,
+                }};
+        };
+
+        auto path_selector = std::make_shared<AggregatingAlgorithmSelector>(stat_info, aggregator_params, settings.use_high_cardinality_aggregating_threshold);
+        std::vector<DynamicPathBuilderPtr> path_builders;
+        auto low_card_path = std::make_shared<LowCardinalityAggregatingExecution>(aggregator_params, merge_threads, final, temporary_data_merge_threads);
+        auto high_card_path = std::make_shared<HighCardinalityAggregatingExecution>(aggregator_params, final);
+        path_builders.emplace_back(std::move(low_card_path));
+        path_builders.emplace_back(std::move(high_card_path));
+        auto paths_step = std::make_unique<MultiPathSelectStep>(
+            query_plan.getCurrentDataStream(), output_header_builder, traits_builder, path_selector, path_builders, true);
+        query_plan.addStep(std::move(paths_step));
+    }
 }
 
 void InterpreterSelectQuery::executeMergeAggregated(QueryPlan & query_plan, bool overflow_row, bool final, bool has_grouping_sets)

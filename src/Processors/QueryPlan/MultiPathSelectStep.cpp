@@ -6,6 +6,7 @@
 #include <QueryPipeline/QueryPipeline.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Exception.h>
+#include <Processors/ResizeProcessor.h>
 #include <Analyzer/BlockStatAnalyzer.h>
 #include <Processors/IProcessor.h>
 
@@ -16,29 +17,22 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-static ITransformingStep::Traits getTraits()
-{
-    return ITransformingStep::Traits
-    {
-        {
-            .preserves_distinct_columns = false, /// Actually, we may check that distinct names are in aggregation keys
-            .returns_single_stream = true,
-            .preserves_number_of_streams = false,
-            .preserves_sorting = false,
-        },
-        {
-            .preserves_number_of_rows = false,
-        }
-    };
-}
 MultiPathSelectStep::MultiPathSelectStep(
     const DataStream & input_stream_,
+    OutputHeaderBuilder output_header_builder_,
+    TraitsBuilder traits_builder_,
     IPathSampleSelectorPtr path_selector_,
-    std::vector<PathBuilder> path_builders_)
-    : ITransformingStep(input_stream_, input_stream_.header, getTraits())
+    std::vector<DynamicPathBuilderPtr> path_builders_,
+    bool need_to_clear_totals_)
+    : ITransformingStep(input_stream_, output_header_builder_(input_stream_), traits_builder_())
+    , output_header_builder(output_header_builder_)
+    , traits_builder(traits_builder_)
     , path_selector(path_selector_)
     , path_builders(path_builders_)
-{}
+    , need_to_clear_totals(need_to_clear_totals_)
+{
+    output_header = output_header_builder(input_stream_);
+}
 
 // Be carefule to connect every outport with the related inport.
 void MultiPathSelectStep::transformPipeline(
@@ -46,9 +40,13 @@ void MultiPathSelectStep::transformPipeline(
     const BuildQueryPipelineSettings &)
 {
     LOG_DEBUG(logger, "line:{}, streams:{}", __LINE__, pipeline.getNumStreams());
+    if (need_to_clear_totals)
+        pipeline.dropTotalsAndExtremes();
+
     QueryPipelineProcessorsCollector collector(pipeline, this);
     size_t path_num = path_builders.size();
     size_t streams_num = pipeline.getNumStreams();
+    path_selector->setNumStreams(streams_num);
     auto input_header = pipeline.getHeader();
 
     // Add divide phase here. Every outport from upstream node will be divided into
@@ -76,7 +74,6 @@ void MultiPathSelectStep::transformPipeline(
     OutputPortRawPtrs paths_outports;
     auto path_pipeline_build = [&](size_t index) {
         auto & path_builder = path_builders[index];
-
         // collect related outports from upstream
         OutputPortRawPtrs inputs;
         for (size_t i = 0; i < streams_num; ++i)
@@ -84,9 +81,7 @@ void MultiPathSelectStep::transformPipeline(
             auto offset = i * path_num + index;
             inputs.emplace_back(sample_transform_outputs[offset]);
         }
-        OutputPortRawPtrs outputs;
-        Processors inner_processors;
-        path_builder(streams_num, inputs, &outputs, &inner_processors);
+        auto [inner_processors, outputs] = path_builder->buildPath(streams_num, inputs);
         path_pipeline_processors.insert(path_pipeline_processors.end(), inner_processors.begin(), inner_processors.end());
         paths_outports.insert(paths_outports.end(), outputs.begin(), outputs.end());
         return inner_processors;
@@ -103,14 +98,13 @@ void MultiPathSelectStep::transformPipeline(
     };
     pipeline.transform(paths_pipelien_build);
 
-    for (size_t i = 1; i < paths_outports.size(); ++i)
+    for (auto & paths_outport : paths_outports)
     {
-        auto lheader = paths_outports[i-1]->getHeader();
-        auto rheader = paths_outports[i]->getHeader();
-        if (!blocksHaveEqualStructure(lheader, rheader))
+        auto header = paths_outport->getHeader();
+        if (!blocksHaveEqualStructure(output_header, header))
         {
             throw Exception(
-                ErrorCodes::LOGICAL_ERROR, "Ports has different structure.({}) vs. ({})", lheader.dumpNames(), rheader.dumpNames());
+                ErrorCodes::LOGICAL_ERROR, "Ports has different structure.({}) vs. ({})", output_header.dumpNames(), header.dumpNames());
         }
     }
 
@@ -135,7 +129,7 @@ void MultiPathSelectStep::transformPipeline(
             }
         }
         auto [new_processors, new_outputs] = QueryPipelineBuilder::connectProcessors(
-            [&](const std::vector<Block> & blocks) { return std::make_shared<UnionStreamsTransform>(blocks[0], path_num); },
+            [&](const std::vector<Block> & blocks) { return std::make_shared<ResizeProcessor>(blocks[0], path_num, 1); },
             rearranged_ports,
             path_num);
         return new_processors;
@@ -144,13 +138,13 @@ void MultiPathSelectStep::transformPipeline(
     pipeline.transform(union_transform);
     assert(pipeline.getNumStreams() == streams_num);
 
-    output_stream = createOutputStream(getInputStreams().front(), paths_outports[0]->getHeader(), getTraits().data_stream_traits);
     processors = collector.detachProcessors(0);
 
 }
 
 void MultiPathSelectStep::updateOutputStream()
 {
+    output_stream = createOutputStream(input_streams.front(), output_header_builder(input_streams.front()), traits_builder().data_stream_traits);
     // Nothing to do.
 }
 

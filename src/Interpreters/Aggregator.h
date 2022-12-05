@@ -1085,6 +1085,7 @@ private:
     friend class ConvertingAggregatedToChunksTransform;
     friend class ConvertingAggregatedToChunksSource;
     friend class AggregatingInOrderTransform;
+    friend class HighCardinalityAggregatingTransform;
 
     /// Data structure of source blocks.
     Block header;

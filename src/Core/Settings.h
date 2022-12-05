@@ -644,6 +644,8 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     \
     M(Map, additional_table_filters, "", "Additional filter expression which would be applied after reading from specified table. Syntax: {'table1': 'expression', 'database.table2': 'expression'}", 0) \
     M(String, additional_result_filter, "", "Additional filter expression which would be applied to query result", 0) \
+    M(UInt64, statistics_sample_rows, 8192, "The number of rows to sample to make a statistics information", 0) \
+    M(UInt64, use_high_cardinality_aggregating_threshold, 90, "The threshold of enable high cardinality aggregating", 0) \
     \
     /** Experimental functions */ \
     M(Bool, allow_experimental_funnel_functions, false, "Enable experimental functions for funnel analysis.", 0) \
