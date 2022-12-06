@@ -305,7 +305,6 @@ std::shared_ptr<substrait::Type> SerializedPlanBuilder::buildType(const DB::Data
 void SerializedPlanBuilder::buildType(const DB::DataTypePtr & ch_type, String & substrait_type)
 {
     auto pb = buildType(ch_type);
-    std::cout << "buildtype:" << pb->DebugString() << std::endl;
     substrait_type = pb->SerializeAsString();
 }
 

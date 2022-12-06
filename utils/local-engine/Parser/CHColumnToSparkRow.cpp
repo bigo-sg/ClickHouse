@@ -178,15 +178,10 @@ static void writeVariableLengthNullableValue(
             {
                 Field field;
                 nested_column.get(i, field);
-                std::cout << "get field:" << toString(field) << std::endl;
                 StringRef str_view = nested_column.getDataAt(i);
                 String buf(str_view.data, str_view.size);
                 auto * decimal128 = reinterpret_cast<Decimal128 *>(buf.data());
-                std::cout << "before:" << *reinterpret_cast<UInt64 *>(buf.data()) << "," << *reinterpret_cast<UInt64 *>(buf.data() + 8)
-                          << std::endl;
                 BackingDataLengthCalculator::swapBytes(*decimal128);
-                std::cout << "before:" << *reinterpret_cast<UInt64 *>(buf.data()) << "," << *reinterpret_cast<UInt64 *>(buf.data() + 8)
-                          << std::endl;
                 int64_t offset_and_size = writer.writeUnalignedBytes(i, buf.data(), buf.size(), 0);
                 memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
             }
@@ -551,12 +546,7 @@ void BackingDataLengthCalculator::swapBytes(DB::Decimal128 & decimal128)
 {
     auto & x = decimal128.value;
     for (size_t i = 0; i != std::size(x.items); ++i)
-    {
-        std::cout << "index:" << i << std::endl;
-        std::cout << "before:" << x.items[i] << std::endl;
         x.items[i] = __builtin_bswap64(x.items[i]);
-        std::cout << "after:" << x.items[i] << std::endl;
-    }
 }
 
 Decimal128 BackingDataLengthCalculator::getDecimal128FromBytes(const String & bytes)
