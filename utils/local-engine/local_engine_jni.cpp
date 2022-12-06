@@ -496,6 +496,7 @@ jint Java_io_glutenproject_vectorized_CHNativeBlock_nativeNumColumns(JNIEnv * en
 jbyteArray Java_io_glutenproject_vectorized_CHNativeBlock_nativeColumnType(JNIEnv * env, jobject /*obj*/, jlong block_address, jint position)
 {
     LOCAL_ENGINE_JNI_METHOD_START
+    std::cout << "nativecolumntype:" << StackTrace().toString() << std::endl;
     auto * block = reinterpret_cast<DB::Block *>(block_address);
     const auto & col = block->getByPosition(position);
     std::string substrait_type;
@@ -681,6 +682,7 @@ jobject Java_io_glutenproject_vectorized_BlockNativeConverter_convertColumnarToR
     LOCAL_ENGINE_JNI_METHOD_START
     local_engine::CHColumnToSparkRow converter;
     DB::Block * block = reinterpret_cast<DB::Block *>(block_address);
+    std::cout << "c2r block:" << block->dumpStructure() << std::endl;
     auto spark_row_info = converter.convertCHColumnToSparkRow(*block);
 
     auto * offsets_arr = env->NewLongArray(spark_row_info->getNumRows());
@@ -734,7 +736,9 @@ jlong Java_io_glutenproject_vectorized_BlockNativeConverter_convertSparkRowsToCH
         env->DeleteLocalRef(type);
     }
     local_engine::SparkRowToCHColumn converter;
-    return reinterpret_cast<jlong>(converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types));
+    auto * block = converter.convertSparkRowItrToCHColumn(java_iter, c_names, c_types);
+    std::cout << "r2c, block:" << block->dumpStructure() << std::endl;
+    return reinterpret_cast<jlong>(block);
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }
 

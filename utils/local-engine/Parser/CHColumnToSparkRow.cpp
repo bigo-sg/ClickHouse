@@ -176,10 +176,17 @@ static void writeVariableLengthNullableValue(
             }
             else
             {
+                Field field;
+                nested_column.get(i, field);
+                std::cout << "get field:" << toString(field) << std::endl;
                 StringRef str_view = nested_column.getDataAt(i);
                 String buf(str_view.data, str_view.size);
                 auto * decimal128 = reinterpret_cast<Decimal128 *>(buf.data());
+                std::cout << "before:" << *reinterpret_cast<UInt64 *>(buf.data()) << "," << *reinterpret_cast<UInt64 *>(buf.data() + 8)
+                          << std::endl;
                 BackingDataLengthCalculator::swapBytes(*decimal128);
+                std::cout << "before:" << *reinterpret_cast<UInt64 *>(buf.data()) << "," << *reinterpret_cast<UInt64 *>(buf.data() + 8)
+                          << std::endl;
                 int64_t offset_and_size = writer.writeUnalignedBytes(i, buf.data(), buf.size(), 0);
                 memcpy(buffer_address + offsets[i] + field_offset, &offset_and_size, 8);
             }
@@ -371,9 +378,7 @@ int64_t SparkRowInfo::getTotalBytes() const
 std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(const Block & block)
 {
     if (!block.columns())
-    {
         throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "A block with empty columns");
-    }
 
     std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
     spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
@@ -546,7 +551,24 @@ void BackingDataLengthCalculator::swapBytes(DB::Decimal128 & decimal128)
 {
     auto & x = decimal128.value;
     for (size_t i = 0; i != std::size(x.items); ++i)
+    {
+        std::cout << "index:" << i << std::endl;
+        std::cout << "before:" << x.items[i] << std::endl;
         x.items[i] = __builtin_bswap64(x.items[i]);
+        std::cout << "after:" << x.items[i] << std::endl;
+    }
+}
+
+Decimal128 BackingDataLengthCalculator::getDecimal128FromBytes(const String & bytes)
+{
+    assert(bytes.size() == 16);
+
+    using base_type = Decimal128::NativeType::base_type;
+    String bytes_copy(bytes);
+    base_type * high = reinterpret_cast<base_type *>(bytes_copy.data() + 8);
+    base_type * low = reinterpret_cast<base_type *>(bytes_copy.data());
+    std::swap(*high, *low);
+    return std::move(*reinterpret_cast<Decimal128 *>(bytes_copy.data()));
 }
 
 VariableLengthDataWriter::VariableLengthDataWriter(
