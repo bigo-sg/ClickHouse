@@ -7,6 +7,7 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Common/Exception.h>
 #include <Processors/ResizeProcessor.h>
+#include <Processors/Transforms/HighCardinalityAggregatingTransform.h>
 #include <Analyzer/BlockStatAnalyzer.h>
 #include <Processors/IProcessor.h>
 
@@ -129,7 +130,7 @@ void MultiPathSelectStep::transformPipeline(
             }
         }
         auto [new_processors, new_outputs] = QueryPipelineBuilder::connectProcessors(
-            [&](const std::vector<Block> & blocks) { return std::make_shared<ResizeProcessor>(blocks[0], path_num, 1); },
+            [&](const std::vector<Block> & blocks) { return std::make_shared<UnionStreamsTransform>(blocks[0], path_num); },
             rearranged_ports,
             path_num);
         return new_processors;

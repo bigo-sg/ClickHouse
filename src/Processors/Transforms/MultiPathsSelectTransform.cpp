@@ -88,6 +88,7 @@ IProcessor::Status MultiPathsSelectTransform::prepare()
             // do nothing.
             return Status::Ready;
         }
+        LOG_INFO(logger, "select path: {}", selected_path);
         Int32 n = 0;
         for (auto & port : outputs)
         {

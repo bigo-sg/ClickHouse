@@ -48,6 +48,13 @@ Int32 AggregatingAlgorithmSelector::getPath()
         if (iter == name_indexes.end())
             continue;
         const auto & col_stat = stat_info->columns_metadata[iter->second];
+        LOG_ERROR(
+            &Poco::Logger::get("AggregatingAlgorithmSelector"),
+            "col:{}, distinct cnt:{}, rows:{}, threshold:{}",
+            key,
+            col_stat->distinct_count,
+            col_stat->rows,
+            high_card_threshold);
         if (col_stat->distinct_count * 100 / (col_stat->rows + 1) > high_card_threshold)
         {
             has_high_card = true;
@@ -146,7 +153,7 @@ DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(si
             ports_for_input.push_back(current_output_ports[j * num_streams + i]);
         }
         auto [union_processors, ports] = QueryPipelineBuilder::connectProcessors(
-            [&](const std::vector<Block> & headers) { return std::make_shared<ResizeProcessor>(headers[0], num_streams, 1); },
+            [&](const std::vector<Block> & headers) { return std::make_shared<UnionStreamsTransform>(headers[0], num_streams); },
             ports_for_input, num_streams);
         result.processors.insert(result.processors.end(), union_processors.begin(), union_processors.end());
         union_output_ports.insert(union_output_ports.end(), ports.begin(), ports.end());
@@ -158,7 +165,6 @@ DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(si
         [&](const std::vector<Block> & headers)
         { return std::make_shared<HighCardinalityAggregatingTransform>(headers[0], this->params, this->final); },
         current_output_ports);
-    auto x = std::make_shared<HighCardinalityAggregatingTransform>(src_header, params, final);
     result.processors.insert(result.processors.end(), agg_processors.begin(), agg_processors.end());
     current_output_ports.swap(agg_output_ports);
     result.output_ports.swap(current_output_ports);

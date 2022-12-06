@@ -2518,7 +2518,7 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
         && (settings.distributed_aggregation_memory_efficient || settings.enable_memory_bound_merging_of_aggregation_results);
 
     if (group_by_info || !grouping_sets_params.empty() || storage_has_evenly_distributed_read
-        || should_produce_results_in_order_of_bucket_number || settings.enable_memory_bound_merging_of_aggregation_results)
+        || should_produce_results_in_order_of_bucket_number || settings.enable_memory_bound_merging_of_aggregation_results || aggregator_params.keys.empty())
     {
         auto aggregating_step = std::make_unique<AggregatingStep>(
             query_plan.getCurrentDataStream(),
@@ -2541,7 +2541,7 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
     {
         LOG_ERROR(&Poco::Logger::get("InterpreterSelectQuery"), "enter sample aggregating algorithm");
         // In other cases, we try to use a more efficient algorithm for high cardinality aggregating.
-        std::shared_ptr<BlockStatMetadata> stat_info;
+        std::shared_ptr<BlockStatMetadata> stat_info = std::make_shared<BlockStatMetadata>();
         auto stat_step = std::make_unique<SampleStatisticsStep>(query_plan.getCurrentDataStream(), stat_info, settings.statistics_sample_rows);
         query_plan.addStep(std::move(stat_step));
 

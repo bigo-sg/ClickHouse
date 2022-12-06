@@ -10,7 +10,7 @@ class HighCardinalityAggregatingTransform : public IProcessor
 {
 public:
     explicit HighCardinalityAggregatingTransform(const Block & header_, const Aggregator::Params & params_, bool final_);
-    ~HighCardinalityAggregatingTransform() override = default;
+    ~HighCardinalityAggregatingTransform() override;
 
     String getName() const override { return "HighCardinalityAggregatingTransform"; }
     Status prepare() override;
@@ -46,5 +46,20 @@ private:
 
     Block convertSingleLevel();
     Block convertTwoLevel(UInt32 bucket_num); 
+};
+
+class UnionStreamsTransform : public IProcessor
+{
+public:
+    explicit UnionStreamsTransform(const Block & header_, size_t inputs_num);
+    ~UnionStreamsTransform() override = default;
+    String getName() const override {return "UnionStreamsTransform"; }
+    Status prepare() override;
+    void work() override;
+private:
+    bool has_input = false;
+    bool has_output = false;
+    Chunk output_chunk;
+    std::list<InputPort *> running_inputs;
 };
 }
