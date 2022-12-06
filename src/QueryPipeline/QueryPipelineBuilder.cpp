@@ -22,9 +22,9 @@
 #include <Interpreters/TableJoin.h>
 #include <Common/typeid_cast.h>
 #include <Common/CurrentThread.h>
-#include "Core/SortDescription.h"
-#include "QueryPipeline/Pipe.h"
-#include "QueryPipeline/QueryPipeline.h"
+#include <Core/SortDescription.h>
+#include <QueryPipeline/Pipe.h>
+#include <QueryPipeline/QueryPipeline.h>
 #include <QueryPipeline/narrowPipe.h>
 #include <Processors/DelayedPortsProcessor.h>
 #include <Processors/RowsBeforeLimitCounter.h>
@@ -145,7 +145,8 @@ QueryPipelineBuilder::connectProcessors(const ProcessorGetter & getter, const Ou
         std::vector<Block> headers;
         for (size_t j = 0; j < outputs_step; ++j)
         {
-            headers.push_back(outputs[ i * outputs_step + j]->getHeader());
+            auto header = outputs.at(i * outputs_step + j)->getHeader();
+            headers.push_back(header);
         }
         auto processor = getter(headers);
         assert (processor->getInputs().size() == outputs_step);

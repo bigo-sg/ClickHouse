@@ -3,6 +3,7 @@
 #include <mutex>
 #include <Processors/IProcessor.h>
 #include <Common/Exception.h>
+#include "base/types.h"
 #include <Processors/Port.h>
 
 namespace DB
@@ -73,7 +74,7 @@ IProcessor::Status MultiPathsSelectTransform::prepare()
         }
         return Status::Finished;
     }
-
+    input.setNeeded();
     if (!input.hasData())
     {
         return Status::NeedData;        
@@ -86,6 +87,17 @@ IProcessor::Status MultiPathsSelectTransform::prepare()
         {
             // do nothing.
             return Status::Ready;
+        }
+        Int32 n = 0;
+        for (auto & port : outputs)
+        {
+            if (n == selected_path)
+            {
+                n += 1;
+                continue;
+            }
+            n += 1;
+            port.finish();
         }
     }
 
@@ -109,6 +121,6 @@ void MultiPathsSelectTransform::work()
     }
 
     has_input = false;
-    has_output = false;
+    has_output = true;
 }
 }

@@ -147,6 +147,7 @@ void SampleStatisticsTransform::work()
 
 void SampleStatisticsTransform::samplingWork()
 {
+
     if (local_status == ProcessStatus::WAIT_SAMPLED)
         return;
     if (has_input)

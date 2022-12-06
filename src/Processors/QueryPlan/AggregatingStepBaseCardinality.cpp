@@ -10,6 +10,9 @@
 #include <QueryPipeline/Pipe.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+
 namespace DB
 {
 AggregatingAlgorithmSelector::AggregatingAlgorithmSelector(
@@ -128,7 +131,7 @@ DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(si
         keys.push_back(src_header.getPositionByName(key_name));
     }
     auto [shuffle_processors, shuffle_output_ports] = QueryPipelineBuilder::connectProcessors(
-        [&](const std::vector<Block> & /*headers*/) { return std::make_shared<InnerShuffleTransform>(num_streams, src_header, keys); },
+        [&](const std::vector<Block> & headers) { return std::make_shared<InnerShuffleTransform>(num_streams, headers[0], keys); },
         current_output_ports);
     result.processors.insert(result.processors.end(), shuffle_processors.begin(), shuffle_processors.end());
     current_output_ports.swap(shuffle_output_ports);
@@ -143,9 +146,9 @@ DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(si
             ports_for_input.push_back(current_output_ports[j * num_streams + i]);
         }
         auto [union_processors, ports] = QueryPipelineBuilder::connectProcessors(
-            [&](const std::vector<Block> & /*headers*/) { return std::make_shared<ResizeProcessor>(src_header, num_streams, 1); },
+            [&](const std::vector<Block> & headers) { return std::make_shared<ResizeProcessor>(headers[0], num_streams, 1); },
             ports_for_input, num_streams);
-        result.processors.insert(result.processors.end(), shuffle_processors.begin(), shuffle_processors.end());
+        result.processors.insert(result.processors.end(), union_processors.begin(), union_processors.end());
         union_output_ports.insert(union_output_ports.end(), ports.begin(), ports.end());
     }
     current_output_ports.swap(union_output_ports);

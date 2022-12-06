@@ -2539,6 +2539,7 @@ void InterpreterSelectQuery::executeAggregation(QueryPlan & query_plan, const Ac
     }
     else
     {
+        LOG_ERROR(&Poco::Logger::get("InterpreterSelectQuery"), "enter sample aggregating algorithm");
         // In other cases, we try to use a more efficient algorithm for high cardinality aggregating.
         std::shared_ptr<BlockStatMetadata> stat_info;
         auto stat_step = std::make_unique<SampleStatisticsStep>(query_plan.getCurrentDataStream(), stat_info, settings.statistics_sample_rows);
