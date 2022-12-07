@@ -4,6 +4,8 @@
 #include <Processors/Formats/Impl/ORCBlockOutputFormat.h>
 #include <Processors/Transforms/AggregatingTransform.h>
 #include "Common/logger_useful.h"
+#include "Core/Defines.h"
+#include "Processors/Chunk.h"
 
 namespace DB
 {
@@ -130,10 +132,22 @@ void HighCardinalityAggregatingTransform::work()
             {
                 LOG_ERROR(logger, "xxxx is two level hash map");
                 is_generate_finished = true;
-                return;
             }
-            output_chunk = convertToChunk(convertTwoLevel(current_bucket_num));
-            current_bucket_num += 1;
+
+            if (!is_generate_finished)
+            {
+                pending_blocks.emplace_back(convertTwoLevel(current_bucket_num));
+                pending_rows += pending_blocks.back().rows();
+                current_bucket_num += 1;
+            }
+
+            if (pending_rows >= DEFAULT_BLOCK_SIZE || is_generate_finished)
+            {
+                output_chunk = convertToChunk(concatenateBlocks(pending_blocks));
+                pending_rows = 0;
+                pending_blocks.clear();
+            }
+
             if (!output_chunk.getNumRows())
                 return;
             has_output = true;
@@ -245,13 +259,36 @@ IProcessor::Status UnionStreamsTransform::prepare()
         {
             continue;
         }
-        output_chunk = input->pull(true);
-        has_input = true;
-        break;
+        input_chunks.emplace_back(input->pull(true));
+        pending_rows += input_chunks.back().getNumRows();
+        if (pending_rows >= DEFAULT_BLOCK_SIZE)
+        {
+            break;
+        }
     }
-
-    if (all_inputs_closed)
+    if (pending_rows >= DEFAULT_BLOCK_SIZE)
     {
+        has_input = true;
+        output_chunk = generateOneChunk();
+    }
+    else if (!all_inputs_closed)
+    {
+        for (auto * port : running_inputs)
+        {
+            if (!port->isFinished())
+                port->setNeeded();
+        }
+        return Status::NeedData;
+    }   
+
+    if (all_inputs_closed) [[unlikely]]
+    {
+        if (pending_rows)
+        {
+            has_input = true;
+            output_chunk = generateOneChunk();
+            return Status::Ready;
+        }
         for (auto & port : outputs)
         {
             if (!port.isFinished())
@@ -265,6 +302,24 @@ IProcessor::Status UnionStreamsTransform::prepare()
     if (!has_input)
         return Status::NeedData;
     return Status::Ready;
+}
+
+Chunk UnionStreamsTransform::generateOneChunk()
+{ 
+    auto mutable_cols = input_chunks[0].mutateColumns();
+    for (size_t col_index = 0, n = mutable_cols.size(); col_index < n; ++col_index)
+    {
+        mutable_cols[col_index]->reserve(pending_rows);
+        for (size_t chunk_it = 1, m = input_chunks.size(); chunk_it < m; ++chunk_it)
+        {
+            const auto & src_cols = input_chunks[chunk_it].getColumns();
+            mutable_cols[col_index]->insertRangeFrom(*src_cols[col_index], 0, input_chunks[chunk_it].getNumRows());
+        }
+    }
+    auto chunk = Chunk(std::move(mutable_cols), pending_rows);
+    input_chunks.clear();
+    pending_rows = 0;
+    return chunk;
 }
 
 void UnionStreamsTransform::work()

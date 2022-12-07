@@ -39,13 +39,15 @@ private:
     UInt32 current_bucket_num = 0;
     static constexpr UInt32 NUM_BUCKETS = 256;
     bool is_generate_finished = false;
+    std::vector<Block> pending_blocks;
+    size_t pending_rows = 0;
 
     Poco::Logger * logger = &Poco::Logger::get("HighCardinalityAggregatingTransform");
 
     bool isGenerateFinished() const;
 
     Block convertSingleLevel();
-    Block convertTwoLevel(UInt32 bucket_num); 
+    Block convertTwoLevel(UInt32 bucket_num);
 };
 
 class UnionStreamsTransform : public IProcessor
@@ -60,6 +62,11 @@ private:
     bool has_input = false;
     bool has_output = false;
     Chunk output_chunk;
+    std::vector<Chunk> input_chunks;
+    size_t pending_rows = 0;
     std::list<InputPort *> running_inputs;
+
+    Chunk generateOneChunk();
+
 };
 }

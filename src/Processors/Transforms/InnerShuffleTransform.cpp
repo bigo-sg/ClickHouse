@@ -4,6 +4,8 @@
 #include <Common/WeakHash.h>
 #include <Poco/Logger.h>
 #include <Common/logger_useful.h>
+#include <Columns/ColumnSparse.h>
+#include <DataTypes/DataTypeLowCardinality.h>
 
 namespace DB
 {
@@ -107,14 +109,16 @@ void InnerShuffleTransform::work()
     WeakHash32 hash(num_rows);
     for (const auto col_index : hash_columns)
     {
-        block.getByPosition(col_index).column->updateWeakHash32(hash);
+        const auto & key_col = block.getByPosition(col_index).column->convertToFullColumnIfConst();
+        const auto & key_col_no_lc = recursiveRemoveLowCardinality(recursiveRemoveSparse(key_col));
+        key_col_no_lc->updateWeakHash32(hash);
     }
 
     IColumn::Selector selector(num_rows);
     const auto & hash_data = hash.getData();
     for (size_t i = 0; i < num_rows; ++i)
     {
-        selector[i] = hash_data[i] % num_streams;
+        selector[i] = hash_data[i] & (num_streams - 1);
     }
 
     Blocks result_blocks;
