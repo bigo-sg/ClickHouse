@@ -99,6 +99,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"substring", "substring"},
     {"lower", "lower"},
     {"upper", "upper"},
+    {"trim", "trimBoth"},
     {"ltrim", "trimLeft"},
     {"rtrim", "trimRight"},
     {"concat", "concat"},
@@ -239,7 +240,7 @@ private:
     }
 
     DB::QueryPlanPtr parseSort(const substrait::SortRel & sort_rel);
-    DB::SortDescription parseSortDescription(const substrait::SortRel & sort_rel);
+    static DB::SortDescription parseSortDescription(const substrait::SortRel & sort_rel);
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
 

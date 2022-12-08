@@ -104,7 +104,7 @@ void SerializedPlanParser::parseExtensions(
     {
         if (extension.has_extension_function())
         {
-            this->function_mapping.emplace(
+            function_mapping.emplace(
                 std::to_string(extension.extension_function().function_anchor()), extension.extension_function().name());
         }
     }
@@ -311,7 +311,7 @@ QueryPlanPtr SerializedPlanParser::parseMergeTreeTable(const substrait::ReadRel 
     }
     auto names_and_types_list = header.getNamesAndTypesList();
     auto storage_factory = StorageMergeTreeFactory::instance();
-    auto metadata = buildMetaData(names_and_types_list, this->context);
+    auto metadata = buildMetaData(names_and_types_list, context);
     query_context.metadata = metadata;
     auto storage = storage_factory.getStorage(
         StorageID(merge_tree_table.database, merge_tree_table.table),
@@ -353,7 +353,7 @@ QueryPlanPtr SerializedPlanParser::parseMergeTreeTable(const substrait::ReadRel 
         throw Exception(ErrorCodes::NO_SUCH_DATA_PART, "part {} to {} not found.", min_block, max_block);
     }
     auto query = query_context.custom_storage_merge_tree->reader.readFromParts(
-        selected_parts, names_and_types_list.getNames(), query_context.storage_snapshot, *query_info, this->context, 4096 * 2, 1);
+        selected_parts, names_and_types_list.getNames(), query_context.storage_snapshot, *query_info, context, 4096 * 2, 1);
     if (!not_null_columns.empty())
     {
         auto input_header = query->getCurrentDataStream().header;
@@ -508,6 +508,7 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     {
         UInt32 precision = substrait_type.decimal().precision();
         UInt32 scale = substrait_type.decimal().scale();
+        /*
         if (precision <= DataTypeDecimal32::maxPrecision())
             ch_type = std::make_shared<DataTypeDecimal32>(precision, scale);
         else if (precision <= DataTypeDecimal64::maxPrecision())
@@ -515,8 +516,10 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         else if (precision <= DataTypeDecimal128::maxPrecision())
             ch_type = std::make_shared<DataTypeDecimal128>(precision, scale);
         else
+        */
+        if (precision > DataTypeDecimal128::maxPrecision())
             throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support decimal type with precision {}", precision);
-
+        ch_type = createDecimal<DataTypeDecimal>(precision, scale);
         ch_type = wrapNullableType(substrait_type.decimal().nullability(), ch_type);
     }
     else if (substrait_type.has_struct_())
@@ -931,7 +934,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
     {
         const auto & measure = rel.measures(i);
         AggregateDescription agg;
-        auto function_signature = this->function_mapping.at(std::to_string(measure.measure().function_reference()));
+        auto function_signature = function_mapping.at(std::to_string(measure.measure().function_reference()));
         auto function_name_idx = function_signature.find(':');
         //        assert(function_name_idx != function_signature.npos && ("invalid function signature: " + function_signature).c_str());
         auto function_name = function_signature.substr(0, function_name_idx);
@@ -954,7 +957,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
         auto arg_type = plan.getCurrentDataStream().header.getByName(input_column).type;
         if (const auto * function_type = checkAndGetDataType<DataTypeAggregateFunction>(arg_type.get()))
         {
-            auto suffix = "PartialMerge";
+            const auto * suffix = "PartialMerge";
             agg.function = getAggregateFunction(function_name + suffix, {arg_type});
         }
         else
@@ -964,7 +967,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
             {
                 auto first = getAggregateFunction(function_name, {arg_type});
                 arg = first->getStateType();
-                auto suffix = "PartialMerge";
+                const auto * suffix = "PartialMerge";
                 function_name = function_name + suffix;
             }
 
@@ -976,14 +979,14 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
     if (has_final_stage)
     {
         auto transform_params = std::make_shared<AggregatingTransformParams>(
-            this->getMergedAggregateParam(plan.getCurrentDataStream().header, keys, aggregates), true);
+            getMergedAggregateParam(plan.getCurrentDataStream().header, keys, aggregates), true);
         return std::make_unique<MergingAggregatedStep>(plan.getCurrentDataStream(), transform_params, false, 1, 1);
     }
     else
     {
         auto aggregating_step = std::make_unique<AggregatingStep>(
             plan.getCurrentDataStream(),
-            this->getAggregateParam(plan.getCurrentDataStream().header, keys, aggregates),
+            getAggregateParam(plan.getCurrentDataStream().header, keys, aggregates),
             false,
             1000000,
             1,
@@ -1061,7 +1064,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
 
     const auto & scalar_function = rel.scalar_function();
 
-    auto function_signature = this->function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
+    auto function_signature = function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
     auto function_name = getFunctionName(function_signature, scalar_function);
     ActionsDAG::NodeRawConstPtrs args;
     for (const auto & arg : scalar_function.arguments())
@@ -1117,7 +1120,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
             args.erase(args.begin());
         }
 
-        auto function_builder = FunctionFactory::instance().get(function_name, this->context);
+        auto function_builder = FunctionFactory::instance().get(function_name, context);
         std::string args_name;
         join(args, ',', args_name);
         result_name = function_name + "(" + args_name + ")";
@@ -1127,7 +1130,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         {
             auto cast_function = getCastFunction(rel.scalar_function().output_type());
             DB::ActionsDAG::NodeRawConstPtrs cast_args({function_node});
-            auto cast = FunctionFactory::instance().get(cast_function, this->context);
+            auto cast = FunctionFactory::instance().get(cast_function, context);
             std::string cast_args_name;
             join(cast_args, ',', cast_args_name);
             result_name = cast_function + "(" + cast_args_name + ")";
@@ -1158,7 +1161,7 @@ ActionsDAGPtr SerializedPlanParser::parseFunction(
 const ActionsDAG::Node *
 SerializedPlanParser::toFunctionNode(ActionsDAGPtr action_dag, const String & function, const DB::ActionsDAG::NodeRawConstPtrs & args)
 {
-    auto function_builder = DB::FunctionFactory::instance().get(function, this->context);
+    auto function_builder = DB::FunctionFactory::instance().get(function, context);
     std::string args_name;
     join(args, ',', args_name);
     auto result_name = function + "(" + args_name + ")";
@@ -1248,7 +1251,7 @@ std::pair<DataTypePtr, Field> SerializedPlanParser::parseLiteral(const substrait
             else if (precision <= DataTypeDecimal128::maxPrecision())
             {
                 type = std::make_shared<DataTypeDecimal128>(precision, scale);
-                auto value = *reinterpret_cast<const Int128 *>(bytes.data());
+                auto value = BackingDataLengthCalculator::getDecimal128FromBytes(bytes);
                 field = DecimalField<Decimal128>(value, scale);
             }
             else
@@ -1313,9 +1316,8 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
 
         case substrait::Expression::RexTypeCase::kSelection: {
             if (!rel.selection().has_direct_reference() || !rel.selection().direct_reference().has_struct_field())
-            {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Can only have direct struct references in selections");
-            }
+
             const auto * field = action_dag->getInputs()[rel.selection().direct_reference().struct_field().field()];
             return action_dag->tryFindInIndex(field->result_name);
         }
@@ -1353,25 +1355,16 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
 
         case substrait::Expression::RexTypeCase::kIfThen: {
             const auto & if_then = rel.if_then();
-            auto function_multi_if = DB::FunctionFactory::instance().get("multiIf", this->context);
+            auto function_multi_if = DB::FunctionFactory::instance().get("multiIf", context);
             DB::ActionsDAG::NodeRawConstPtrs args;
 
             auto condition_nums = if_then.ifs_size();
             for (int i = 0; i < condition_nums; ++i)
             {
                 const auto & ifs = if_then.ifs(i);
-                std::string if_name;
-                std::string then_name;
-                std::vector<String> useless;
-                parseFunctionWithDAG(ifs.if_(), if_name, useless, action_dag, false);
-                for (const auto & node : action_dag->getNodes())
-                {
-                    if (node.result_name == if_name)
-                    {
-                        args.emplace_back(&node);
-                        break;
-                    }
-                }
+                const auto * if_node = parseArgument(action_dag, ifs.if_());
+                args.emplace_back(if_node);
+
                 const auto * then_node = parseArgument(action_dag, ifs.then());
                 args.emplace_back(then_node);
             }
@@ -1499,7 +1492,7 @@ void SerializedPlanParser::collectJoinKeys(
     const substrait::Expression & condition, std::vector<std::pair<int32_t, int32_t>> & join_keys, int32_t right_key_start)
 {
     auto condition_name = getFunctionName(
-        this->function_mapping.at(std::to_string(condition.scalar_function().function_reference())), condition.scalar_function());
+        function_mapping.at(std::to_string(condition.scalar_function().function_reference())), condition.scalar_function());
     if (condition_name == "and")
     {
         collectJoinKeys(condition.scalar_function().arguments(0).value(), join_keys, right_key_start);
@@ -1691,7 +1684,7 @@ void SerializedPlanParser::removeNullable(std::vector<String> require_columns, A
 {
     for (const auto & item : require_columns)
     {
-        auto function_builder = FunctionFactory::instance().get("assumeNotNull", this->context);
+        auto function_builder = FunctionFactory::instance().get("assumeNotNull", context);
         ActionsDAG::NodeRawConstPtrs args;
         args.emplace_back(&actionsDag->findInIndex(item));
         const auto & node = actionsDag->addFunction(function_builder, args, item);
@@ -1763,10 +1756,10 @@ SharedContextHolder SerializedPlanParser::shared_context;
 
 LocalExecutor::~LocalExecutor()
 {
-    if (this->spark_buffer)
+    if (spark_buffer)
     {
-        this->ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
-        this->spark_buffer.reset();
+        ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
+        spark_buffer.reset();
     }
 }
 
@@ -1782,9 +1775,9 @@ void LocalExecutor::execute(QueryPlanPtr query_plan)
         BuildQueryPipelineSettings{
             .actions_settings = ExpressionActionsSettings{
                 .can_compile_expressions = true, .min_count_to_compile_expression = 3, .compile_expressions = CompileExpressions::yes}});
-    this->query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*pipeline_builder));
+    query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*pipeline_builder));
     auto t_pipeline = stopwatch.elapsedMicroseconds();
-    this->executor = std::make_unique<PullingPipelineExecutor>(query_pipeline);
+    executor = std::make_unique<PullingPipelineExecutor>(query_pipeline);
     auto t_executor = stopwatch.elapsedMicroseconds() - t_pipeline;
     stopwatch.stop();
     LOG_INFO(
@@ -1792,13 +1785,13 @@ void LocalExecutor::execute(QueryPlanPtr query_plan)
         "build pipeline {} ms; create executor {} ms;",
         t_pipeline / 1000.0,
         t_executor / 1000.0);
-    this->header = current_query_plan->getCurrentDataStream().header.cloneEmpty();
-    this->ch_column_to_spark_row = std::make_unique<CHColumnToSparkRow>();
+    header = current_query_plan->getCurrentDataStream().header.cloneEmpty();
+    ch_column_to_spark_row = std::make_unique<CHColumnToSparkRow>();
 
 }
 std::unique_ptr<SparkRowInfo> LocalExecutor::writeBlockToSparkRow(Block & block)
 {
-    return this->ch_column_to_spark_row->convertCHColumnToSparkRow(block);
+    return ch_column_to_spark_row->convertCHColumnToSparkRow(block);
 }
 bool LocalExecutor::hasNext()
 {
@@ -1809,7 +1802,7 @@ bool LocalExecutor::hasNext()
         {
             auto empty_block = header.cloneEmpty();
             setCurrentBlock(empty_block);
-            has_next = this->executor->pull(currentBlock());
+            has_next = executor->pull(currentBlock());
             produce();
         }
         else
@@ -1830,14 +1823,14 @@ SparkRowInfoPtr LocalExecutor::next()
     checkNextValid();
     SparkRowInfoPtr row_info = writeBlockToSparkRow(currentBlock());
     consume();
-    if (this->spark_buffer)
+    if (spark_buffer)
     {
-        this->ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
-        this->spark_buffer.reset();
+        ch_column_to_spark_row->freeMem(spark_buffer->address, spark_buffer->size);
+        spark_buffer.reset();
     }
-    this->spark_buffer = std::make_unique<SparkBuffer>();
-    this->spark_buffer->address = row_info->getBufferAddress();
-    this->spark_buffer->size = row_info->getTotalBytes();
+    spark_buffer = std::make_unique<SparkBuffer>();
+    spark_buffer->address = row_info->getBufferAddress();
+    spark_buffer->size = row_info->getTotalBytes();
     return row_info;
 }
 
