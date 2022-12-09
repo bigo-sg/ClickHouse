@@ -129,6 +129,7 @@ HighCardinalityAggregatingExecution::HighCardinalityAggregatingExecution(Aggrega
 
 DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(size_t num_streams, const OutputPortRawPtrs & outports)
 {
+    #if 0
     PathResult result;
     OutputPortRawPtrs current_output_ports = outports;
     auto src_header = outports[0]->getHeader();
@@ -163,13 +164,89 @@ DynamicPathBuilder::PathResult HighCardinalityAggregatingExecution::buildPath(si
 
     auto [agg_processors, agg_output_ports] = QueryPipelineBuilder::connectProcessors(
         [&](const std::vector<Block> & headers)
-        { return std::make_shared<HighCardinalityAggregatingTransform>(headers[0], this->params, this->final); },
+        { return std::make_shared<HighCardinalityAggregatingTransform>(0, 1, headers[0], this->params, this->final); },
         current_output_ports);
     result.processors.insert(result.processors.end(), agg_processors.begin(), agg_processors.end());
     current_output_ports.swap(agg_output_ports);
     result.output_ports.swap(current_output_ports);
 
     return result;
+
+    #else
+    PathResult result;
+    OutputPortRawPtrs current_output_ports = outports;
+    auto src_header = outports[0]->getHeader();
+    std::vector<size_t> keys;
+    for (const auto & key_name : params.keys)
+    {
+        keys.push_back(src_header.getPositionByName(key_name));
+    }
+
+    auto [add_hash_processors, add_hash_outputs] = QueryPipelineBuilder::connectProcessors(
+        [&](const std::vector<Block> & headers) { return std::make_shared<BuildAggregatingKeysHashColumnTransform>(headers[0], keys, num_streams); },
+        current_output_ports);
+    current_output_ports.swap(add_hash_outputs);
+    result.processors.insert(result.processors.end(), add_hash_processors.begin(), add_hash_processors.end());
+    LOG_ERROR(
+        &Poco::Logger::get("HighCardinalityAggregatingExecution"),
+        "xxxx {} out header={}",
+        __LINE__,
+        current_output_ports[0]->getHeader().dumpNames());
+
+    auto [copy_processors, copy_outputs] = QueryPipelineBuilder::connectProcessors(
+        [&](const std::vector<Block> & headers) { return std::make_shared<CopyTransform>(headers[0], num_streams); },
+        current_output_ports);
+    current_output_ports.swap(copy_outputs);
+    result.processors.insert(result.processors.end(), copy_processors.begin(), copy_processors.end());
+    assert(current_output_ports.size() == num_streams * num_streams);
+    LOG_ERROR(&Poco::Logger::get("HighCardinalityAggregatingExecution"), "xxxx {} current_output_ports={}", __LINE__, current_output_ports.size());
+    LOG_ERROR(
+        &Poco::Logger::get("HighCardinalityAggregatingExecution"),
+        "xxxx {} out header={}",
+        __LINE__,
+        current_output_ports[0]->getHeader().dumpNames());
+
+    OutputPortRawPtrs resize_outputs;
+    for (size_t i = 0; i < num_streams; ++i)
+    {
+        OutputPortRawPtrs input_ports;
+        for (size_t j = 0; j < num_streams; ++j)
+        {
+            input_ports.emplace_back(current_output_ports[j * num_streams + i]);
+        }
+        auto [resize_processors, part_resize_outputs] = QueryPipelineBuilder::connectProcessors(
+            [&](const std::vector<Block> & headers) { return std::make_shared<ResizeProcessor>(headers[0], num_streams, 1); },
+            input_ports,
+            num_streams);
+        resize_outputs.insert(resize_outputs.end(), part_resize_outputs.begin(), part_resize_outputs.end());
+        result.processors.insert(result.processors.end(), resize_processors.begin(), resize_processors.end());
+    }
+    current_output_ports.swap(resize_outputs);
+    assert(current_output_ports.size() == num_streams);
+    LOG_ERROR(&Poco::Logger::get("HighCardinalityAggregatingExecution"), "xxxx {} current_output_ports={}", __LINE__, current_output_ports.size());
+    LOG_ERROR(
+        &Poco::Logger::get("HighCardinalityAggregatingExecution"),
+        "xxxx {} out header={}",
+        __LINE__,
+        current_output_ports[0]->getHeader().dumpNames());
+
+    size_t id = 0;
+    auto [agg_processors, agg_outputs] = QueryPipelineBuilder::connectProcessors(
+        [&](const std::vector<Block> & headers)
+        { return std::make_shared<HighCardinalityAggregatingTransform>(id++, num_streams, headers[0], this->params, this->final); },
+        current_output_ports);
+    current_output_ports.swap(agg_outputs);
+    LOG_ERROR(
+        &Poco::Logger::get("HighCardinalityAggregatingExecution"),
+        "xxxx {} out header={}",
+        __LINE__,
+        current_output_ports[0]->getHeader().dumpNames());
+    result.processors.insert(result.processors.end(), agg_processors.begin(), agg_processors.end());
+    result.output_ports.swap(current_output_ports);
+    LOG_ERROR(&Poco::Logger::get("HighCardinalityAggregatingExecution"), "xxxx {} current_output_ports={}", __LINE__, current_output_ports.size());
+
+    return result;
+    #endif
 }
 
 }

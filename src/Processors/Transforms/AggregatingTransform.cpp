@@ -85,6 +85,7 @@ class ConvertingAggregatedToChunksSource : public ISource
 {
 public:
     static constexpr UInt32 NUM_BUCKETS = 256;
+    // static constexpr UInt32 NUM_BUCKETS = 512;
 
     struct SharedData
     {
@@ -309,6 +310,7 @@ private:
 
     UInt32 current_bucket_num = 0;
     static constexpr Int32 NUM_BUCKETS = 256;
+    // static constexpr Int32 NUM_BUCKETS = 512;
     std::array<Chunk, NUM_BUCKETS> two_level_chunks;
 
     Processors processors;

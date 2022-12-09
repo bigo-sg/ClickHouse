@@ -9,13 +9,16 @@ namespace DB
 class HighCardinalityAggregatingTransform : public IProcessor
 {
 public:
-    explicit HighCardinalityAggregatingTransform(const Block & header_, const Aggregator::Params & params_, bool final_);
+    explicit HighCardinalityAggregatingTransform(
+        size_t id_, size_t num_streams_, const Block & header_, const Aggregator::Params & params_, bool final_);
     ~HighCardinalityAggregatingTransform() override;
 
     String getName() const override { return "HighCardinalityAggregatingTransform"; }
     Status prepare() override;
     void work() override;
 private:
+    size_t id;
+    size_t num_streams;
     Block header;
     Aggregator::Params params;
     bool final;
@@ -48,6 +51,8 @@ private:
 
     Block convertSingleLevel();
     Block convertTwoLevel(UInt32 bucket_num);
+
+    Chunk buildFiltedChunk(Chunk & input_chunk_);
 };
 
 class UnionStreamsTransform : public IProcessor
@@ -55,7 +60,7 @@ class UnionStreamsTransform : public IProcessor
 public:
     explicit UnionStreamsTransform(const Block & header_, size_t inputs_num);
     ~UnionStreamsTransform() override = default;
-    String getName() const override {return "UnionStreamsTransform"; }
+    String getName() const override { return "UnionStreamsTransform"; }
     Status prepare() override;
     void work() override;
 private:
@@ -67,6 +72,28 @@ private:
     std::list<InputPort *> running_inputs;
 
     Chunk generateOneChunk();
+
+};
+
+// This transform will append a new hash column into the original block.
+// It shoul be remove after be used.
+class BuildAggregatingKeysHashColumnTransform : public IProcessor
+{
+public:
+    explicit BuildAggregatingKeysHashColumnTransform(const Block & header_, const std::vector<size_t> & hash_columns_, size_t num_streams_);
+    ~BuildAggregatingKeysHashColumnTransform() override = default;
+    String getName() const override { return "BuildAggregatingKeysHashColumnTransform"; }
+    Status prepare() override;
+    void work() override;
+private:
+    Block header;
+    std::vector<size_t> hash_columns;
+    size_t num_streams;
+    Block output_header;
+    bool has_input = false;
+    bool has_output = false;
+    Chunk output_chunk;
+    String hash_column_name;
 
 };
 }

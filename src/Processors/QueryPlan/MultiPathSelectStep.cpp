@@ -114,7 +114,7 @@ void MultiPathSelectStep::transformPipeline(
         {
             throw Exception(
                 ErrorCodes::LOGICAL_ERROR,
-                "Unexpected path outports size. {} != {} * path_num",
+                "Unexpected path outports size. {} != {} * {}",
                 paths_outports.size(),
                 streams_num,
                 path_num);
