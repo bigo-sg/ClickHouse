@@ -19,6 +19,7 @@
 #include <Common/HashTable/hash_table7.hpp>
 #include <Common/HashTable/robin_hood.h>
 #include <boost/unordered/unordered_flat_map.hpp>
+#include <Common/HashTable/ROHashMap.h>
 
 static std::size_t s_alloc_bytes = 0;
 static std::size_t s_alloc_count = 0;
@@ -129,11 +130,15 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
     }
     else if (method == 7)
     {
-        test<Key, emhash7::HashMap<Key, UInt32, DefaultHash<Key>>>(data.data(), data.size(), "emhash7::flat_unordered_map", [&](auto & map){ map.init(static_cast<emhash7::size_type>(data.size()), static_cast<float>(0.5)); });
+        test<Key, emhash7::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "emhash7::flat_unordered_map", [&](auto & map){ map.init(static_cast<emhash7::size_type>(256), static_cast<float>(0.5)); });
     }
     else if (method == 8)
     {
         test<Key, boost_unordered_flat_map<Key, UInt64>>(data.data(), data.size(), "boost::unordered_flat_map");
+    }
+    else if (method == 9)
+    {
+        test<Key, rigtorp::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "rigtorp::unordered_flat_map");
     }
     else
     {
