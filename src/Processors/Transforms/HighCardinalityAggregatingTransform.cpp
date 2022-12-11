@@ -79,7 +79,7 @@ IProcessor::Status HighCardinalityAggregatingTransform::prepare()
 
     if (has_input)
         return Status::PortFull;
-    
+
     bool is_input_finshed = input.isFinished();
     if (is_input_finshed || is_consume_finished)
     {
@@ -139,7 +139,7 @@ void HighCardinalityAggregatingTransform::work()
                 #if 0
                 auto flag_col = ColumnUInt8::create(num_rows,0);
                 auto & flag_array = flag_col->getData();
-                
+
                 const ColumnUInt32 * uint32_col = typeid_cast<const ColumnUInt32 *>(hash_col->getPtr().get());
                 const auto & array = uint32_col->getData();
                 for (size_t i = 0; i < num_rows; ++i)
@@ -147,11 +147,11 @@ void HighCardinalityAggregatingTransform::work()
                     flag_array[i] = array[i] == id;
                 }
                 #endif
-                if (!aggregator->executeOnBlock(
-                        used_cols, 0, num_rows, *aggregate_data, key_columns, aggregate_columns, no_more_keys, hash_col->getPtr().get(), id))
-                {
-                    is_consume_finished = true;
-                }
+                //if (!aggregator->executeOnBlock(
+                //        used_cols, 0, num_rows, *aggregate_data, key_columns, aggregate_columns, no_more_keys, hash_col->getPtr().get(), id))
+                //{
+                //    is_consume_finished = true;
+                //}
                 #else
                 // auto filted_chunk = buildFiltedChunk(input_chunk);
                 // auto cols = filted_chunk.detachColumns();
@@ -253,12 +253,12 @@ Chunk HighCardinalityAggregatingTransform::buildFiltedChunk(Chunk & input_chunk_
                 }
                 else
                 {
-                    filted_cols[i]->insertRangeFrom(*used_cols[i], start, r - start);       
+                    filted_cols[i]->insertRangeFrom(*used_cols[i], start, r - start);
                 }
             }
         }
     }
-    
+
     num_rows = filted_cols[0]->size();
     return Chunk(std::move(filted_cols), num_rows);
 }
@@ -378,7 +378,7 @@ IProcessor::Status UnionStreamsTransform::prepare()
                 port->setNeeded();
         }
         return Status::NeedData;
-    }   
+    }
 
     if (all_inputs_closed) [[unlikely]]
     {
@@ -404,7 +404,7 @@ IProcessor::Status UnionStreamsTransform::prepare()
 }
 
 Chunk UnionStreamsTransform::generateOneChunk()
-{ 
+{
     auto mutable_cols = input_chunks[0].mutateColumns();
     for (size_t col_index = 0, n = mutable_cols.size(); col_index < n; ++col_index)
     {
@@ -469,7 +469,7 @@ IProcessor::Status BuildAggregatingKeysHashColumnTransform::prepare()
 
     if (has_input)
         return Status::Ready;
-    
+
     if (has_output)
     {
         output.push(std::move(output_chunk));

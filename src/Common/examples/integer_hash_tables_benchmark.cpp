@@ -4,6 +4,7 @@
 
 #include <unordered_map>
 
+#include <boost/unordered/unordered_map_fwd.hpp>
 #include <sparsehash/dense_hash_map>
 #include <sparsehash/sparse_hash_map>
 #include <absl/container/flat_hash_map.h>
@@ -14,6 +15,54 @@
 #include <IO/ReadBufferFromFile.h>
 #include <Compression/CompressedReadBuffer.h>
 #include <Common/HashTable/HashMap.h>
+#include <Common/HashTable/hash_table8.hpp>
+#include <Common/HashTable/hash_table7.hpp>
+#include <Common/HashTable/robin_hood.h>
+#include <boost/unordered/unordered_flat_map.hpp>
+
+static std::size_t s_alloc_bytes = 0;
+static std::size_t s_alloc_count = 0;
+
+template<class T> struct allocator
+{
+    using value_type = T;
+
+    allocator() = default;
+
+    template<class U> allocator( allocator<U> const & ) noexcept
+    {
+    }
+
+    template<class U> bool operator==( allocator<U> const & ) const noexcept
+    {
+        return true;
+    }
+
+    template<class U> bool operator!=( allocator<U> const& ) const noexcept
+    {
+        return false;
+    }
+
+    T* allocate( std::size_t n ) const
+    {
+        s_alloc_bytes += n * sizeof(T);
+        s_alloc_count++;
+
+        return std::allocator<T>().allocate( n );
+    }
+
+    void deallocate( T* p, std::size_t n ) const noexcept
+    {
+        s_alloc_bytes -= n * sizeof(T);
+        s_alloc_count--;
+
+        std::allocator<T>().deallocate( p, n );
+    }
+};
+
+template<class K, class V> using allocator_for = ::allocator< std::pair<K const, V> >;
+template<class K, class V> using boost_unordered_flat_map =
+    boost::unordered_flat_map<K, V, DefaultHash<K>, std::equal_to<K>, allocator_for<K, V>>;
 
 template <typename Key, typename Map>
 void NO_INLINE test(const Key * data, size_t size, const std::string & name, std::function<void(Map &)> init = {})
@@ -50,11 +99,13 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
 
     if (method == 0)
     {
-        test<Key, HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "CH HashMap");
+        test<Key, HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "CH HashMap", [&](auto & ){
+            //map.reserve(data.size());
+            });
     }
     else if (method == 1)
     {
-        test<Key, ::google::dense_hash_map<Key, UInt64, absl::Hash<Key>>>(data.data(), data.size(), "Google DenseMap", [](auto & map){ map.set_empty_key(0); });
+        //test<Key, ::google::dense_hash_map<Key, UInt64, absl::Hash<Key>>>(data.data(), data.size(), "Google DenseMap", [](auto & map){ map.set_empty_key(0); });
     }
     else if (method == 2)
     {
@@ -67,6 +118,22 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
     else if (method == 4)
     {
         test<Key, std::unordered_map<Key, UInt64>>(data.data(), data.size(), "std::unordered_map");
+    }
+    else if (method == 5)
+    {
+        test<Key, emhash8::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "emhash8::flat_unordered_map");
+    }
+    else if (method == 6)
+    {
+        test<Key, robin_hood::unordered_flat_map<Key, UInt64, DefaultHash<Key>, std::equal_to<Key>, 80>>(data.data(), data.size(), "robinhood::flat_unordered_map");
+    }
+    else if (method == 7)
+    {
+        test<Key, emhash7::HashMap<Key, UInt32, DefaultHash<Key>>>(data.data(), data.size(), "emhash7::flat_unordered_map", [&](auto & map){ map.init(static_cast<emhash7::size_type>(data.size()), static_cast<float>(0.5)); });
+    }
+    else if (method == 8)
+    {
+        test<Key, boost_unordered_flat_map<Key, UInt64>>(data.data(), data.size(), "boost::unordered_flat_map");
     }
     else
     {
