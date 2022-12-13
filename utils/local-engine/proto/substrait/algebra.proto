@@ -163,7 +163,6 @@ message ExpandRel {
   substrait.extensions.AdvancedExtension advanced_extension = 10;
 }
 
-
 // This operator allows to represent calculated expressions of fields (e.g., a+b). Direct/Emit are used to represent classical relational projections
 message ProjectRel {
   RelCommon common = 1;

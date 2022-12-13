@@ -2,6 +2,7 @@
 
 #include <Core/Block.h>
 #include <Core/ColumnWithTypeAndName.h>
+#include <Core/SortDescription.h>
 #include <DataTypes/DataTypeFactory.h>
 #include <Parser/CHColumnToSparkRow.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
@@ -168,6 +169,7 @@ DataTypePtr wrapNullableType(bool nullable, DataTypePtr nested_type);
 
 class SerializedPlanParser
 {
+    friend class RelParser;
 public:
     explicit SerializedPlanParser(const ContextPtr & context);
     static void initFunctionEnv();

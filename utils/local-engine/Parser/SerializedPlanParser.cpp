@@ -62,6 +62,7 @@
 #include <sys/select.h>
 #include <Common/CHUtil.h>
 #include "SerializedPlanParser.h"
+#include <Parser/RelParser.h>
 
 namespace DB
 {
@@ -756,7 +757,8 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                     }
                 }
 
-                if (need_convert) {
+                if (need_convert)
+                {
                     ActionsDAGPtr convert_action
                         = ActionsDAG::makeConvertingActions(source, target, DB::ActionsDAG::MatchColumnsMode::Position);
                     if (convert_action)
@@ -805,8 +807,15 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             break;
         }
         case substrait::Rel::RelTypeCase::kSort: {
-            const auto & sort_rel = rel.sort();
-            query_plan = parseSort(sort_rel);
+            query_plan = parseSort(rel.sort());
+            break;
+        }
+        case substrait::Rel::RelTypeCase::kWindow: {
+            const auto win_rel = rel.window();
+            query_plan = parseOp(win_rel.input());
+            auto win_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kWindow)(this);
+            std::list<const substrait::Rel *> rel_stack;
+            query_plan = win_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
         default:
@@ -885,7 +894,8 @@ void SerializedPlanParser::addPreProjectStepIfNeeded(
     }
     wrapNullable(to_wrap_nullable, expression, nullable_measure_names);
 
-    if (need_pre_project) {
+    if (need_pre_project)
+    {
         auto expression_before_aggregate = std::make_unique<ExpressionStep>(input, expression);
         expression_before_aggregate->setStepDescription("Before Aggregate");
         plan.addStep(std::move(expression_before_aggregate));
@@ -912,10 +922,13 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
 
     if (phase_set.size() > 1)
     {
-        if (phase_set.size() == 2 && has_first_stage && has_inter_stage) {
+        if (phase_set.size() == 2 && has_first_stage && has_inter_stage)
+        {
             // this will happen in a sql like:
             // select sum(a), count(distinct b) from T
-        } else {
+        }
+        else
+        {
             throw Exception(ErrorCodes::LOGICAL_ERROR, "too many aggregate phase!");
         }
     }
@@ -968,7 +981,8 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
         // if measure arg has nullable version, use it
         auto input_column = measure_names.at(i);
         auto entry = nullable_measure_names.find(input_column);
-        if (entry != nullable_measure_names.end()) {
+        if (entry != nullable_measure_names.end())
+        {
             input_column = entry->second;
         }
         agg.arguments = ColumnNumbers{plan.getCurrentDataStream().header.getPositionByName(input_column)};

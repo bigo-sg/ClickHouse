@@ -7,6 +7,7 @@
 #include <DataTypes/DataTypeNullable.h>
 #include <Operator/BlockCoalesceOperator.h>
 #include <Parser/CHColumnToSparkRow.h>
+#include <Parser/RelParser.h>
 #include <Parser/SerializedPlanParser.h>
 #include <Parser/SparkRowToCHColumn.h>
 #include <Shuffle/NativeSplitter.h>
@@ -14,16 +15,16 @@
 #include <Shuffle/ShuffleReader.h>
 #include <Shuffle/ShuffleSplitter.h>
 #include <Shuffle/ShuffleWriter.h>
-#include <Poco/StringTokenizer.h>
-#include <Common/ExceptionUtils.h>
-#include <Common/JNIUtils.h>
-#include <Common/CurrentThread.h>
-#include <Common/QueryContext.h>
-#include <Poco/Logger.h>
+#include <Storages/SubstraitSource/ReadBufferBuilder.h>
+#include <jni/ReservationListenerWrapper.h>
 #include <jni/jni_common.h>
 #include <jni/jni_error.h>
-#include <jni/ReservationListenerWrapper.h>
-#include <Storages/SubstraitSource/ReadBufferBuilder.h>
+#include <Poco/Logger.h>
+#include <Poco/StringTokenizer.h>
+#include <Common/CurrentThread.h>
+#include <Common/ExceptionUtils.h>
+#include <Common/JNIUtils.h>
+#include <Common/QueryContext.h>
 
 
 bool inside_main = true;
@@ -154,6 +155,7 @@ jint JNI_OnLoad(JavaVM * vm, void * /*reserved*/)
 
     local_engine::JNIUtils::vm = vm;
     local_engine::registerReadBufferBuildes(local_engine::ReadBufferBuilderFactory::instance());
+    local_engine::initRelParserFactory();
     return JNI_VERSION_1_8;
 }
 
