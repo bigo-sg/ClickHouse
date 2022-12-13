@@ -16,7 +16,7 @@
 #include <Compression/CompressedReadBuffer.h>
 #include <Common/HashTable/HashMap.h>
 #include <Common/HashTable/hash_table8.hpp>
-#include <Common/HashTable/hash_table7.hpp>
+#include <Common/HashTable/hash_table5.hpp>
 #include <Common/HashTable/robin_hood.h>
 #include <boost/unordered/unordered_flat_map.hpp>
 #include <Common/HashTable/ROHashMap.h>
@@ -68,13 +68,13 @@ template<class K, class V> using boost_unordered_flat_map =
 template <typename Key, typename Map>
 void NO_INLINE test(const Key * data, size_t size, const std::string & name, std::function<void(Map &)> init = {})
 {
-    Stopwatch watch;
 
     Map map;
 
     if (init)
         init(map);
 
+    Stopwatch watch;
     for (const auto * end = data + size; data < end; ++data)
         ++map[*data];
 
@@ -97,6 +97,9 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
         DB::CompressedReadBuffer in2(in1);
         in2.readStrict(reinterpret_cast<char*>(data.data()), sizeof(data[0]) * rows_size);
     }
+    std::cerr << "data size " << data.size() << std::endl;
+    boost_unordered_flat_map<UInt64, UInt64> tmp;
+    std::cerr << "boost max load factor " << tmp.max_load_factor() << std::endl;
 
     if (method == 0)
     {
@@ -120,8 +123,7 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
     {
         test<Key, std::unordered_map<Key, UInt64>>(data.data(), data.size(), "std::unordered_map");
     }
-    else if (method == 5)
-    {
+    else if (method == 5) {
         test<Key, emhash8::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "emhash8::flat_unordered_map");
     }
     else if (method == 6)
@@ -130,7 +132,7 @@ static void NO_INLINE testForType(size_t method, size_t rows_size)
     }
     else if (method == 7)
     {
-        test<Key, emhash7::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "emhash7::flat_unordered_map", [&](auto & map){ map.init(static_cast<emhash7::size_type>(256), static_cast<float>(0.5)); });
+        test<Key, emhash5::HashMap<Key, UInt64, DefaultHash<Key>>>(data.data(), data.size(), "emhash5::flat_unordered_map", [&](auto & map){ map.max_load_factor(0.5f); std::cerr << "em5 set max load factor 0.5";} );
     }
     else if (method == 8)
     {
