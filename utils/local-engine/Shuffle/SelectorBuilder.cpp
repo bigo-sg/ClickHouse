@@ -226,8 +226,15 @@ void RangeSelectorBuilder::initActionsDAG(const DB::Block & block)
         return;
     SerializedPlanParser plan_parser(local_engine::SerializedPlanParser::global_context);
     plan_parser.parseExtensions(projection_plan_pb->extensions());
+
+    const auto & expressions = projection_plan_pb->relations().at(0).root().input().project().expressions();
+    std::vector<substrait::Expression> exprs;
+    exprs.reserve(expressions.size());
+    for (const auto & expression: expressions)
+        exprs.emplace_back(expression);
+
     auto projection_actions_dag
-        = plan_parser.expressionsToActionsDAG(projection_plan_pb->relations().at(0).root().input().project().expressions(), block, block);
+        = plan_parser.expressionsToActionsDAG(exprs, block, block);
     projection_expression_actions = std::make_unique<DB::ExpressionActions>(projection_actions_dag);
     has_init_actions_dag = true;
 }

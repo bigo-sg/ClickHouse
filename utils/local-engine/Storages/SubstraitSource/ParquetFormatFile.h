@@ -2,8 +2,18 @@
 #include <memory>
 #include <Storages/SubstraitSource/FormatFile.h>
 #include <parquet/arrow/reader.h>
+#include <IO/ReadBuffer.h>
+#include <base/types.h>
 namespace local_engine
 {
+struct RowGroupInfomation
+{
+    UInt32 index = 0;
+    UInt64 start = 0;
+    UInt64 total_compressed_size = 0;
+    UInt64 total_size = 0;
+    UInt64 num_rows = 0;
+};
 class ParquetFormatFile : public FormatFile
 {
 public:
@@ -17,10 +27,8 @@ private:
     std::mutex mutex;
     std::optional<size_t> total_rows;
 
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    void prepareReader();
-
-    std::vector<int> collectRowGroupIndices();
+    std::vector<RowGroupInfomation> collectRequiredRowGroups();
+    std::vector<RowGroupInfomation> collectRequiredRowGroups(DB::ReadBuffer * read_buffer);
 };
 
 }

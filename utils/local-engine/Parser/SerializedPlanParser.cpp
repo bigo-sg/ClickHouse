@@ -111,7 +111,7 @@ void SerializedPlanParser::parseExtensions(
 }
 
 std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
-        const ::google::protobuf::RepeatedPtrField<substrait::Expression> & expressions,
+        const std::vector<substrait::Expression> & expressions,
         const DB::Block & header,
         const DB::Block & read_schema)
 {
@@ -139,21 +139,21 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         }
         else if (expr.has_scalar_function())
         {
-            std::string name;
+            std::string result_name;
             std::vector<String> useless;
-            actions_dag = parseFunction(header, expr, name, useless, actions_dag, true);
-            if (!name.empty())
+            actions_dag = parseFunction(header, expr, result_name, useless, actions_dag, true);
+            if (!result_name.empty())
             {
-                if (distinct_columns.contains(name))
+                if (distinct_columns.contains(result_name))
                 {
-                    auto unique_name = getUniqueName(name);
-                    required_columns.emplace_back(NameWithAlias(name, unique_name));
+                    auto unique_name = getUniqueName(result_name);
+                    required_columns.emplace_back(NameWithAlias(result_name, unique_name));
                     distinct_columns.emplace(unique_name);
                 }
                 else
                 {
-                    required_columns.emplace_back(NameWithAlias(name, name));
-                    distinct_columns.emplace(name);
+                    required_columns.emplace_back(NameWithAlias(result_name, result_name));
+                    distinct_columns.emplace(result_name);
                 }
             }
         }
@@ -174,12 +174,40 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
             }
         }
         else
-        {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported projection type {}.", magic_enum::enum_name(expr.rex_type_case()));
-        }
     }
+
     actions_dag->project(required_columns);
     return actions_dag;
+}
+
+std::string getDecimalFunction(const substrait::Type_Decimal & decimal, const bool null_on_overflow) {
+    std::string ch_function_name;
+    UInt32 precision = decimal.precision();
+    UInt32 scale = decimal.scale();
+
+    if (precision <= DataTypeDecimal32::maxPrecision())
+    {
+        ch_function_name = "toDecimal32";
+    }
+    else if (precision <= DataTypeDecimal64::maxPrecision())
+    {
+        ch_function_name = "toDecimal64";
+    }
+    else if (precision <= DataTypeDecimal128::maxPrecision())
+    {
+        ch_function_name = "toDecimal128";
+    }
+    else
+    {
+        throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support decimal type with precision {}", precision);
+    }
+
+    if (null_on_overflow) {
+        ch_function_name = ch_function_name + "OrNull";
+    }
+
+    return ch_function_name;
 }
 
 /// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
@@ -226,6 +254,10 @@ std::string getCastFunction(const substrait::Type & type)
     else if (type.has_bool_())
     {
         ch_function_name = "toUInt8";
+    }
+    else if (type.has_decimal())
+    {
+        ch_function_name = getDecimalFunction(type.decimal(), false);
     }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support cast type {}", type.DebugString());
@@ -661,25 +693,47 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             addRemoveNullableStep(*query_plan, required_columns);
             break;
         }
+        case substrait::Rel::RelTypeCase::kGenerate:
         case substrait::Rel::RelTypeCase::kProject: {
-            const auto & project = rel.project();
-            last_project = &project;
-            query_plan = parseOp(project.input());
-            // for prewhere
-            bool is_mergetree_input = project.input().has_read() && !project.input().read().has_local_files();
-            Block read_schema;
-            if (is_mergetree_input)
+            const substrait::Rel * input = nullptr;
+            bool is_generate = false;
+            std::vector<substrait::Expression> expressions;
+
+            if (rel.has_project())
             {
-                read_schema = parseNameStruct(project.input().read().base_schema());
+                const auto & project = rel.project();
+                last_project = &project;
+                input = &project.input();
+
+                expressions.reserve(project.expressions_size());
+                for (int i=0; i<project.expressions_size(); ++i)
+                    expressions.emplace_back(project.expressions(i));
             }
             else
             {
-                read_schema = query_plan->getCurrentDataStream().header;
+                const auto & generate = rel.generate();
+                input = &generate.input();
+                is_generate = true;
+
+                expressions.reserve(generate.child_output_size() + 1);
+                for (int i = 0; i < generate.child_output_size(); ++i)
+                    expressions.push_back(generate.child_output(i));
+                expressions.emplace_back(generate.generator());
             }
-            const auto & expressions = project.expressions();
+
+            query_plan = parseOp(*input);
+
+            // for prewhere
+            Block read_schema;
+            bool is_mergetree_input = input->has_read() && !input->read().has_local_files();
+            if (is_mergetree_input)
+                read_schema = parseNameStruct(input->read().base_schema());
+            else
+                read_schema = query_plan->getCurrentDataStream().header;
+
             auto actions_dag = expressionsToActionsDAG(expressions, query_plan->getCurrentDataStream().header, read_schema);
             auto expression_step = std::make_unique<ExpressionStep>(query_plan->getCurrentDataStream(), actions_dag);
-            expression_step->setStepDescription("Project");
+            expression_step->setStepDescription(is_generate ? "Generate" : "Project");
             query_plan->addStep(std::move(expression_step));
             break;
         }
@@ -1025,6 +1079,12 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
         else
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "The first arg of extract function is wrong.");
     }
+    else if (function_name == "check_overflow")
+    {
+        if (args.size() != 2)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "check_overflow function requires two args.");
+        ch_function_name = getDecimalFunction(output_type.decimal(), args.at(1).value().literal().boolean());
+    }
     else
         ch_function_name = SCALAR_FUNCTIONS.at(function_name);
 
@@ -1068,6 +1128,15 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         actions_dag->addOrReplaceInIndex(*args[0]);
         result_node = &actions_dag->addAlias(actions_dag->findInIndex(result_name), result_name);
     }
+    else if (function_name == "arrayJoin")
+    {
+        std::string args_name;
+        join(args, ',', args_name);
+        result_name = function_name + "(" + args_name + ")";
+        result_node = &actions_dag->addArrayJoin(*args[0], result_name);
+        if (keep_result)
+            actions_dag->addOrReplaceInIndex(*result_node);
+    }
     else
     {
         if (function_name == "isNotNull")
@@ -1090,6 +1159,33 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
             args.erase(args.begin());
         }
 
+        if (function_signature.find("check_overflow:", 0) != function_signature.npos)
+        {
+            if (scalar_function.arguments().size() != 2)
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "check_overflow function requires two args.");
+
+            // if toDecimalxxOrNull, first arg need string type
+            if (scalar_function.arguments().at(1).value().literal().boolean())
+            {
+                std::string check_overflow_args_trans_function = "toString";
+                DB::ActionsDAG::NodeRawConstPtrs to_string_args({args[0]});
+
+                auto to_string_cast = FunctionFactory::instance().get(check_overflow_args_trans_function, context);
+                std::string to_string_cast_args_name;
+                join(to_string_args, ',', to_string_cast_args_name);
+                result_name = check_overflow_args_trans_function + "(" + to_string_cast_args_name + ")";
+                const auto * to_string_cast_node = &actions_dag->addFunction(to_string_cast, to_string_args, result_name);
+                args[0] = to_string_cast_node;
+            }
+
+            // delete the latest arg
+            args.pop_back();
+            auto type = std::make_shared<DataTypeUInt32>();
+            UInt32 scale = rel.scalar_function().output_type().decimal().scale();
+            args.emplace_back(
+                &actions_dag->addColumn(ColumnWithTypeAndName(type->createColumnConst(1, scale), type, getUniqueName(toString(scale)))));
+        }
+
         auto function_builder = FunctionFactory::instance().get(function_name, context);
         std::string args_name;
         join(args, ',', args_name);
@@ -1100,6 +1196,15 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         {
             auto cast_function = getCastFunction(rel.scalar_function().output_type());
             DB::ActionsDAG::NodeRawConstPtrs cast_args({function_node});
+
+            if (cast_function.starts_with("toDecimal"))
+            {
+                auto type = std::make_shared<DataTypeUInt32>();
+                UInt32 scale = rel.scalar_function().output_type().decimal().scale();
+                cast_args.emplace_back(&actions_dag->addColumn(
+                    ColumnWithTypeAndName(type->createColumnConst(1, scale), type, getUniqueName(toString(scale)))));
+            }
+
             auto cast = FunctionFactory::instance().get(cast_function, context);
             std::string cast_args_name;
             join(cast_args, ',', cast_args_name);
@@ -1299,7 +1404,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             std::string ch_function_name = getCastFunction(rel.cast().type());
             DB::ActionsDAG::NodeRawConstPtrs args;
             auto cast_input = rel.cast().input();
-            if (cast_input.has_selection())
+            if (cast_input.has_selection() || cast_input.has_literal())
             {
                 args.emplace_back(parseArgument(action_dag, rel.cast().input()));
             }
@@ -1318,6 +1423,13 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported cast input {}", rel.cast().input().DebugString());
             }
+
+            if (ch_function_name.starts_with("toDecimal"))
+            {
+                UInt32 scale = rel.cast().type().decimal().scale();
+                args.emplace_back(add_column(std::make_shared<DataTypeUInt32>(), scale));
+            }
+
             const auto * function_node = toFunctionNode(action_dag, ch_function_name, args);
             action_dag->addOrReplaceInIndex(*function_node);
             return function_node;
