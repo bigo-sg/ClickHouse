@@ -640,21 +640,6 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
             expression_step->setStepDescription("Rename Output");
             query_plan->addStep(std::move(expression_step));
         }
-
-        if (logger->trace())
-        {
-            WriteBufferFromOwnString plan_string;
-            WriteBufferFromOwnString pipeline_string;
-            QueryPlan::ExplainPlanOptions options;
-            options.header = true;
-            query_plan->explainPlan(plan_string, options);
-            LOG_TRACE(
-                &Poco::Logger::get("SerializedPlanParser"),
-                "<ch plan>: \n{}\n<pipeline output>:\n{}\n",
-                plan_string.str(),
-                query_plan->getCurrentDataStream().header.dumpStructure());
-        }
-
         return query_plan;
     }
     else
