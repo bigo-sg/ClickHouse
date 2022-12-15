@@ -46,6 +46,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"to_date", "toDate"},
     {"quarter", "toQuarter"},
     {"to_unix_timestamp", "toUnixTimestamp"},
+    {"unix_timestamp", "toUnixTimestamp"},
 
     /// arithmetic functions
     {"subtract", "minus"},
