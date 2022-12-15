@@ -42,6 +42,7 @@ void registerFunctionToStringCutToZero(FunctionFactory &);
 void registerFunctionDetectCharset(FunctionFactory &);
 void registerFunctionDetectTonality(FunctionFactory &);
 void registerFunctionDetectProgrammingLanguage(FunctionFactory &);
+void registerFunctionAscii(FunctionFactory &);
 
 #if USE_BASE64
 void registerFunctionBase64Encode(FunctionFactory &);
@@ -98,6 +99,7 @@ void registerFunctionsString(FunctionFactory & factory)
     registerFunctionDetectCharset(factory);
     registerFunctionDetectTonality(factory);
     registerFunctionDetectProgrammingLanguage(factory);
+    registerFunctionAscii(factory);
 
 #if USE_BASE64
     registerFunctionBase64Encode(factory);
