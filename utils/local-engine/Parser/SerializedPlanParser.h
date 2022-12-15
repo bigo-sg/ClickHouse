@@ -108,6 +108,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"char_length", "char_length"},
     {"replace", "replaceAll"},
     {"chr", "char"},
+    {"ascii", "ascii"},
 
     // in functions
     {"in", "in"},
