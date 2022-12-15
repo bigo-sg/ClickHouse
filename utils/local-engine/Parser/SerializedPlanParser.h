@@ -38,10 +38,14 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"not", "not"},
     {"xor", "xor"},
 
-    {"to_date", "toDate"},
     {"extract", ""},
     {"cast", ""},
     {"alias", "alias"},
+
+    /// datetime functions
+    {"to_date", "toDate"},
+    {"quarter", "toQuarter"},
+    {"to_unix_timestamp", "toUnixTimestamp"},
 
     /// arithmetic functions
     {"subtract", "minus"},
@@ -86,7 +90,6 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"radians", "radians"},
     {"greatest", "greatest"},
     {"least", "least"},
-    {"quarter", "toQuarter"},
     {"shiftleft", "bitShiftLeft"},
     {"shiftright", "bitShiftRight"},
     {"check_overflow", "check_overflow"},
