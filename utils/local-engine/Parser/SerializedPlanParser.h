@@ -109,6 +109,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"replace", "replaceAll"},
     {"chr", "char"},
     {"ascii", "ascii"},
+    {"split", "splitByRegexp"},
 
     // in functions
     {"in", "in"},
