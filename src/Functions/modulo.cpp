@@ -177,19 +177,9 @@ struct NamePositiveModulo
 };
 using FunctionPositiveModulo = BinaryArithmeticOverloadResolver<PositiveModuloImpl, NamePositiveModulo, false>;
 
-REGISTER_FUNCTION(PositiveModulo)
+void registerFunctionPositiveModulo(FunctionFactory & factory)
 {
-    factory.registerFunction<FunctionPositiveModulo>(
-        {
-            R"(
-Calculates the remainder when dividing `a` by `b`. Similar to function `modulo` except that `positiveModulo` always return non-negative number.
-Returns the difference between `a` and the nearest integer not greater than `a` divisible by `b`.
-In other words, the function returning the modulus (modulo) in the terms of Modular Arithmetic.
-        )",
-            Documentation::Examples{{"positiveModulo", "SELECT positiveModulo(-1, 10);"}},
-            Documentation::Categories{"Arithmetic"}},
-        FunctionFactory::CaseInsensitive);
-
+    factory.registerFunction<FunctionPositiveModulo>(FunctionFactory::CaseInsensitive);
     factory.registerAlias("positive_modulo", "positiveModulo", FunctionFactory::CaseInsensitive);
     /// Compatibility with Spark:
     factory.registerAlias("pmod", "positiveModulo", FunctionFactory::CaseInsensitive);
