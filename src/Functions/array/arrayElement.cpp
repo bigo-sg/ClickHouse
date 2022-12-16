@@ -482,17 +482,25 @@ ColumnPtr FunctionArrayElement::executeNumberConst(
     }
     else if (index.getType() == Field::Types::Int64)
     {
-        /// Cast to UInt64 before negation allows to avoid undefined behaviour for negation of the most negative number.
-        /// NOTE: this would be undefined behaviour in C++ sense, but nevertheless, compiler cannot see it on user provided data,
-        /// and generates the code that we want on supported CPU architectures (overflow in sense of two's complement arithmetic).
-        /// This is only needed to avoid UBSan report.
+        auto value = safeGet<Int64>(index);
+        if (value >= 0)
+        {
+            ArrayElementNumImpl<DataType>::template vectorConst<false>(
+                col_nested->getData(), col_array->getOffsets(), static_cast<UInt64>(value) - 1, col_res->getData(), builder);
+        }
+        else
+        {
+            /// Cast to UInt64 before negation allows to avoid undefined behaviour for negation of the most negative number.
+            /// NOTE: this would be undefined behaviour in C++ sense, but nevertheless, compiler cannot see it on user provided data,
+            /// and generates the code that we want on supported CPU architectures (overflow in sense of two's complement arithmetic).
+            /// This is only needed to avoid UBSan report.
 
-        /// Negative array indices work this way:
-        /// arr[-1] is the element at offset 0 from the last
-        /// arr[-2] is the element at offset 1 from the last and so on.
-
-        ArrayElementNumImpl<DataType>::template vectorConst<true>(
-            col_nested->getData(), col_array->getOffsets(), -(UInt64(safeGet<Int64>(index)) + 1), col_res->getData(), builder);
+            /// Negative array indices work this way:
+            /// arr[-1] is the element at offset 0 from the last
+            /// arr[-2] is the element at offset 1 from the last and so on.
+            ArrayElementNumImpl<DataType>::template vectorConst<true>(
+                col_nested->getData(), col_array->getOffsets(), -(UInt64(safeGet<Int64>(index)) + 1), col_res->getData(), builder);
+        }
     }
     else
         throw Exception("Illegal type of array index", ErrorCodes::LOGICAL_ERROR);
