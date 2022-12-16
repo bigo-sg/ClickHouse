@@ -20,6 +20,7 @@ void registerFunctionUpperUTF8(FunctionFactory &);
 void registerFunctionReverse(FunctionFactory &);
 void registerFunctionReverseUTF8(FunctionFactory &);
 void registerFunctionsConcat(FunctionFactory &);
+void registerFunctionConcatWithSeparator(FunctionFactory &);
 void registerFunctionFormat(FunctionFactory &);
 void registerFunctionFormatRow(FunctionFactory &);
 void registerFunctionSubstring(FunctionFactory &);
@@ -78,6 +79,7 @@ void registerFunctionsString(FunctionFactory & factory)
     registerFunctionCRC(factory);
     registerFunctionReverseUTF8(factory);
     registerFunctionsConcat(factory);
+    registerFunctionConcatWithSeparator(factory);
     registerFunctionFormat(factory);
     registerFunctionFormatRow(factory);
     registerFunctionSubstring(factory);
