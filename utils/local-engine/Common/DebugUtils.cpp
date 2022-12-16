@@ -36,7 +36,7 @@ void headBlock(const DB::Block & block, size_t count)
     }
 }
 
-void headColumn(const DB::ColumnPtr column, size_t count)
+void headColumn(const DB::ColumnPtr & column, size_t count)
 {
     std::cerr << "============Column============" << std::endl;
 
