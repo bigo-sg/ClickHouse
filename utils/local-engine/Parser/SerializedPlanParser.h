@@ -92,6 +92,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"shiftright", "bitShiftRight"},
     {"check_overflow", "check_overflow"},
     {"factorial", "factorial"},
+    {"rand", "canonicalRand"},
 
     /// string functions
     {"like", "like"},
