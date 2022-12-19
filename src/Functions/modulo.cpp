@@ -124,6 +124,7 @@ struct ModuloLegacyByConstantImpl : ModuloByConstantImpl<A, B>
 {
     using Op = ModuloLegacyImpl<A, B>;
 };
+
 }
 
 /** Specializations are specified for dividing numbers of the type UInt64 and UInt32 by the numbers of the same sign.
@@ -168,6 +169,20 @@ using FunctionModuloLegacy = BinaryArithmeticOverloadResolver<ModuloLegacyImpl, 
 void registerFunctionModuloLegacy(FunctionFactory & factory)
 {
     factory.registerFunction<FunctionModuloLegacy>();
+}
+
+struct NamePositiveModulo
+{
+    static constexpr auto name = "positiveModulo";
+};
+using FunctionPositiveModulo = BinaryArithmeticOverloadResolver<PositiveModuloImpl, NamePositiveModulo, false>;
+
+void registerFunctionPositiveModulo(FunctionFactory & factory)
+{
+    factory.registerFunction<FunctionPositiveModulo>(FunctionFactory::CaseInsensitive);
+    factory.registerAlias("positive_modulo", "positiveModulo", FunctionFactory::CaseInsensitive);
+    /// Compatibility with Spark:
+    factory.registerAlias("pmod", "positiveModulo", FunctionFactory::CaseInsensitive);
 }
 
 }

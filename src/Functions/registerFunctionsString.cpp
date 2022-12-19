@@ -20,6 +20,7 @@ void registerFunctionUpperUTF8(FunctionFactory &);
 void registerFunctionReverse(FunctionFactory &);
 void registerFunctionReverseUTF8(FunctionFactory &);
 void registerFunctionsConcat(FunctionFactory &);
+void registerFunctionConcatWithSeparator(FunctionFactory &);
 void registerFunctionFormat(FunctionFactory &);
 void registerFunctionFormatRow(FunctionFactory &);
 void registerFunctionSubstring(FunctionFactory &);
@@ -42,6 +43,7 @@ void registerFunctionToStringCutToZero(FunctionFactory &);
 void registerFunctionDetectCharset(FunctionFactory &);
 void registerFunctionDetectTonality(FunctionFactory &);
 void registerFunctionDetectProgrammingLanguage(FunctionFactory &);
+void registerFunctionAscii(FunctionFactory &);
 
 #if USE_BASE64
 void registerFunctionBase64Encode(FunctionFactory &);
@@ -77,6 +79,7 @@ void registerFunctionsString(FunctionFactory & factory)
     registerFunctionCRC(factory);
     registerFunctionReverseUTF8(factory);
     registerFunctionsConcat(factory);
+    registerFunctionConcatWithSeparator(factory);
     registerFunctionFormat(factory);
     registerFunctionFormatRow(factory);
     registerFunctionSubstring(factory);
@@ -98,6 +101,7 @@ void registerFunctionsString(FunctionFactory & factory)
     registerFunctionDetectCharset(factory);
     registerFunctionDetectTonality(factory);
     registerFunctionDetectProgrammingLanguage(factory);
+    registerFunctionAscii(factory);
 
 #if USE_BASE64
     registerFunctionBase64Encode(factory);

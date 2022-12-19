@@ -28,6 +28,8 @@ include_directories(
         ${ClickHouse_SOURCE_DIR}/utils/local-engine
         ${ClickHouse_SOURCE_DIR}/src
         ${ClickHouse_SOURCE_DIR}/base
+        ${ClickHouse_SOURCE_DIR}/contrib/orc/c++/include
+        ${CMAKE_BINARY_DIR}/contrib/orc/c++/include
 )
 
 add_subdirectory(Storages/ch_parquet)
@@ -95,6 +97,7 @@ target_compile_options(_poco_json PRIVATE -fPIC)
 target_compile_options(_poco_net PRIVATE -fPIC)
 target_compile_options(_poco_net_ssl PRIVATE -fPIC)
 target_compile_options(common PRIVATE -fPIC)
+target_compile_options(_orc PRIVATE -fPIC)
 if (ENABLE_MYSQL)
     target_compile_options(_mariadbclient PRIVATE -fPIC)
     target_compile_options(mysqlxx PRIVATE -fPIC)

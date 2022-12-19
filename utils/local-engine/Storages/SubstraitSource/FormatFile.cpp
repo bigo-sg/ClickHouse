@@ -9,10 +9,15 @@
 #include <Common/Exception.h>
 #include <Common/StringUtils.h>
 #include <Common/config.h>
+#include "base/logger_useful.h"
 #include <IO/ReadBufferFromFile.h>
 #include <Processors/Formats/IInputFormat.h>
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
 #include <Storages/SubstraitSource/ParquetFormatFile.h>
+#include <Storages/SubstraitSource/OrcFormatFile.h>
+
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 namespace DB
 {
@@ -40,6 +45,10 @@ FormatFilePtr FormatFileUtil::createFile(DB::ContextPtr context, ReadBufferBuild
     if (file.has_parquet())
     {
         return std::make_shared<ParquetFormatFile>(context, file, read_buffer_builder);
+    }
+    else if (file.has_orc())
+    {
+        return std::make_shared<OrcFormatFile>(context, file, read_buffer_builder);
     }
     else
     {
