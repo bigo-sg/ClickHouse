@@ -2,38 +2,43 @@
 
 #if USE_ARROW || USE_ORC || USE_PARQUET
 
+#include <algorithm>
+#include <Columns/ColumnArray.h>
+#include <Columns/ColumnLowCardinality.h>
+#include <Columns/ColumnMap.h>
+#include <Columns/ColumnNullable.h>
+#include <Columns/ColumnString.h>
+#include <Columns/ColumnTuple.h>
+#include <Columns/ColumnUnique.h>
+#include <Columns/ColumnsNumber.h>
+#include <Core/Block.h>
+#include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeDate.h>
+#include <DataTypes/DataTypeDate32.h>
+#include <DataTypes/DataTypeDateTime64.h>
 #include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/DataTypeLowCardinality.h>
+#include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypesNumber.h>
-#include <DataTypes/DataTypeArray.h>
-#include <DataTypes/DataTypeLowCardinality.h>
-#include <DataTypes/DataTypeTuple.h>
-#include <DataTypes/DataTypeMap.h>
-#include <DataTypes/DataTypeString.h>
-#include <DataTypes/DataTypeDate32.h>
-#include <DataTypes/DataTypeDate.h>
 #include <DataTypes/NestedUtils.h>
-#include <DataTypes/DataTypeDateTime64.h>
-#include <Common/DateLUTImpl.h>
-#include <base/types.h>
-#include <Processors/Chunk.h>
-#include <Columns/ColumnString.h>
-#include <Columns/ColumnNullable.h>
-#include <Columns/ColumnArray.h>
-#include <Columns/ColumnTuple.h>
-#include <Columns/ColumnLowCardinality.h>
-#include <Columns/ColumnUnique.h>
-#include <Columns/ColumnMap.h>
-#include <Columns/ColumnsNumber.h>
 #include <Interpreters/castColumn.h>
-#include <Common/quoteString.h>
-#include <algorithm>
-#include <arrow/builder.h>
+#include <Processors/Chunk.h>
 #include <arrow/array.h>
+#include <arrow/builder.h>
+#include <base/types.h>
+#include <Common/CHUtil.h>
+#include <Common/DateLUTImpl.h>
 #include <Common/Stopwatch.h>
+#include <Common/quoteString.h>
 
 #include "arrow/column_reader.h"
+
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 /// UINT16 and UINT32 are processed separately, see comments in readColumnFromArrowColumn.
 #define FOR_ARROW_NUMERIC_TYPES(M) \
@@ -564,74 +569,79 @@ void OptimizedArrowColumnToCHColumn::arrowColumnsToCHChunk(
 
     Columns columns_list;
     UInt64 num_rows = name_to_column_ptr.begin()->second->length();
-    columns_list.reserve(header.rows());
-    std::unordered_map<String, BlockPtr> nested_tables;
+    columns_list.reserve(header.columns());
+    std::unordered_map<String, std::pair<BlockPtr, std::shared_ptr<local_engine::NestedColumnExtractHelper>>> nested_tables;
     for (size_t column_i = 0, columns = header.columns(); column_i < columns; ++column_i)
     {
         const ColumnWithTypeAndName & header_column = header.getByPosition(column_i);
+        auto search_column_name = header_column.name;
+        ColumnWithTypeAndName column;
 
-        bool read_from_nested = false;
-        String nested_table_name = Nested::extractTableName(header_column.name);
-        if (!name_to_column_ptr.contains(header_column.name))
+        if (!name_to_column_ptr.contains(search_column_name))
         {
+            bool read_from_nested = false;
             /// Check if it's a column from nested table.
-            if (import_nested && name_to_column_ptr.contains(nested_table_name))
+            if (import_nested)
             {
-                if (!nested_tables.contains(nested_table_name))
+                String search_nested_table_name = Nested::extractTableName(header_column.name);
+                if (name_to_column_ptr.contains(search_nested_table_name))
                 {
-                    const auto & arrow_field = schema->field(schema->GetFieldIndex(nested_table_name));
-                    std::shared_ptr<arrow::ChunkedArray> arrow_column = name_to_column_ptr[nested_table_name];
-                    ColumnsWithTypeAndName cols = {readColumnFromArrowColumn(arrow_field, arrow_column, format_name, dictionary_values, true)};
-                    Block block(cols);
-                    nested_tables[nested_table_name] = std::make_shared<Block>(Nested::flatten(block));
+                    if (!nested_tables.contains(search_nested_table_name))
+                    {
+                        const auto & arrow_field = schema->field(schema->GetFieldIndex(search_nested_table_name));
+                        std::shared_ptr<arrow::ChunkedArray> arrow_column = name_to_column_ptr[search_nested_table_name];
+                        ColumnsWithTypeAndName cols
+                            = {readColumnFromArrowColumn(arrow_field, arrow_column, format_name, dictionary_values, true)};
+                        BlockPtr block_ptr = std::make_shared<Block>(cols);
+                        auto column_extractor = std::make_shared<local_engine::NestedColumnExtractHelper>(*block_ptr, true);
+                        nested_tables[search_nested_table_name] = {block_ptr, column_extractor};
+                    }
+                    auto nested_column = nested_tables[search_nested_table_name].second->extractColumn(search_column_name);
+                    if (nested_column)
+                    {
+                        column = *nested_column;
+                        read_from_nested = true;
+                    }
                 }
-
-                read_from_nested = nested_tables[nested_table_name]->has(header_column.name);
             }
-
             if (!read_from_nested)
             {
                 if (!allow_missing_columns)
+                {
                     throw Exception{ErrorCodes::THERE_IS_NO_COLUMN, "Column '{}' is not presented in input data.", header_column.name};
-
-                ColumnWithTypeAndName column;
-                column.name = header_column.name;
-                column.type = header_column.type;
-                column.column = header_column.column->cloneResized(num_rows);
-                columns_list.push_back(std::move(column.column));
-                continue;
+                }
+                else
+                {
+                    column.name = header_column.name;
+                    column.type = header_column.type;
+                    column.column = header_column.column->cloneResized(num_rows);
+                    columns_list.push_back(std::move(column.column));
+                    continue;
+                }
             }
         }
-
-        std::shared_ptr<arrow::ChunkedArray> arrow_column = name_to_column_ptr[header_column.name];
-
-        ColumnWithTypeAndName column;
-        if (read_from_nested)
-            column = nested_tables[nested_table_name]->getByName(header_column.name);
         else
         {
-            const auto & arrow_field = schema->field(schema->GetFieldIndex(header_column.name));
+            auto arrow_column = name_to_column_ptr[search_column_name];
+            const auto & arrow_field = schema->field(schema->GetFieldIndex(search_column_name));
             column = readColumnFromArrowColumn(arrow_field, arrow_column, format_name, dictionary_values, true);
         }
-
         try
         {
-            Stopwatch sw;
-            sw.start();
             column.column = castColumn(column, header_column.type);
-            cast_time += sw.elapsedNanoseconds();
         }
         catch (Exception & e)
         {
-            e.addMessage(fmt::format("while converting column {} from type {} to type {}",
-                backQuote(header_column.name), column.type->getName(), header_column.type->getName()));
+            e.addMessage(fmt::format(
+                "while converting column {} from type {} to type {}",
+                backQuote(header_column.name),
+                column.type->getName(),
+                header_column.type->getName()));
             throw;
         }
-
         column.type = header_column.type;
         columns_list.push_back(std::move(column.column));
     }
-
     res.setColumns(columns_list, num_rows);
 }
 
@@ -639,21 +649,26 @@ std::vector<size_t> OptimizedArrowColumnToCHColumn::getMissingColumns(const arro
 {
     std::vector<size_t> missing_columns;
     auto block_from_arrow = arrowSchemaToCHHeader(schema, format_name);
-    auto flatten_block_from_arrow = Nested::flatten(block_from_arrow);
+    local_engine::NestedColumnExtractHelper nested_table(block_from_arrow, true);
     for (size_t i = 0, columns = header.columns(); i < columns; ++i)
     {
         const auto & column = header.getByPosition(i);
         bool read_from_nested = false;
-        String nested_table_name = Nested::extractTableName(column.name);
         if (!block_from_arrow.has(column.name))
         {
+            String nested_table_name = Nested::extractTableName(column.name);
             if (import_nested && block_from_arrow.has(nested_table_name))
-                read_from_nested = flatten_block_from_arrow.has(column.name);
+            {
+                if (nested_table.extractColumn(column.name))
+                    read_from_nested = true;
+            }
 
             if (!read_from_nested)
             {
                 if (!allow_missing_columns)
+                {
                     throw Exception{ErrorCodes::THERE_IS_NO_COLUMN, "Column '{}' is not presented in input data.", column.name};
+                }
 
                 missing_columns.push_back(i);
             }

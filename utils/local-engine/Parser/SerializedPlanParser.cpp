@@ -1,5 +1,6 @@
 #include "SerializedPlanParser.h"
 #include <memory>
+#include <string_view>
 #include <base/logger_useful.h>
 #include <base/Decimal.h>
 #include <AggregateFunctions/AggregateFunctionFactory.h>
@@ -125,7 +126,8 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         if (expr.has_selection())
         {
             auto position = expr.selection().direct_reference().struct_field().field();
-            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
+            auto col_name = read_schema.getByPosition(position).name;
+            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(col_name);
             if (distinct_columns.contains(field->result_name))
             {
                 auto unique_name = getUniqueName(field->result_name);
@@ -448,11 +450,17 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
 {
     ColumnsWithTypeAndName internal_cols;
     internal_cols.reserve(struct_.names_size());
+    std::list<std::string> field_names;
     for (int i = 0; i < struct_.names_size(); ++i)
     {
-        const auto & name = struct_.names(i);
+        field_names.emplace_back(struct_.names(i));
+    }
+
+    for (int i = 0; i < struct_.struct_().types_size(); ++i)
+    {
+        auto name = field_names.front();
         const auto & type = struct_.struct_().types(i);
-        auto data_type = parseType(type);
+        auto data_type = parseType(type, &field_names);
         Poco::StringTokenizer name_parts(name, "#");
         if (name_parts.count() == 4)
         {
@@ -480,9 +488,20 @@ DataTypePtr wrapNullableType(bool nullable, DataTypePtr nested_type)
         return nested_type;
 }
 
-DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_type)
+/**
+ * names is used to name struct type fields.
+ *
+ */
+DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_type, std::list<std::string> * names)
 {
     DataTypePtr ch_type;
+    std::string_view current_name;
+    if (names)
+    {
+        current_name = names->front();
+        names->pop_front();
+    }
+
     if (substrait_type.has_bool_())
     {
         ch_type = std::make_shared<DataTypeUInt8>();
@@ -559,9 +578,23 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     else if (substrait_type.has_struct_())
     {
         DataTypes ch_field_types(substrait_type.struct_().types().size());
+        Strings field_names;
         for (size_t i = 0; i < ch_field_types.size(); ++i)
-            ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i]));
-        ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+        {
+            if (names)
+            {
+                field_names.push_back(names->front());
+            }
+            ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i], names));
+        }
+        if (field_names.size())
+        {
+            ch_type = std::make_shared<DataTypeTuple>(ch_field_types, field_names);
+        }
+        else
+        {
+            ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+        }
         ch_type = wrapNullableType(substrait_type.struct_().nullability(), ch_type);
     }
     else if (substrait_type.has_list())

@@ -1,19 +1,20 @@
 #pragma once
 #include <cstdint>
-#include <Processors/Sources/SourceWithProgress.h>
-#include <Storages/SubstraitSource/FormatFile.h>
-#include <Core/Block.h>
-#include <Interpreters/Context_fwd.h>
-#include <Storages/SubstraitSource/FormatFile.h>
-#include <Interpreters/Context.h>
-#include <Processors/Chunk.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
-#include <base/types.h>
+#include <unordered_map>
 #include <Columns/IColumn.h>
+#include <Core/Block.h>
+#include <Core/ColumnsWithTypeAndName.h>
 #include <Core/Field.h>
 #include <DataTypes/Serializations/ISerialization.h>
-#include <Storages/SubstraitSource/ReadBufferBuilder.h>
+#include <Interpreters/Context.h>
+#include <Interpreters/Context_fwd.h>
+#include <Processors/Chunk.h>
+#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/Sources/SourceWithProgress.h>
 #include <QueryPipeline/QueryPipeline.h>
+#include <Storages/SubstraitSource/FormatFile.h>
+#include <Storages/SubstraitSource/ReadBufferBuilder.h>
+#include <base/types.h>
 namespace local_engine
 {
 
@@ -84,7 +85,8 @@ protected:
 private:
     DB::ContextPtr context;
     DB::Block output_header;
-    DB::Block to_read_header;
+    DB::Block flatten_output_header; // flatten a struct column into independent field columns recursively
+    DB::Block to_read_header; // Not include partition keys
     FormatFiles files;
 
     UInt32 current_file_index = 0;
@@ -92,5 +94,14 @@ private:
     ReadBufferBuilderPtr read_buffer_builder;
 
     bool tryPrepareReader();
+
+    // E.g we have flatten columns correspond to header {a:int, b.x.i: int, b.x.j: string, b.y: string}
+    // but we want to fold all the flatten struct columns into one struct column,
+    // {a:int, b: {x: {i: int, j: string}, y: string}}
+    // Notice, don't support list with named struct. ClickHouse may take advantage of this to support
+    // nested table, but not the case in spark.
+    static DB::Block foldFlattenColumns(const DB::Columns & cols, const DB::Block & header);
+    static DB::ColumnWithTypeAndName
+    foldFlattenColumn(DB::DataTypePtr col_type, const std::string & col_name, size_t & pos, const DB::Columns & cols);
 };
 }

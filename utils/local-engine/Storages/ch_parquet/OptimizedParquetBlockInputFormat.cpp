@@ -15,6 +15,9 @@
 #include "OptimizedArrowColumnToCHColumn.h"
 #include <DataTypes/NestedUtils.h>
 
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
+
 namespace DB
 {
 

@@ -7,6 +7,7 @@
 #include <arrow/adapters/orc/adapter.h>
 #include <base/types.h>
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
+#include <Storages/ch_parquet/OptimizedArrowColumnToCHColumn.h>
 namespace local_engine
 {
 
@@ -46,7 +47,7 @@ private:
 
     std::unique_ptr<arrow::adapters::orc::ORCFileReader> file_reader;
 
-    std::unique_ptr<DB::ArrowColumnToCHColumn> arrow_column_to_ch_column;
+    std::unique_ptr<DB::OptimizedArrowColumnToCHColumn> arrow_column_to_ch_column;
 
     // indices of columns to read from ORC file
     std::vector<int> include_indices;
