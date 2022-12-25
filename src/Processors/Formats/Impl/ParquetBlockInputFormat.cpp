@@ -107,7 +107,11 @@ void ParquetBlockInputFormat::prepareReader()
 
     arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(getPort().getHeader(), schema, "Parquet", format_settings);
 
-    ArrowFormatUtil format_util(format_settings.parquet.case_insensitive_column_matching, format_settings.parquet.import_nested, false);
+    ArrowFormatUtil format_util(
+        format_settings.parquet.case_insensitive_column_matching,
+        format_settings.parquet.import_nested,
+        false,
+        format_settings.parquet.allow_missing_columns);
     column_indices = format_util.findRequiredIndices(getPort().getHeader(), *schema);
 }
 
