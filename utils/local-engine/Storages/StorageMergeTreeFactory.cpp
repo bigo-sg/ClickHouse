@@ -13,9 +13,9 @@ CustomStorageMergeTreePtr
 StorageMergeTreeFactory::getStorage(StorageID id, ColumnsDescription columns, std::function<CustomStorageMergeTreePtr()> creator)
 {
     auto table_name = id.database_name + "." + id.table_name;
+    std::lock_guard lock(storage_map_mutex);
     if (!storage_map.contains(table_name))
     {
-        std::lock_guard lock(storage_map_mutex);
         if (storage_map.contains(table_name))
         {
             std::set<std::string> existed_columns = storage_columns_map.at(table_name);
@@ -45,9 +45,9 @@ StorageInMemoryMetadataPtr StorageMergeTreeFactory::getMetadata(StorageID id, st
 {
     auto table_name = id.database_name + "." + id.table_name;
 
+    std::lock_guard lock(metadata_map_mutex);
     if (!metadata_map.contains(table_name))
     {
-        std::lock_guard lock(metadata_map_mutex);
         if (!metadata_map.contains(table_name))
         {
             metadata_map.emplace(table_name, creator());
