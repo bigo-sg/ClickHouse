@@ -1,6 +1,8 @@
 #include "SortRelParser.h"
 #include <Parser/RelParser.h>
 #include <Processors/QueryPlan/SortingStep.h>
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
 
 namespace DB
 {
@@ -18,8 +20,9 @@ SortRelParser::SortRelParser(SerializedPlanParser * plan_paser_)
 {}
 
 DB::QueryPlanPtr
-SortRelParser::parse(DB::QueryPlanPtr query_plan, const substrait::Rel & rel, std::list<const substrait::Rel *> & /*rel_stack_*/)
+SortRelParser::parse(DB::QueryPlanPtr query_plan, const substrait::Rel & rel, std::list<const substrait::Rel *> & rel_stack_)
 {
+    size_t limit = parseLimit(rel_stack_);
     const auto & sort_rel = rel.sort();
     auto sort_descr = parseSortDescription(sort_rel.sorts());
     const auto & settings = getContext()->getSettingsRef();
@@ -27,7 +30,7 @@ SortRelParser::parse(DB::QueryPlanPtr query_plan, const substrait::Rel & rel, st
         query_plan->getCurrentDataStream(),
         sort_descr,
         settings.max_block_size,
-        0, // no limit now
+        limit,
         SizeLimits(settings.max_rows_to_sort, settings.max_bytes_to_sort, settings.sort_overflow_mode),
         settings.max_bytes_before_remerge_sort,
         settings.remerge_sort_lowered_memory_bytes_ratio,
@@ -73,6 +76,19 @@ SortRelParser::parseSortDescription(const google::protobuf::RepeatedPtrField<sub
         }
     }
     return sort_descr;
+}
+
+size_t SortRelParser::parseLimit(std::list<const substrait::Rel *> & rel_stack_)
+{
+    if (rel_stack_.empty())
+        return 0;
+    const auto & last_rel = *rel_stack_.back();
+    if (last_rel.has_fetch())
+    {
+        const auto & fetch_rel = last_rel.fetch();
+        return fetch_rel.count();
+    }
+    return 0;
 }
 
 void registerSortRelParser(RelParserFactory & factory)

@@ -625,8 +625,8 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "must have root rel!");
         }
-
-        auto query_plan = parseOp(root_rel.root().input());
+        std::list<const substrait::Rel *> rel_stack;
+        auto query_plan = parseOp(root_rel.root().input(), rel_stack);
         if (root_rel.root().names_size())
         {
             ActionsDAGPtr actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
@@ -649,21 +649,25 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
     }
 }
 
-QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
+QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list<const substrait::Rel *> & rel_stack)
 {
     QueryPlanPtr query_plan;
     switch (rel.rel_type_case())
     {
         case substrait::Rel::RelTypeCase::kFetch: {
+            rel_stack.push_back(&rel);
             const auto & limit = rel.fetch();
-            query_plan = parseOp(limit.input());
+            query_plan = parseOp(limit.input(), rel_stack);
+            rel_stack.pop_back();
             auto limit_step = std::make_unique<LimitStep>(query_plan->getCurrentDataStream(), limit.count(), limit.offset());
             query_plan->addStep(std::move(limit_step));
             break;
         }
         case substrait::Rel::RelTypeCase::kFilter: {
+            rel_stack.push_back(&rel);
             const auto & filter = rel.filter();
-            query_plan = parseOp(filter.input());
+            query_plan = parseOp(filter.input(), rel_stack);
+            rel_stack.pop_back();
             std::string filter_name;
             std::vector<String> required_columns;
             auto actions_dag = parseFunction(
@@ -706,9 +710,9 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                     expressions.push_back(generate.child_output(i));
                 expressions.emplace_back(generate.generator());
             }
-
-            query_plan = parseOp(*input);
-
+            rel_stack.push_back(&rel);
+            query_plan = parseOp(*input, rel_stack);
+            rel_stack.pop_back();
             // for prewhere
             Block read_schema;
             bool is_mergetree_input = input->has_read() && !input->read().has_local_files();
@@ -724,8 +728,10 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             break;
         }
         case substrait::Rel::RelTypeCase::kAggregate: {
+            rel_stack.push_back(&rel);
             const auto & aggregate = rel.aggregate();
-            query_plan = parseOp(aggregate.input());
+            query_plan = parseOp(aggregate.input(), rel_stack);
+            rel_stack.pop_back();
             bool is_final;
             auto aggregate_step = parseAggregate(*query_plan, aggregate, is_final);
 
@@ -799,22 +805,30 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "left table or right table is missing.");
             }
             last_project = nullptr;
-            auto left_plan = parseOp(join.left());
+            rel_stack.push_back(&rel);
+            auto left_plan = parseOp(join.left(), rel_stack);
             last_project = nullptr;
-            auto right_plan = parseOp(join.right());
+            auto right_plan = parseOp(join.right(), rel_stack);
+            rel_stack.pop_back();
 
             query_plan = parseJoin(join, std::move(left_plan), std::move(right_plan));
             break;
         }
         case substrait::Rel::RelTypeCase::kSort: {
-            query_plan = parseSort(rel.sort());
+            rel_stack.push_back(&rel);
+            const auto & sort_rel = rel.sort();
+            query_plan = parseOp(sort_rel.input(), rel_stack);
+            rel_stack.pop_back();
+            auto sort_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kSort)(this);
+            query_plan = sort_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
         case substrait::Rel::RelTypeCase::kWindow: {
+            rel_stack.push_back(&rel);
             const auto win_rel = rel.window();
-            query_plan = parseOp(win_rel.input());
+            query_plan = parseOp(win_rel.input(), rel_stack);
+            rel_stack.pop_back();
             auto win_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kWindow)(this);
-            std::list<const substrait::Rel *> rel_stack;
             query_plan = win_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
@@ -1786,53 +1800,6 @@ void SerializedPlanParser::wrapNullable(std::vector<String> columns, ActionsDAGP
     }
 }
 
-DB::QueryPlanPtr SerializedPlanParser::parseSort(const substrait::SortRel & sort_rel)
-{
-    auto query_plan = parseOp(sort_rel.input());
-    auto sort_descr = parseSortDescription(sort_rel);
-    const auto & settings = context->getSettingsRef();
-    auto sorting_step = std::make_unique<DB::SortingStep>(
-        query_plan->getCurrentDataStream(),
-        sort_descr,
-        settings.max_block_size,
-        0, // no limit now
-        SizeLimits(settings.max_rows_to_sort, settings.max_bytes_to_sort, settings.sort_overflow_mode),
-        settings.max_bytes_before_remerge_sort,
-        settings.remerge_sort_lowered_memory_bytes_ratio,
-        settings.max_bytes_before_external_sort,
-        context->getTemporaryVolume(),
-        settings.min_free_disk_space_for_temporary_data);
-    sorting_step->setStepDescription("Sorting step");
-    query_plan->addStep(std::move(sorting_step));
-    return std::move(query_plan);
-}
-
-DB::SortDescription SerializedPlanParser::parseSortDescription(const substrait::SortRel & sort_rel)
-{
-    static std::map<int, std::pair<int, int>> direction_map = {{1, {1, -1}}, {2, {1, 1}}, {3, {-1, 1}}, {4, {-1, -1}}};
-
-    DB::SortDescription sort_descr;
-    for (int i = 0, sz = sort_rel.sorts_size(); i < sz; ++i)
-    {
-        const auto & sort_field = sort_rel.sorts(i);
-
-        if (!sort_field.expr().has_selection() || !sort_field.expr().selection().has_direct_reference()
-            || !sort_field.expr().selection().direct_reference().has_struct_field())
-        {
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupport sort field");
-        }
-        auto field_pos = sort_field.expr().selection().direct_reference().struct_field().field();
-
-        auto direction_iter = direction_map.find(sort_field.direction());
-        if (direction_iter == direction_map.end())
-        {
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsuppor sort direction: {}", sort_field.direction());
-        }
-
-        sort_descr.emplace_back(field_pos, direction_iter->second.first, direction_iter->second.second);
-    }
-    return sort_descr;
-}
 SharedContextHolder SerializedPlanParser::shared_context;
 
 LocalExecutor::~LocalExecutor()

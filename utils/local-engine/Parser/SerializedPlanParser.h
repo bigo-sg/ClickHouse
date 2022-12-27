@@ -203,7 +203,7 @@ public:
 
 private:
     static DB::NamesAndTypesList blockToNameAndTypeList(const DB::Block & header);
-    DB::QueryPlanPtr parseOp(const substrait::Rel & rel);
+    DB::QueryPlanPtr parseOp(const substrait::Rel & rel, std::list<const substrait::Rel *> & rel_stack);
     void
     collectJoinKeys(const substrait::Expression & condition, std::vector<std::pair<int32_t, int32_t>> & join_keys, int32_t right_key_start);
     DB::QueryPlanPtr parseJoin(substrait::JoinRel join, DB::QueryPlanPtr left, DB::QueryPlanPtr right);
@@ -268,9 +268,6 @@ private:
         Settings settings;
         return Aggregator::Params(header, keys, aggregates, false, settings.max_threads);
     }
-
-    DB::QueryPlanPtr parseSort(const substrait::SortRel & sort_rel);
-    static DB::SortDescription parseSortDescription(const substrait::SortRel & sort_rel);
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
 
