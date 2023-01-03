@@ -1060,16 +1060,30 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
             const auto & field_value = extract_field.value().literal().string();
             if (field_value == "YEAR")
                 ch_function_name = "toYear";
+            /*
+            else if (field_value == "YEAR_OF_WEEK")
+                ch_function_name = "?";
+            */
             else if (field_value == "QUARTER")
                 ch_function_name = "toQuarter";
             else if (field_value == "MONTH")
                 ch_function_name = "toMonth";
             else if (field_value == "WEEK_OF_YEAR")
                 ch_function_name = "toISOWeek";
+            /*
+            else if (field_value == "WEEK_DAY")
+                ch_function_name = "?";
             else if (field_value == "DAY_OF_WEEK")
-                ch_function_name = "toDayOfWeek";
+                ch_function_name = "?";
+            */
+            else if (field_value == "DAY")
+                ch_function_name = "toDayOfMonth";
             else if (field_value == "DAY_OF_YEAR")
                 ch_function_name = "toDayOfYear";
+            else if (field_value == "HOUR")
+                ch_function_name = "toHour";
+            else if (field_value == "MINUTE")
+                ch_function_name = "toMinute";
             else if (field_value == "SECOND")
                 ch_function_name = "toSecond";
             else
