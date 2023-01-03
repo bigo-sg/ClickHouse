@@ -865,6 +865,15 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
             query_plan = win_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
+        case substrait::Rel::RelTypeCase::kExpand: {
+            rel_stack.push_back(&rel);
+            const auto & expand_rel = rel.expand();
+            query_plan = parseOp(expand_rel.input(), rel_stack);
+            rel_stack.pop_back();
+            auto epand_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kExpand)(this);
+            query_plan = epand_parser->parse(std::move(query_plan), rel, rel_stack);
+            break;
+        }
         default:
             throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support relation type: {}.\n{}", rel.rel_type_case(), rel.DebugString());
     }
