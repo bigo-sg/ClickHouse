@@ -1062,7 +1062,7 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
                 ch_function_name = "toYear";
             /*
             else if (field_value == "YEAR_OF_WEEK")
-                ch_function_name = "?";
+                ch_function_name = "?";  // spark: YearOfWeek
             */
             else if (field_value == "QUARTER")
                 ch_function_name = "toQuarter";
@@ -1072,9 +1072,9 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
                 ch_function_name = "toISOWeek";
             /*
             else if (field_value == "WEEK_DAY")
-                ch_function_name = "?";
+                ch_function_name = "?"; // spark: WeekDay
             else if (field_value == "DAY_OF_WEEK")
-                ch_function_name = "?";
+                ch_function_name = "?"; // spark: DayOfWeek
             */
             else if (field_value == "DAY")
                 ch_function_name = "toDayOfMonth";
