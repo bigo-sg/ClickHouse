@@ -521,7 +521,7 @@ bool BackingDataLengthCalculator::isFixedLengthDataType(const DataTypePtr & type
     const WhichDataType which(type_without_nullable);
     return which.isUInt8() || which.isInt8() || which.isUInt16() || which.isInt16() || which.isDate() || which.isUInt32() || which.isInt32()
         || which.isFloat32() || which.isDate32() || which.isDecimal32() || which.isUInt64() || which.isInt64() || which.isFloat64()
-        || which.isDateTime64() || which.isDecimal64();
+        || which.isDateTime64() || which.isDecimal64() || which.isNothing();
 }
 
 bool BackingDataLengthCalculator::isVariableLengthDataType(const DataTypePtr & type_without_nullable)

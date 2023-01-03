@@ -296,6 +296,8 @@ std::shared_ptr<substrait::Type> SerializedPlanBuilder::buildType(const DB::Data
         *(res->mutable_map()->mutable_key()) = *buildType(ch_key_type);
         *(res->mutable_map()->mutable_value()) = *buildType(ch_val_type);
     }
+    else if (which.isNothing())
+        res->mutable_nothing();
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
 

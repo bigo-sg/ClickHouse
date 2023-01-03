@@ -20,6 +20,7 @@
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeMap.h>
 #include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypeNothing.h>
 #include <Functions/FunctionFactory.h>
 #include <Functions/registerFunctions.h>
 #include <Interpreters/ActionsDAG.h>
@@ -542,15 +543,6 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     {
         UInt32 precision = substrait_type.decimal().precision();
         UInt32 scale = substrait_type.decimal().scale();
-        /*
-        if (precision <= DataTypeDecimal32::maxPrecision())
-            ch_type = std::make_shared<DataTypeDecimal32>(precision, scale);
-        else if (precision <= DataTypeDecimal64::maxPrecision())
-            ch_type = std::make_shared<DataTypeDecimal64>(precision, scale);
-        else if (precision <= DataTypeDecimal128::maxPrecision())
-            ch_type = std::make_shared<DataTypeDecimal128>(precision, scale);
-        else
-        */
         if (precision > DataTypeDecimal128::maxPrecision())
             throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support decimal type with precision {}", precision);
         ch_type = createDecimal<DataTypeDecimal>(precision, scale);
@@ -576,6 +568,11 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         auto ch_val_type = parseType(substrait_type.map().value());
         ch_type = std::make_shared<DataTypeMap>(ch_key_type, ch_val_type);
         ch_type = wrapNullableType(substrait_type.map().nullability(), ch_type);
+    }
+    else if (substrait_type.has_nothing())
+    {
+        ch_type = std::make_shared<DataTypeNothing>();
+        ch_type = wrapNullableType(true, ch_type);
     }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support type {}", substrait_type.DebugString());
