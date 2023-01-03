@@ -1060,10 +1060,8 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
             const auto & field_value = extract_field.value().literal().string();
             if (field_value == "YEAR")
                 ch_function_name = "toYear";
-            /*
             else if (field_value == "YEAR_OF_WEEK")
-                ch_function_name = "?";  // spark: YearOfWeek
-            */
+                ch_function_name = "toISOYear";  // spark: YearOfWeek
             else if (field_value == "QUARTER")
                 ch_function_name = "toQuarter";
             else if (field_value == "MONTH")
