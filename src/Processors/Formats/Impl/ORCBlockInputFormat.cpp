@@ -9,7 +9,7 @@
 #include <IO/copyData.h>
 #include "ArrowBufferedStreams.h"
 #include "ArrowColumnToCHColumn.h"
-#include "ArrowFormatUtil.h"
+#include "ArrowFieldIndexUtil.h"
 #include <DataTypes/NestedUtils.h>
 
 
@@ -115,12 +115,11 @@ void ORCBlockInputFormat::prepareReader()
 
     arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(getPort().getHeader(), schema, "ORC", format_settings);
 
-    ArrowFormatUtil format_util(
+    ArrowFieldIndexUtil field_util(
         format_settings.orc.case_insensitive_column_matching,
-        format_settings.orc.import_nested,
         true,
         format_settings.orc.allow_missing_columns);
-    include_indices = format_util.findRequiredIndices(getPort().getHeader(), *schema);
+    include_indices = field_util.findRequiredIndices(getPort().getHeader(), *schema);
 }
 
 ORCSchemaReader::ORCSchemaReader(ReadBuffer & in_, const FormatSettings & format_settings_)

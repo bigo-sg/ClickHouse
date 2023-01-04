@@ -14,7 +14,7 @@
 #include <parquet/file_reader.h>
 #include "ArrowBufferedStreams.h"
 #include "ArrowColumnToCHColumn.h"
-#include "ArrowFormatUtil.h"
+#include "ArrowFieldIndexUtil.h"
 #include <DataTypes/NestedUtils.h>
 
 namespace DB
@@ -107,12 +107,11 @@ void ParquetBlockInputFormat::prepareReader()
 
     arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(getPort().getHeader(), schema, "Parquet", format_settings);
 
-    ArrowFormatUtil format_util(
+    ArrowFieldIndexUtil field_util(
         format_settings.parquet.case_insensitive_column_matching,
-        format_settings.parquet.import_nested,
         false,
         format_settings.parquet.allow_missing_columns);
-    column_indices = format_util.findRequiredIndices(getPort().getHeader(), *schema);
+    column_indices = field_util.findRequiredIndices(getPort().getHeader(), *schema);
 }
 
 ParquetSchemaReader::ParquetSchemaReader(ReadBuffer & in_, const FormatSettings & format_settings_)
