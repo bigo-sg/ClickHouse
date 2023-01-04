@@ -1,5 +1,5 @@
 #pragma once
-#include "config.h"
+#include "config_formats.h"
 #if USE_PARQUET || USE_ORC
 #include <map>
 #include <Core/Block.h>
