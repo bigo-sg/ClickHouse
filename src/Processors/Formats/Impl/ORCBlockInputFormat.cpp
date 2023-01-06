@@ -12,7 +12,6 @@
 #include "ArrowFieldIndexUtil.h"
 #include <DataTypes/NestedUtils.h>
 
-
 namespace DB
 {
 
@@ -115,9 +114,8 @@ void ORCBlockInputFormat::prepareReader()
 
     arrow_column_to_ch_column = std::make_unique<ArrowColumnToCHColumn>(getPort().getHeader(), schema, "ORC", format_settings);
 
-    ArrowFieldIndexUtil field_util(
+    ArrowFieldIndexUtil<true> field_util(
         format_settings.orc.case_insensitive_column_matching,
-        true,
         format_settings.orc.allow_missing_columns);
     include_indices = field_util.findRequiredIndices(getPort().getHeader(), *schema);
 }
