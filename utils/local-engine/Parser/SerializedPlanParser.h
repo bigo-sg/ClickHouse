@@ -141,6 +141,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"date_add", "addDays"},
     {"date_sub", "subtractDays"},
     {"datediff", "dateDiff"},
+    {"second", "toSecond"},
 
     // array functions
     {"array", "array"},
