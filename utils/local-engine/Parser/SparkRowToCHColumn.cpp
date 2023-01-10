@@ -9,6 +9,7 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypeDateTime64.h>
 #include <Functions/FunctionHelpers.h>
+#include <Common/CHUtil.h>
 #include <Common/Exception.h>
 #include <Core/ColumnsWithTypeAndName.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -61,20 +62,28 @@ std::unique_ptr<Block>
 SparkRowToCHColumn::convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row_info, const Block & header)
 {
     auto block = std::make_unique<Block>();
-    *block = std::move(header.cloneEmpty());
-    MutableColumns mutable_columns{std::move(block->mutateColumns())};
     const auto num_rows = spark_row_info.getNumRows();
-    for (size_t col_i = 0; col_i < header.columns(); ++col_i)
-        mutable_columns[col_i]->reserve(num_rows);
-
-    DataTypes types{std::move(header.getDataTypes())};
-    SparkRowReader row_reader(types);
-    for (int64_t i = 0; i < num_rows; i++)
+    if (header.columns())
     {
-        row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
-        writeRowToColumns(mutable_columns, row_reader);
+        *block = std::move(header.cloneEmpty());
+        MutableColumns mutable_columns{std::move(block->mutateColumns())};
+        for (size_t col_i = 0; col_i < header.columns(); ++col_i)
+            mutable_columns[col_i]->reserve(num_rows);
+
+        DataTypes types{std::move(header.getDataTypes())};
+        SparkRowReader row_reader(types);
+        for (int64_t i = 0; i < num_rows; i++)
+        {
+            row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
+            writeRowToColumns(mutable_columns, row_reader);
+        }
+        block->setColumns(std::move(mutable_columns));
     }
-    block->setColumns(std::move(mutable_columns));
+    else
+    {
+        // This is a special case for count(1)/count(*)
+        *block = BlockUtil::buildRowCountBlock(num_rows);
+    }
     return std::move(block);
 }
 

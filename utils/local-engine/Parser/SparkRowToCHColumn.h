@@ -92,20 +92,14 @@ public:
             int len = *(reinterpret_cast<int*>(rows_buf_ptr));
 
             // len = -1 means reaching the buf's end.
+            // len = 0 indicates no columns in the this row. e.g. count(1)/count(*)
             while (len >= 0)
             {
                 rows_buf_ptr += 4;
                 appendSparkRowToCHColumn(helper, rows_buf_ptr, len);
 
-                if (len > 0)
-                {
-                    rows_buf_ptr += len;
-                    len = *(reinterpret_cast<int *>(rows_buf_ptr));
-                }
-                else
-                {
-                    len = -1;
-                }
+                rows_buf_ptr += len;
+                len = *(reinterpret_cast<int *>(rows_buf_ptr));
             }
 
             // Try to release reference.
