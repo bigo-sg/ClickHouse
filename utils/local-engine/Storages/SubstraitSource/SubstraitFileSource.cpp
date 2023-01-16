@@ -1,30 +1,35 @@
 #include <functional>
 #include <memory>
 #include <Columns/ColumnNullable.h>
+#include <Columns/ColumnTuple.h>
 #include <Columns/ColumnsNumber.h>
 #include <Columns/IColumn.h>
+#include <Core/Block.h>
+#include <Core/ColumnWithTypeAndName.h>
+#include <Core/ColumnsWithTypeAndName.h>
 #include <Core/Field.h>
+#include <Core/Types.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeTuple.h>
+#include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/Serializations/ISerialization.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/ReadHelpers.h>
+#include <Interpreters/castColumn.h>
 #include <Processors/Chunk.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
+#include <Storages/SubstraitSource/FormatFile.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
+#include <base/logger_useful.h>
 #include <base/types.h>
+#include <substrait/plan.pb.h>
+#include <magic_enum.hpp>
+#include <Poco/Logger.h>
 #include <Poco/URI.h>
+#include <Common/CHUtil.h>
 #include <Common/Exception.h>
 #include <Common/StringUtils.h>
 #include <Common/typeid_cast.h>
-#include <Core/Block.h>
-#include <Core/Types.h>
-#include <Storages/SubstraitSource/FormatFile.h>
-#include <QueryPipeline/QueryPipelineBuilder.h>
-#include <substrait/plan.pb.h>
-
-#include <Poco/Logger.h>
-#include <base/logger_useful.h>
-#include <magic_enum.hpp>
-#include <Common/CHUtil.h>
 namespace DB
 {
 namespace ErrorCodes
@@ -51,7 +56,16 @@ SubstraitFileSource::SubstraitFileSource(DB::ContextPtr context_, const DB::Bloc
     , context(context_)
     , output_header(header_)
 {
-    to_read_header = output_header;
+    /**
+     * We may query part fields of a struct column. For example, we have a column c in type
+     * struct{x:int, y:int, z:int}, and just want fields c.x and c.y. In the substraint plan, we get
+     * a column c described in type struct{x:int, y:int} which is not matched with the original
+     * struct type and cause some exceptions. To solve this, we flatten all struct columns into
+     * independent field columns recursively, and fold the field columns back into struct columns
+     * at the end.
+     */
+    to_read_header = BlockUtil::flattenBlock(output_header, BlockUtil::FLAT_STRUCT, true);
+    flatten_output_header = to_read_header;
     if (file_infos.items_size())
     {
         Poco::URI file_uri(file_infos.items().Get(0).uri_file());
@@ -83,7 +97,19 @@ DB::Chunk SubstraitFileSource::generate()
 
         DB::Chunk chunk;
         if (file_reader->pull(chunk))
-            return chunk;
+        {
+            if (output_header.columns())
+            {
+                auto result_block = foldFlattenColumns(chunk.detachColumns(), output_header);
+                auto cols = result_block.getColumns();
+                return DB::Chunk(cols, result_block.rows());
+            }
+            else
+            {
+                // The count(*)/count(1) case
+                return chunk;
+            }
+        }
 
         /// try to read from next file
         file_reader.reset();
@@ -128,12 +154,72 @@ bool SubstraitFileSource::tryPrepareReader()
     }
     else
     {
-        file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, output_header);
+        file_reader = std::make_unique<NormalFileReader>(current_file, context, to_read_header, flatten_output_header);
     }
 
     return true;
 }
 
+DB::Block SubstraitFileSource::foldFlattenColumns(const DB::Columns & cols, const DB::Block & header)
+{
+    DB::ColumnsWithTypeAndName result_cols;
+    size_t pos = 0;
+    for (size_t i = 0; i < header.columns(); ++i)
+    {
+        const auto & named_col = header.getByPosition(i);
+        auto new_col = foldFlattenColumn(named_col.type, named_col.name, pos, cols);
+        result_cols.push_back(new_col);
+    }
+    return DB::Block(std::move(result_cols));
+}
+
+DB::ColumnWithTypeAndName
+SubstraitFileSource::foldFlattenColumn(DB::DataTypePtr col_type, const std::string & col_name, size_t & pos, const DB::Columns & cols)
+{
+    DB::DataTypePtr nested_type = nullptr;
+    if (col_type->isNullable())
+    {
+        nested_type = typeid_cast<const DB::DataTypeNullable *>(col_type.get())->getNestedType();
+    }
+    else
+    {
+        nested_type = col_type;
+    }
+
+    const DB::DataTypeTuple * type_tuple = typeid_cast<const DB::DataTypeTuple *>(nested_type.get());
+    if (type_tuple)
+    {
+        if (type_tuple->haveExplicitNames())
+        {
+            const auto & field_types = type_tuple->getElements();
+            const auto & field_names = type_tuple->getElementNames();
+            size_t fields_num = field_names.size();
+            DB::Columns tuple_cols;
+            for (size_t i = 0; i < fields_num; ++i)
+            {
+                auto named_col = foldFlattenColumn(field_types[i], field_names[i], pos, cols);
+                tuple_cols.push_back(named_col.column);
+            }
+            auto tuple_col = DB::ColumnTuple::create(std::move(tuple_cols));
+
+            // The original type col_type may be wrapped by nullable, so add a cast here.
+            DB::ColumnWithTypeAndName ret_col(std::move(tuple_col), nested_type, col_name);
+            ret_col.column = DB::castColumn(ret_col, col_type);
+            ret_col.type = col_type;
+            return ret_col;
+        }
+        else
+        {
+            size_t current_pos = pos;
+            pos += 1;
+            return DB::ColumnWithTypeAndName(cols[current_pos], col_type, col_name);
+        }
+    }
+
+    size_t current_pos = pos;
+    pos += 1;
+    return DB::ColumnWithTypeAndName(cols[current_pos], col_type, col_name);
+}
 
 DB::ColumnPtr FileReaderWrapper::createConstColumn(DB::DataTypePtr data_type, const DB::Field & field, size_t rows)
 {

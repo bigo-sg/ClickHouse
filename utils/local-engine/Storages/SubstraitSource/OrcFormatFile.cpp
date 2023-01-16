@@ -17,6 +17,7 @@
 #include <Common/Exception.h>
 #include <Common/Stopwatch.h>
 
+
 namespace DB
 {
 namespace ErrorCodes
@@ -67,11 +68,15 @@ DB::Chunk ORCBlockInputFormat::generate()
     std::shared_ptr<arrow::Table> table;
     arrow::Status table_status = batch_reader->ReadAll(&table);
     if (!table_status.ok())
+    {
         throw DB::ParsingException(
             DB::ErrorCodes::CANNOT_READ_ALL_DATA, "Error while reading batch of ORC data: {}", table_status.ToString());
+    }
 
     if (!table || !table->num_rows())
+    {
         return res;
+    }
 
     if (format_settings.use_lowercase_column_name)
         table = *table->RenameColumns(include_column_names);
@@ -83,7 +88,6 @@ DB::Chunk ORCBlockInputFormat::generate()
         for (size_t row_idx = 0; row_idx < res.getNumRows(); ++row_idx)
             for (const auto & column_idx : missing_columns)
                 block_missing_values.setBit(column_idx, row_idx);
-
     return res;
 }
 
@@ -95,13 +99,14 @@ void ORCBlockInputFormat::prepareReader()
     if (is_stopped)
         return;
 
-    arrow_column_to_ch_column = std::make_unique<DB::ArrowColumnToCHColumn>(
+    arrow_column_to_ch_column = std::make_unique<DB::OptimizedArrowColumnToCHColumn>(
         getPort().getHeader(), "ORC", format_settings.orc.import_nested, format_settings.orc.allow_missing_columns);
     missing_columns = arrow_column_to_ch_column->getMissingColumns(*schema);
 
     std::unordered_set<String> nested_table_names;
     if (format_settings.orc.import_nested)
         nested_table_names = DB::Nested::getAllTableNames(getPort().getHeader());
+
 
     /// In ReadStripe column indices should be started from 1,
     /// because 0 indicates to select all columns.
@@ -129,7 +134,9 @@ std::shared_ptr<arrow::RecordBatchReader> ORCBlockInputFormat::stepOneStripe()
     auto result = file_reader->NextStripeReader(format_settings.orc.row_batch_size, include_indices);
     current_stripe += 1;
     if (!result.ok())
+    {
         throw DB::ParsingException(DB::ErrorCodes::CANNOT_READ_ALL_DATA, "Failed to create batch reader: {}", result.status().ToString());
+    }
     std::shared_ptr<arrow::RecordBatchReader> batch_reader;
     batch_reader = std::move(result).ValueOrDie();
     return batch_reader;
@@ -154,6 +161,7 @@ FormatFile::InputFormatPtr OrcFormatFile::createInputFormat(const DB::Block & he
 {
     auto read_buffer = read_buffer_builder->build(file_info);
     auto format_settings = DB::getFormatSettings(context);
+    format_settings.orc.import_nested = true;
     auto file_format = std::make_shared<FormatFile::InputFormat>();
     file_format->read_buffer = std::move(read_buffer);
     std::vector<StripeInformation> stripes;

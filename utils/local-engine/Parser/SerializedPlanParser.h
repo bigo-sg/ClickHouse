@@ -141,6 +141,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"date_add", "addDays"},
     {"date_sub", "subtractDays"},
     {"datediff", "dateDiff"},
+    {"second", "toSecond"},
 
     // array functions
     {"array", "array"},
@@ -150,6 +151,9 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     // map functions
     {"map", "map"},
     {"get_map_value", "arrayElement"},
+
+    // tuple functions
+    {"get_struct_field", "tupleElement"},
 
     // table-valued generator function
     {"explode", "arrayJoin"},
@@ -184,7 +188,7 @@ public:
 
     static bool isReadRelFromJava(const substrait::ReadRel & rel);
     static DB::Block parseNameStruct(const substrait::NamedStruct & struct_);
-    static DB::DataTypePtr parseType(const substrait::Type & type);
+    static DB::DataTypePtr parseType(const substrait::Type & type, std::list<std::string> * names = nullptr);
     // This is used for construct a data type from spark type name;
     static DB::DataTypePtr parseType(const std::string & type);
 
@@ -203,7 +207,7 @@ public:
 
 private:
     static DB::NamesAndTypesList blockToNameAndTypeList(const DB::Block & header);
-    DB::QueryPlanPtr parseOp(const substrait::Rel & rel);
+    DB::QueryPlanPtr parseOp(const substrait::Rel & rel, std::list<const substrait::Rel *> & rel_stack);
     void
     collectJoinKeys(const substrait::Expression & condition, std::vector<std::pair<int32_t, int32_t>> & join_keys, int32_t right_key_start);
     DB::QueryPlanPtr parseJoin(substrait::JoinRel join, DB::QueryPlanPtr left, DB::QueryPlanPtr right);
@@ -268,9 +272,6 @@ private:
         Settings settings;
         return Aggregator::Params(header, keys, aggregates, false, settings.max_threads);
     }
-
-    DB::QueryPlanPtr parseSort(const substrait::SortRel & sort_rel);
-    static DB::SortDescription parseSortDescription(const substrait::SortRel & sort_rel);
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
 

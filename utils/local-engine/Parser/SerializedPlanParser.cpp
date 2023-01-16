@@ -1,5 +1,6 @@
 #include "SerializedPlanParser.h"
 #include <memory>
+#include <string_view>
 #include <base/logger_useful.h>
 #include <base/Decimal.h>
 #include <AggregateFunctions/AggregateFunctionFactory.h>
@@ -126,7 +127,8 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         if (expr.has_selection())
         {
             auto position = expr.selection().direct_reference().struct_field().field();
-            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(read_schema.getByPosition(position).name);
+            auto col_name = read_schema.getByPosition(position).name;
+            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(col_name);
             if (distinct_columns.contains(field->result_name))
             {
                 auto unique_name = getUniqueName(field->result_name);
@@ -449,11 +451,17 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
 {
     ColumnsWithTypeAndName internal_cols;
     internal_cols.reserve(struct_.names_size());
+    std::list<std::string> field_names;
     for (int i = 0; i < struct_.names_size(); ++i)
     {
-        const auto & name = struct_.names(i);
+        field_names.emplace_back(struct_.names(i));
+    }
+
+    for (int i = 0; i < struct_.struct_().types_size(); ++i)
+    {
+        auto name = field_names.front();
         const auto & type = struct_.struct_().types(i);
-        auto data_type = parseType(type);
+        auto data_type = parseType(type, &field_names);
         Poco::StringTokenizer name_parts(name, "#");
         if (name_parts.count() == 4)
         {
@@ -481,9 +489,20 @@ DataTypePtr wrapNullableType(bool nullable, DataTypePtr nested_type)
         return nested_type;
 }
 
-DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_type)
+/**
+ * names is used to name struct type fields.
+ *
+ */
+DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_type, std::list<std::string> * names)
 {
     DataTypePtr ch_type;
+    std::string_view current_name;
+    if (names)
+    {
+        current_name = names->front();
+        names->pop_front();
+    }
+
     if (substrait_type.has_bool_())
     {
         ch_type = std::make_shared<DataTypeUInt8>();
@@ -551,9 +570,23 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     else if (substrait_type.has_struct_())
     {
         DataTypes ch_field_types(substrait_type.struct_().types().size());
+        Strings field_names;
         for (size_t i = 0; i < ch_field_types.size(); ++i)
-            ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i]));
-        ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+        {
+            if (names)
+            {
+                field_names.push_back(names->front());
+            }
+            ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i], names));
+        }
+        if (field_names.size())
+        {
+            ch_type = std::make_shared<DataTypeTuple>(ch_field_types, field_names);
+        }
+        else
+        {
+            ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
+        }
         ch_type = wrapNullableType(substrait_type.struct_().nullability(), ch_type);
     }
     else if (substrait_type.has_list())
@@ -622,8 +655,8 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
         {
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "must have root rel!");
         }
-
-        auto query_plan = parseOp(root_rel.root().input());
+        std::list<const substrait::Rel *> rel_stack;
+        auto query_plan = parseOp(root_rel.root().input(), rel_stack);
         if (root_rel.root().names_size())
         {
             ActionsDAGPtr actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
@@ -646,21 +679,25 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
     }
 }
 
-QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
+QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list<const substrait::Rel *> & rel_stack)
 {
     QueryPlanPtr query_plan;
     switch (rel.rel_type_case())
     {
         case substrait::Rel::RelTypeCase::kFetch: {
+            rel_stack.push_back(&rel);
             const auto & limit = rel.fetch();
-            query_plan = parseOp(limit.input());
+            query_plan = parseOp(limit.input(), rel_stack);
+            rel_stack.pop_back();
             auto limit_step = std::make_unique<LimitStep>(query_plan->getCurrentDataStream(), limit.count(), limit.offset());
             query_plan->addStep(std::move(limit_step));
             break;
         }
         case substrait::Rel::RelTypeCase::kFilter: {
+            rel_stack.push_back(&rel);
             const auto & filter = rel.filter();
-            query_plan = parseOp(filter.input());
+            query_plan = parseOp(filter.input(), rel_stack);
+            rel_stack.pop_back();
             std::string filter_name;
             std::vector<String> required_columns;
             auto actions_dag = parseFunction(
@@ -703,9 +740,9 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                     expressions.push_back(generate.child_output(i));
                 expressions.emplace_back(generate.generator());
             }
-
-            query_plan = parseOp(*input);
-
+            rel_stack.push_back(&rel);
+            query_plan = parseOp(*input, rel_stack);
+            rel_stack.pop_back();
             // for prewhere
             Block read_schema;
             bool is_mergetree_input = input->has_read() && !input->read().has_local_files();
@@ -721,8 +758,10 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
             break;
         }
         case substrait::Rel::RelTypeCase::kAggregate: {
+            rel_stack.push_back(&rel);
             const auto & aggregate = rel.aggregate();
-            query_plan = parseOp(aggregate.input());
+            query_plan = parseOp(aggregate.input(), rel_stack);
+            rel_stack.pop_back();
             bool is_final;
             auto aggregate_step = parseAggregate(*query_plan, aggregate, is_final);
 
@@ -796,22 +835,30 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel)
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "left table or right table is missing.");
             }
             last_project = nullptr;
-            auto left_plan = parseOp(join.left());
+            rel_stack.push_back(&rel);
+            auto left_plan = parseOp(join.left(), rel_stack);
             last_project = nullptr;
-            auto right_plan = parseOp(join.right());
+            auto right_plan = parseOp(join.right(), rel_stack);
+            rel_stack.pop_back();
 
             query_plan = parseJoin(join, std::move(left_plan), std::move(right_plan));
             break;
         }
         case substrait::Rel::RelTypeCase::kSort: {
-            query_plan = parseSort(rel.sort());
+            rel_stack.push_back(&rel);
+            const auto & sort_rel = rel.sort();
+            query_plan = parseOp(sort_rel.input(), rel_stack);
+            rel_stack.pop_back();
+            auto sort_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kSort)(this);
+            query_plan = sort_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
         case substrait::Rel::RelTypeCase::kWindow: {
+            rel_stack.push_back(&rel);
             const auto win_rel = rel.window();
-            query_plan = parseOp(win_rel.input());
+            query_plan = parseOp(win_rel.input(), rel_stack);
+            rel_stack.pop_back();
             auto win_parser = RelParserFactory::instance().getBuilder(substrait::Rel::RelTypeCase::kWindow)(this);
-            std::list<const substrait::Rel *> rel_stack;
             query_plan = win_parser->parse(std::move(query_plan), rel, rel_stack);
             break;
         }
@@ -1047,7 +1094,7 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
     else if (function_name == "extract")
     {
         if (args.size() != 2)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "extract function requires two args.");
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "extract function requires two args, function:{}", function.ShortDebugString());
 
         // Get the first arg: field
         const auto & extract_field = args.at(0);
@@ -1056,19 +1103,35 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
         {
             const auto & field_value = extract_field.value().literal().string();
             if (field_value == "YEAR")
-                ch_function_name = "toYear";
+                ch_function_name = "toYear";        // spark: extract(YEAR FROM) or year
+            else if (field_value == "YEAR_OF_WEEK")
+                ch_function_name = "toISOYear";     // spark: extract(YEAROFWEEK FROM)
             else if (field_value == "QUARTER")
-                ch_function_name = "toQuarter";
+                ch_function_name = "toQuarter";     // spark: extract(QUARTER FROM) or quarter
             else if (field_value == "MONTH")
-                ch_function_name = "toMonth";
+                ch_function_name = "toMonth";       // spark: extract(MONTH FROM) or month
             else if (field_value == "WEEK_OF_YEAR")
-                ch_function_name = "toISOWeek";
+                ch_function_name = "toISOWeek";     // spark: extract(WEEK FROM) or weekofyear
+            /*
+            else if (field_value == "WEEK_DAY")
+            {
+                /// spark: weekday(t) -> substrait: extract(WEEK_DAY FROM t) -> ch: WEEKDAY(t)
+                /// spark: extract(DAYOFWEEK_ISO FROM t) -> substrait: 1 + extract(WEEK_DAY FROM t) -> ch: 1 + WEEKDAY(t)
+                ch_function_name = "?";
+            }
             else if (field_value == "DAY_OF_WEEK")
-                ch_function_name = "toDayOfWeek";
+                ch_function_name = "?";             // spark: extract(DAYOFWEEK FROM) or dayofweek
+            */
+            else if (field_value == "DAY")
+                ch_function_name = "toDayOfMonth";  // spark: extract(DAY FROM) or dayofmonth
             else if (field_value == "DAY_OF_YEAR")
-                ch_function_name = "toDayOfYear";
+                ch_function_name = "toDayOfYear";   // spark: extract(DOY FROM) or dayofyear
+            else if (field_value == "HOUR")
+                ch_function_name = "toHour";        // spark: extract(HOUR FROM) or hour
+            else if (field_value == "MINUTE")
+                ch_function_name = "toMinute";      // spark: extract(MINUTE FROM) or minute
             else if (field_value == "SECOND")
-                ch_function_name = "toSecond";
+                ch_function_name = "toSecond";      // spark: extract(SECOND FROM) or secondwithfraction
             else
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "The first arg of extract function is wrong.");
         }
@@ -1416,14 +1479,19 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 args.emplace_back(node);
             }
             else
-            {
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported cast input {}", rel.cast().input().DebugString());
-            }
 
             if (ch_function_name.starts_with("toDecimal"))
             {
                 UInt32 scale = rel.cast().type().decimal().scale();
                 args.emplace_back(add_column(std::make_shared<DataTypeUInt32>(), scale));
+            }
+            else if (ch_function_name.starts_with("toDateTime64"))
+            {
+                /// In Spark: cast(xx as TIMESTAMP)
+                /// In CH: toDateTime(xx, 6)
+                /// So we must add extra argument: 6
+                args.emplace_back(add_column(std::make_shared<DataTypeUInt32>(), 6));
             }
 
             const auto * function_node = toFunctionNode(action_dag, ch_function_name, args);
@@ -1464,15 +1532,16 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
         }
 
         case substrait::Expression::RexTypeCase::kSingularOrList: {
-            DB::ActionsDAG::NodeRawConstPtrs args;
-            args.emplace_back(parseArgument(action_dag, rel.singular_or_list().value()));
-
-            /// options should be non-empty and literals
             const auto & options = rel.singular_or_list().options();
+            /// options is empty always return false
             if (options.empty())
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "Empty SingularOrList not supported");
+                return add_column(std::make_shared<DataTypeUInt8>(), 0);
+            /// options should be literals
             if (!options[0].has_literal())
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Options of SingularOrList must have literal type");
+
+            DB::ActionsDAG::NodeRawConstPtrs args;
+            args.emplace_back(parseArgument(action_dag, rel.singular_or_list().value()));
 
             DataTypePtr elem_type;
             std::tie(elem_type, std::ignore) = parseLiteral(options[0].literal());
@@ -1783,53 +1852,6 @@ void SerializedPlanParser::wrapNullable(std::vector<String> columns, ActionsDAGP
     }
 }
 
-DB::QueryPlanPtr SerializedPlanParser::parseSort(const substrait::SortRel & sort_rel)
-{
-    auto query_plan = parseOp(sort_rel.input());
-    auto sort_descr = parseSortDescription(sort_rel);
-    const auto & settings = context->getSettingsRef();
-    auto sorting_step = std::make_unique<DB::SortingStep>(
-        query_plan->getCurrentDataStream(),
-        sort_descr,
-        settings.max_block_size,
-        0, // no limit now
-        SizeLimits(settings.max_rows_to_sort, settings.max_bytes_to_sort, settings.sort_overflow_mode),
-        settings.max_bytes_before_remerge_sort,
-        settings.remerge_sort_lowered_memory_bytes_ratio,
-        settings.max_bytes_before_external_sort,
-        context->getTemporaryVolume(),
-        settings.min_free_disk_space_for_temporary_data);
-    sorting_step->setStepDescription("Sorting step");
-    query_plan->addStep(std::move(sorting_step));
-    return std::move(query_plan);
-}
-
-DB::SortDescription SerializedPlanParser::parseSortDescription(const substrait::SortRel & sort_rel)
-{
-    static std::map<int, std::pair<int, int>> direction_map = {{1, {1, -1}}, {2, {1, 1}}, {3, {-1, 1}}, {4, {-1, -1}}};
-
-    DB::SortDescription sort_descr;
-    for (int i = 0, sz = sort_rel.sorts_size(); i < sz; ++i)
-    {
-        const auto & sort_field = sort_rel.sorts(i);
-
-        if (!sort_field.expr().has_selection() || !sort_field.expr().selection().has_direct_reference()
-            || !sort_field.expr().selection().direct_reference().has_struct_field())
-        {
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupport sort field");
-        }
-        auto field_pos = sort_field.expr().selection().direct_reference().struct_field().field();
-
-        auto direction_iter = direction_map.find(sort_field.direction());
-        if (direction_iter == direction_map.end())
-        {
-            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsuppor sort direction: {}", sort_field.direction());
-        }
-
-        sort_descr.emplace_back(field_pos, direction_iter->second.first, direction_iter->second.second);
-    }
-    return sort_descr;
-}
 SharedContextHolder SerializedPlanParser::shared_context;
 
 LocalExecutor::~LocalExecutor()

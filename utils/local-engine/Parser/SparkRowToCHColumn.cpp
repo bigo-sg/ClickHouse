@@ -9,6 +9,7 @@
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypeDateTime64.h>
 #include <Functions/FunctionHelpers.h>
+#include <Common/CHUtil.h>
 #include <Common/Exception.h>
 #include <Core/ColumnsWithTypeAndName.h>
 #include <DataTypes/DataTypesNumber.h>
@@ -61,20 +62,28 @@ std::unique_ptr<Block>
 SparkRowToCHColumn::convertSparkRowInfoToCHColumn(const SparkRowInfo & spark_row_info, const Block & header)
 {
     auto block = std::make_unique<Block>();
-    *block = std::move(header.cloneEmpty());
-    MutableColumns mutable_columns{std::move(block->mutateColumns())};
     const auto num_rows = spark_row_info.getNumRows();
-    for (size_t col_i = 0; col_i < header.columns(); ++col_i)
-        mutable_columns[col_i]->reserve(num_rows);
-
-    DataTypes types{std::move(header.getDataTypes())};
-    SparkRowReader row_reader(types);
-    for (int64_t i = 0; i < num_rows; i++)
+    if (header.columns())
     {
-        row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
-        writeRowToColumns(mutable_columns, row_reader);
+        *block = std::move(header.cloneEmpty());
+        MutableColumns mutable_columns{std::move(block->mutateColumns())};
+        for (size_t col_i = 0; col_i < header.columns(); ++col_i)
+            mutable_columns[col_i]->reserve(num_rows);
+
+        DataTypes types{std::move(header.getDataTypes())};
+        SparkRowReader row_reader(types);
+        for (int64_t i = 0; i < num_rows; i++)
+        {
+            row_reader.pointTo(spark_row_info.getBufferAddress() + spark_row_info.getOffsets()[i], spark_row_info.getLengths()[i]);
+            writeRowToColumns(mutable_columns, row_reader);
+        }
+        block->setColumns(std::move(mutable_columns));
     }
-    block->setColumns(std::move(mutable_columns));
+    else
+    {
+        // This is a special case for count(1)/count(*)
+        *block = BlockUtil::buildRowCountBlock(num_rows);
+    }
     return std::move(block);
 }
 
@@ -170,7 +179,7 @@ Field VariableLengthDataReader::readArray(const char * buffer, [[maybe_unused]] 
     const auto len_null_bitmap = calculateBitSetWidthInBytes(num_elems);
 
     /// Read values
-    const auto * array_type = typeid_cast<const DataTypeArray *>(type.get());
+    const auto * array_type = typeid_cast<const DataTypeArray *>(type_without_nullable.get());
     const auto & nested_type = array_type->getNestedType();
     const auto elem_size = BackingDataLengthCalculator::getArrayElementSize(nested_type);
     const auto len_values = roundNumberOfBytesToNearestWord(elem_size * num_elems);
@@ -230,7 +239,7 @@ Field VariableLengthDataReader::readMap(const char * buffer, size_t length) cons
         return std::move(Map());
 
     /// Read UnsafeArrayData of keys
-    const auto * map_type = typeid_cast<const DataTypeMap *>(type.get());
+    const auto * map_type = typeid_cast<const DataTypeMap *>(type_without_nullable.get());
     const auto & key_type = map_type->getKeyType();
     const auto key_array_type = std::make_shared<DataTypeArray>(key_type);
     VariableLengthDataReader key_reader(key_array_type);
@@ -262,7 +271,7 @@ Field VariableLengthDataReader::readMap(const char * buffer, size_t length) cons
 Field VariableLengthDataReader::readStruct(const char * buffer, size_t  /*length*/) const
 {
     /// 内存布局：null_bitmap(字节数与字段数成正比) | values(num_fields * 8B) | backing data
-    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type.get());
+    const auto * tuple_type = typeid_cast<const DataTypeTuple *>(type_without_nullable.get());
     const auto & field_types = tuple_type->getElements();
     const auto num_fields = field_types.size();
     if (num_fields == 0)

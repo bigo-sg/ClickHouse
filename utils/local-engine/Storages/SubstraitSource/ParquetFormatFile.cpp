@@ -45,6 +45,7 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
         row_group_indices.emplace_back(row_group.index);
     }
     auto format_settings = DB::getFormatSettings(context);
+    format_settings.parquet.import_nested = true;
     auto input_format = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*(res->read_buffer), header, format_settings, row_group_indices);
     res->input = input_format;
     return res;
