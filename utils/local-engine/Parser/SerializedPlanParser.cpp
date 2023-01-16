@@ -63,6 +63,7 @@
 #include <Storages/IStorage.h>
 #include <sys/select.h>
 #include <Common/CHUtil.h>
+#include <Core/Types.h>
 #include "SerializedPlanParser.h"
 #include <Parser/RelParser.h>
 
@@ -76,6 +77,7 @@ namespace ErrorCodes
     extern const int NO_SUCH_DATA_PART;
     extern const int UNKNOWN_FUNCTION;
     extern const int CANNOT_PARSE_PROTOBUF_SCHEMA;
+    extern const int ILLEGAL_TYPE_OF_ARGUMENT;
 }
 }
 
@@ -1174,20 +1176,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     auto function_signature = function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
     auto function_name = getFunctionName(function_signature, scalar_function);
     ActionsDAG::NodeRawConstPtrs args;
-    for (const auto & arg : scalar_function.arguments())
-    {
-        if (arg.value().has_scalar_function())
-        {
-            std::string arg_name;
-            bool keep_arg = FUNCTION_NEED_KEEP_ARGUMENTS.contains(function_name);
-            parseFunctionWithDAG(arg.value(), arg_name, required_columns, actions_dag, keep_arg);
-            args.emplace_back(&actions_dag->getNodes().back());
-        }
-        else
-        {
-            args.emplace_back(parseArgument(actions_dag, arg.value()));
-        }
-    }
+    parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
     const ActionsDAG::Node * result_node;
     if (function_name == "alias")
@@ -1284,6 +1273,95 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
             actions_dag->addOrReplaceInIndex(*result_node);
     }
     return result_node;
+}
+
+void SerializedPlanParser::parseFunctionArguments(
+    DB::ActionsDAGPtr & actions_dag,
+    ActionsDAG::NodeRawConstPtrs & parsed_args,
+    std::vector<String> & required_columns,
+    const std::string & function_name,
+    const substrait::Expression_ScalarFunction & scalar_function)
+{
+    auto add_column = [&](const DataTypePtr & type, const Field & field) -> auto
+    {
+        return &actions_dag->addColumn(ColumnWithTypeAndName(type->createColumnConst(1, field), type, getUniqueName(toString(field))));
+    };
+    const auto & args = scalar_function.arguments();
+    // Some functions need to be handle specially.
+    if (function_name == "JSONExtract")
+    {
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
+        auto data_type = parseType(scalar_function.output_type());
+        parsed_args.emplace_back(add_column(std::make_shared<DB::DataTypeString>(), data_type->getName()));
+    }
+    else if (function_name == "tupleElement")
+    {
+        // tupleElement requires the second argument to be uintxx, but subtrait only supports signed
+        // interger.
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
+        const auto & ordinal_arg = args[1].value();
+        if (!ordinal_arg.has_literal())
+        {
+            throw DB::Exception(
+                DB::ErrorCodes::BAD_ARGUMENTS, "Second argument should be a integer literal, but got {}", ordinal_arg.ShortDebugString());
+        }
+        auto [type, field] = parseLiteral(ordinal_arg.literal());
+        std::tie(type, field) = convertStructFieldType(type, field);
+        parsed_args.emplace_back(add_column(type, field));
+    }
+    else
+    {
+        // Default handle
+        for (const auto & arg : args)
+        {
+            parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, arg);
+        }
+    }
+}
+
+void SerializedPlanParser::parseFunctionArgument(
+    DB::ActionsDAGPtr & actions_dag,
+    ActionsDAG::NodeRawConstPtrs & parsed_args,
+    std::vector<String> & required_columns,
+    const std::string & function_name,
+    const substrait::FunctionArgument & arg)
+{
+    if (arg.value().has_scalar_function())
+    {
+        std::string arg_name;
+        bool keep_arg = FUNCTION_NEED_KEEP_ARGUMENTS.contains(function_name);
+        parseFunctionWithDAG(arg.value(), arg_name, required_columns, actions_dag, keep_arg);
+        parsed_args.emplace_back(&actions_dag->getNodes().back());
+    }
+    else
+    {
+        parsed_args.emplace_back(parseArgument(actions_dag, arg.value()));
+    }
+}
+
+// Convert signed integer index into unsigned integer index
+std::pair<DB::DataTypePtr, DB::Field>
+SerializedPlanParser::convertStructFieldType(const DB::DataTypePtr & type, const DB::Field & field)
+{
+    // For tupelElement, field index starts from 1, but int substrait plan, it starts from 0.
+    #define UINT_CONVERT(type_ptr, field, type_name) \
+        if (type_ptr->getTypeId() == DB::TypeIndex::type_name) \
+        {\
+            return {std::make_shared<DB::DataTypeU##type_name>(), static_cast<U##type_name>(field.get<type_name>()) + 1};\
+        }
+
+    auto type_id = type->getTypeId();
+    if (type_id == DB::TypeIndex::UInt8 || type_id == DB::TypeIndex::UInt16 || type_id == DB::TypeIndex::UInt32
+        || type_id == DB::TypeIndex::UInt64)
+    {
+        return {type, field};
+    }
+    UINT_CONVERT(type, field, Int8)
+    UINT_CONVERT(type, field, Int16)
+    UINT_CONVERT(type, field, Int32)
+    UINT_CONVERT(type, field, Int64)
+    throw DB::Exception(DB::ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Not valid interger type: {}", type->getName());
+    #undef UINT_CONVERT
 }
 
 ActionsDAGPtr SerializedPlanParser::parseFunction(

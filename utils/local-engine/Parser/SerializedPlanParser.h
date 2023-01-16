@@ -159,6 +159,11 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
 
     // table-valued generator function
     {"explode", "arrayJoin"},
+
+    // json functions
+    {"get_json_object", "JSON_VALUE"},
+    {"to_json", "toJSONString"},
+    {"from_json", "JSONExtract"},
 };
 
 static const std::set<std::string> FUNCTION_NEED_KEEP_ARGUMENTS = {"alias"};
@@ -229,6 +234,18 @@ private:
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
         bool keep_result = false);
+    void parseFunctionArguments(
+        DB::ActionsDAGPtr & actions_dag,
+        ActionsDAG::NodeRawConstPtrs & parsed_args,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::Expression_ScalarFunction & scalar_function);
+    void parseFunctionArgument(
+        DB::ActionsDAGPtr & actions_dag,
+        ActionsDAG::NodeRawConstPtrs & parsed_args,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::FunctionArgument & arg);
     void addPreProjectStepIfNeeded(
         QueryPlan & plan,
         const substrait::AggregateRel & rel,
@@ -276,6 +293,8 @@ private:
     }
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
+
+    std::pair<DB::DataTypePtr, DB::Field> convertStructFieldType(const DB::DataTypePtr & type, const DB::Field & field);
 
     int name_no = 0;
     std::unordered_map<std::string, std::string> function_mapping;
