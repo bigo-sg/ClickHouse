@@ -1,13 +1,14 @@
 #pragma once
-#include <Core/Block.h>
-#include <Processors/Chunk.h>
-#include <DataTypes/Serializations/ISerialization.h>
-#include <base/types.h>
-#include <Storages/IStorage.h>
-#include <Core/NamesAndTypes.h>
-#include <Columns/IColumn.h>
-#include <Core/ColumnWithTypeAndName.h>
 #include <filesystem>
+#include <Columns/IColumn.h>
+#include <Core/Block.h>
+#include <Core/ColumnWithTypeAndName.h>
+#include <Core/NamesAndTypes.h>
+#include <DataTypes/Serializations/ISerialization.h>
+#include <Interpreters/ActionsDAG.h>
+#include <Processors/Chunk.h>
+#include <Storages/IStorage.h>
+#include <base/types.h>
 namespace local_engine
 {
 
@@ -62,6 +63,16 @@ public:
     using Path = std::filesystem::path;
     static std::vector<Path> getAllMergeTreeParts(const Path & storage_path);
     static DB::NamesAndTypesList getSchemaFromMergeTreePart(const Path & part_path);
+};
+
+class ActionsDAGUtil
+{
+public:
+    static const DB::ActionsDAG::Node * convertNodeType(
+        DB::ActionsDAGPtr & actions_dag,
+        const DB::ActionsDAG::Node * node,
+        const std::string & type_name,
+        const std::string & result_name = "");
 };
 
 }

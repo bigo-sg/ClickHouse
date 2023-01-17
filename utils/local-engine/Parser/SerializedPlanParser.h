@@ -154,13 +154,18 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"array", "array"},
     {"size", "length"},
     {"get_array_item", "arrayElement"},
+    {"element_at", "arrayElement"},
+    {"array_contains", "has"},
 
     // map functions
     {"map", "map"},
     {"get_map_value", "arrayElement"},
+    {"map_keys", "mapKeys"},
+    {"map_values", "mapValues"},
 
     // tuple functions
     {"get_struct_field", "tupleElement"},
+    {"named_struct", "tuple"},
 
     // table-valued generator function
     {"explode", "arrayJoin"},
@@ -248,6 +253,11 @@ private:
     void parseFunctionArgument(
         DB::ActionsDAGPtr & actions_dag,
         ActionsDAG::NodeRawConstPtrs & parsed_args,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::FunctionArgument & arg);
+    const DB::ActionsDAG::Node * parseFunctionArgument(
+        DB::ActionsDAGPtr & actions_dag,
         std::vector<String> & required_columns,
         const std::string & function_name,
         const substrait::FunctionArgument & arg);

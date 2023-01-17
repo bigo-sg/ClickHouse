@@ -51,6 +51,8 @@
 #include <google/protobuf/wrappers.pb.h>
 #include <Poco/StringTokenizer.h>
 #include <Poco/Util/MapConfiguration.h>
+#include "Common/Exception.h"
+#include <Common/typeid_cast.h>
 #include <Common/DebugUtils.h>
 #include <Common/JoinHelper.h>
 #include <Common/MergeTreeTool.h>
@@ -65,8 +67,13 @@
 #include <sys/select.h>
 #include <Common/CHUtil.h>
 #include <Core/Types.h>
+#include <Core/ColumnWithTypeAndName.h>
+#include <Functions/FunctionsConversion.h>
+#include <DataTypes/DataTypeNullable.h>
+#include "Parsers/ExpressionListParsers.h"
 #include "SerializedPlanParser.h"
 #include <Parser/RelParser.h>
+#include <Functions/CastOverloadResolver.h>
 
 namespace DB
 {
@@ -1264,23 +1271,11 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         result_node = function_node;
         if (!isTypeMatched(rel.scalar_function().output_type(), function_node->result_type))
         {
-            auto cast_function = getCastFunction(rel.scalar_function().output_type());
-            DB::ActionsDAG::NodeRawConstPtrs cast_args({function_node});
-
-            if (cast_function.starts_with("toDecimal"))
-            {
-                auto type = std::make_shared<DataTypeUInt32>();
-                UInt32 scale = rel.scalar_function().output_type().decimal().scale();
-                cast_args.emplace_back(&actions_dag->addColumn(
-                    ColumnWithTypeAndName(type->createColumnConst(1, scale), type, getUniqueName(toString(scale)))));
-            }
-
-            auto cast = FunctionFactory::instance().get(cast_function, context);
-            std::string cast_args_name;
-            join(cast_args, ',', cast_args_name);
-            result_name = cast_function + "(" + cast_args_name + ")";
-            const auto * cast_node = &actions_dag->addFunction(cast, cast_args, result_name);
-            result_node = cast_node;
+            result_node = ActionsDAGUtil::convertNodeType(
+                actions_dag,
+                function_node,
+                SerializedPlanParser::parseType(rel.scalar_function().output_type())->getName(),
+                function_node->result_name);
         }
         if (keep_result)
             actions_dag->addOrReplaceInIndex(*result_node);
@@ -1300,7 +1295,7 @@ void SerializedPlanParser::parseFunctionArguments(
         return &actions_dag->addColumn(ColumnWithTypeAndName(type->createColumnConst(1, field), type, getUniqueName(toString(field))));
     };
     const auto & args = scalar_function.arguments();
-    // Some functions need to be handle specially.
+    // Some functions need to be handled specially.
     if (function_name == "JSONExtract")
     {
         parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
@@ -1309,18 +1304,68 @@ void SerializedPlanParser::parseFunctionArguments(
     }
     else if (function_name == "tupleElement")
     {
-        // tupleElement requires the second argument to be uintxx, but subtrait only supports signed
-        // interger.
+        // tupleElement. the field index must be unsigned integer in CH, cast the signed integer in substrait
+        // which must be a positive value into unsigned integer here.
         parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
-        const auto & ordinal_arg = args[1].value();
-        if (!ordinal_arg.has_literal())
+
+        // tuple indecies start from 1, in spark, start from 0
+        if (!args[1].value().has_literal())
         {
-            throw DB::Exception(
-                DB::ErrorCodes::BAD_ARGUMENTS, "Second argument should be a integer literal, but got {}", ordinal_arg.ShortDebugString());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "get_struct_field's second argument must be a literal");
         }
-        auto [type, field] = parseLiteral(ordinal_arg.literal());
-        std::tie(type, field) = convertStructFieldType(type, field);
-        parsed_args.emplace_back(add_column(type, field));
+        auto [data_type, field] = parseLiteral(args[1].value().literal());
+        if (data_type->getTypeId() != DB::TypeIndex::Int32)
+        {
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "get_struct_field's second argument must be i32");
+        }
+        UInt32 field_index = field.get<Int32>() + 1;
+        const auto * index_node = add_column(std::make_shared<DB::DataTypeUInt32>(), field_index);
+        parsed_args.emplace_back(index_node);
+    }
+    else if (function_name == "tuple")
+    {
+        // Arguments in the format, (<field name>, <value expression>[, <field name>, <value expression> ...])
+        // We don't need to care the field names here.
+        for (int index = 1; index < args.size();  index += 2)
+        {
+            parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[index]);
+        }
+    }
+    else if (function_name == "has")
+    {
+        // since FunctionArrayIndex::useDefaultImplementationForNulls = false, we need to unwrap the
+        // nullable
+        const ActionsDAG::Node * arg_node = parseFunctionArgument(actions_dag, required_columns, function_name, args[0]);
+        if (arg_node->result_type->isNullable())
+        {
+            auto nested_type = typeid_cast<const DB::DataTypeNullable *>(arg_node->result_type.get())->getNestedType();
+            arg_node = ActionsDAGUtil::convertNodeType(actions_dag, arg_node, nested_type->getName());
+        }
+        parsed_args.emplace_back(arg_node);
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[1]);
+    }
+    else if (function_name == "arrayElement")
+    {
+        // arrayElement. in spark, the array element index must a be positive value. But in CH, a array element index
+        // could be positive or negative and have different effects. So we make a cast here.
+        // In clickhosue, map element are also accessed by arrayElement, not make the cast.
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
+        auto element_type = actions_dag->getNodes().back().result_type;
+        const auto * nested_type = element_type.get();
+        if (nested_type->isNullable())
+        {
+            nested_type = typeid_cast<const DB::DataTypeNullable *>(nested_type)->getNestedType().get();
+        }
+        const auto * index_node = parseFunctionArgument(actions_dag, required_columns, function_name, args[1]);
+        if (nested_type->getTypeId() == DB::TypeIndex::Array)
+        {
+            DB::DataTypeNullable target_type(std::make_shared<DB::DataTypeUInt32>());
+            index_node = ActionsDAGUtil::convertNodeType(actions_dag, index_node, target_type.getName());
+            parsed_args.emplace_back(index_node);
+        }
+        else
+            parsed_args.push_back(index_node);
+
     }
     else
     {
@@ -1339,17 +1384,28 @@ void SerializedPlanParser::parseFunctionArgument(
     const std::string & function_name,
     const substrait::FunctionArgument & arg)
 {
+    parsed_args.emplace_back(parseFunctionArgument(actions_dag, required_columns, function_name, arg));
+}
+
+const DB::ActionsDAG::Node * SerializedPlanParser::parseFunctionArgument(
+    DB::ActionsDAGPtr & actions_dag,
+    std::vector<String> & required_columns,
+    const std::string & function_name,
+    const substrait::FunctionArgument & arg)
+{
+    const DB::ActionsDAG::Node * res;
     if (arg.value().has_scalar_function())
     {
         std::string arg_name;
         bool keep_arg = FUNCTION_NEED_KEEP_ARGUMENTS.contains(function_name);
         parseFunctionWithDAG(arg.value(), arg_name, required_columns, actions_dag, keep_arg);
-        parsed_args.emplace_back(&actions_dag->getNodes().back());
+        res = &actions_dag->getNodes().back();
     }
     else
     {
-        parsed_args.emplace_back(parseArgument(actions_dag, arg.value()));
+        res = parseArgument(actions_dag, arg.value());
     }
+    return res;
 }
 
 // Convert signed integer index into unsigned integer index
