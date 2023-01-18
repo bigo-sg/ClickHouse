@@ -808,14 +808,87 @@ ColumnPtr ColumnVector<T>::replicate(const IColumn::Offsets & offsets) const
 
     auto res = this->create(offsets.back());
 
+/*
 #ifdef __SSE2__
-    if constexpr (std::is_same_v<T, UInt32>)
+    if constexpr (std::is_same_v<T, UInt32> || std::is_same_v<T, Int32>)
     {
         replicateSSE42Int32(getData().data(), res->getData().data(), offsets);
-        return res;
+        return std::move(res);
     }
 #endif
+*/
 
+#ifdef __SSE2__
+    auto & dst_data = res->getData();
+    IColumn::Offset prev_offset = 0;
+    constexpr size_t elem_bytes = sizeof(T);
+
+    /*
+    /// For [U]Int128/[U]Int256
+    if constexpr (elem_size > 8)
+    {
+        for (size_t row_i = 0; row_i < offsets.size(); ++row_i)
+        {
+            auto copy_size = offsets[row_i] - prev_offset;
+            T src = data[row_i];
+            for (size_t i=0; i<copy_size; ++i)
+                dst_data[prev_offset + i] = src;
+
+            prev_offset = offsets[row_i];
+        }
+        return std::move(res);
+    }
+    */
+
+    constexpr size_t batch_size = 16 / elem_bytes;
+    for (size_t row_i = 0; row_i < offsets.size(); ++row_i)
+    {
+        auto copy_size = offsets[row_i] - prev_offset;
+        // auto remainder = copy_size % batch_size;
+        T src = data[row_i];
+
+        size_t pos = 0;
+        for (; pos + batch_size - 1 < copy_size; pos += batch_size)
+        {
+            if constexpr (std::is_same_v<T, UInt8> || std::is_same_v<T, Int8>)
+            {
+                __m128i batch_src = _mm_set1_epi8(src);
+                _mm_storeu_si128(reinterpret_cast<__m128i *>(&dst_data[prev_offset + pos]), batch_src);
+            }
+            else if constexpr (std::is_same_v<T, UInt16> || std::is_same_v<T, Int16>)
+            {
+                __m128i batch_src = _mm_set1_epi16(src);
+                _mm_storeu_si128(reinterpret_cast<__m128i *>(&dst_data[prev_offset + pos]), batch_src);
+            }
+            else if constexpr (std::is_same_v<T, UInt32> || std::is_same_v<T, Int32>)
+            {
+                __m128i batch_src = _mm_set1_epi32(src);
+                _mm_storeu_si128(reinterpret_cast<__m128i *>(&dst_data[prev_offset + pos]), batch_src);
+            }
+            else if constexpr (std::is_same_v<T, UInt64> || std::is_same_v<T, Int64>)
+            {
+                __m128i batch_src = _mm_set1_epi64x(src);
+                _mm_storeu_si128(reinterpret_cast<__m128i *>(&dst_data[prev_offset + pos]), batch_src);
+            }
+            /*
+            else
+            {
+                for (size_t i = 0; i < batch_size; ++i)
+                    dst_data[prev_offset + pos + i] = src;
+            }
+            */
+        }
+
+        for (; pos < copy_size; ++pos)
+            dst_data[prev_offset + pos] = src;
+
+        prev_offset = offsets[row_i];
+    }
+    return std::move(res);
+#endif
+
+
+    /*
     auto it = res->getData().begin(); // NOLINT
     for (size_t i = 0; i < size; ++i)
     {
@@ -823,8 +896,9 @@ ColumnPtr ColumnVector<T>::replicate(const IColumn::Offsets & offsets) const
         for (; it != span_end; ++it)
             *it = data[i];
     }
+    */
 
-    return res;
+    return std::move(res);
 }
 
 template <typename T>

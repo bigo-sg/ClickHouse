@@ -1,0 +1,2 @@
+clickhouse_add_executable (column_vector_replicate_perf column_vector_replicate_perf.cpp)
+target_link_libraries (column_vector_replicate_perf PRIVATE clickhouse_common_io dbms)
