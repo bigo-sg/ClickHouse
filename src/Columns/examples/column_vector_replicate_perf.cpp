@@ -18,7 +18,7 @@ static MutableColumnPtr createColumn(size_t n)
     for (size_t i = 0; i < n; ++i)
         values.push_back(static_cast<T>(i));
 
-    return column;
+    return std::move(column);
 }
 
 static IColumn::Offsets createOffsets(size_t n)
@@ -27,7 +27,7 @@ static IColumn::Offsets createOffsets(size_t n)
     IColumn::Offset prev_offset = 0;
     for (size_t i = 0; i < n; ++i)
     {
-        res[i] = prev_offset + (std::rand() % 128);
+        res[i] = prev_offset + (std::rand() % 128 + 10);
         prev_offset = res[i];
     }
     return res;
@@ -38,10 +38,16 @@ static void testSingleType(const String & msg, const IColumn::Offsets & offsets)
 {
     auto column = createColumn<T>(1000000);
 
-    Stopwatch watch;
-    auto output = column->replicate(offsets);
-    watch.stop();
-    std::cerr << msg << " cost " << watch.elapsedMilliseconds() << " ms, output size:" << output->size() << std::endl;
+    double sum = 0.0;
+    for (size_t i=0; i<10; i++)
+    {
+        Stopwatch watch;
+        auto output = column->replicate(offsets);
+        watch.stop();
+
+        sum += watch.elapsedMilliseconds();
+    }
+    std::cerr << msg << " cost " << sum / 10 << " ms" << std::endl;
 }
 
 static void testAllTypes()

@@ -823,22 +823,20 @@ ColumnPtr ColumnVector<T>::replicate(const IColumn::Offsets & offsets) const
     IColumn::Offset prev_offset = 0;
     constexpr size_t elem_bytes = sizeof(T);
 
-    /*
     /// For [U]Int128/[U]Int256
-    if constexpr (elem_size > 8)
-    {
-        for (size_t row_i = 0; row_i < offsets.size(); ++row_i)
-        {
-            auto copy_size = offsets[row_i] - prev_offset;
-            T src = data[row_i];
-            for (size_t i=0; i<copy_size; ++i)
-                dst_data[prev_offset + i] = src;
+    // if constexpr (elem_size > 8)
+    // {
+    //     for (size_t row_i = 0; row_i < offsets.size(); ++row_i)
+    //     {
+    //         auto copy_size = offsets[row_i] - prev_offset;
+    //         T src = data[row_i];
+    //         for (size_t i=0; i<copy_size; ++i)
+    //             dst_data[prev_offset + i] = src;
 
-            prev_offset = offsets[row_i];
-        }
-        return std::move(res);
-    }
-    */
+    //         prev_offset = offsets[row_i];
+    //     }
+    //     return std::move(res);
+    // }
 
     constexpr size_t batch_size = 16 / elem_bytes;
     for (size_t row_i = 0; row_i < offsets.size(); ++row_i)
@@ -870,13 +868,11 @@ ColumnPtr ColumnVector<T>::replicate(const IColumn::Offsets & offsets) const
                 __m128i batch_src = _mm_set1_epi64x(src);
                 _mm_storeu_si128(reinterpret_cast<__m128i *>(&dst_data[prev_offset + pos]), batch_src);
             }
-            /*
-            else
-            {
-                for (size_t i = 0; i < batch_size; ++i)
-                    dst_data[prev_offset + pos + i] = src;
-            }
-            */
+            // else
+            // {
+            //     for (size_t i = 0; i < batch_size; ++i)
+            //         dst_data[prev_offset + pos + i] = src;
+            // }
         }
 
         for (; pos < copy_size; ++pos)
