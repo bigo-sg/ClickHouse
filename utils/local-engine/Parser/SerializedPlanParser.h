@@ -124,6 +124,10 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"base64", "base64Encode"},
     {"unbase64","base64Decode"},
 
+    /// hash functions
+    {"hash", "murmurHashSpark3_32"},
+    {"xxhash64", "xxHashSpark64"},
+
     // in functions
     {"in", "in"},
 

@@ -18,7 +18,8 @@ add_headers_and_sources(external External)
 add_headers_and_sources(shuffle Shuffle)
 add_headers_and_sources(operator Operator)
 add_headers_and_sources(jni jni)
-add_headers_and_sources(aggregate AggregateFunctions)
+add_headers_and_sources(aggregate_functions AggregateFunctions)
+add_headers_and_sources(functions Functions)
 
 include_directories(
         ${JNI_INCLUDE_DIRS}
@@ -45,7 +46,8 @@ add_library(${LOCALENGINE_SHARED_LIB} SHARED
         ${jni_sources}
         ${substrait_source}
         ${operator_sources}
-        ${aggregate_sources}
+        ${aggregate_functions_sources}
+        ${functions_sources}
         local_engine_jni.cpp)
 
 
@@ -62,6 +64,7 @@ target_link_libraries(${LOCALENGINE_SHARED_LIB} PUBLIC
         loggers
         ch_parquet
         substait_source
+        ch_contrib::lz4
 )
 
 # if (USE_LIBCXX)
