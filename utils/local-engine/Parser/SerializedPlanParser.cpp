@@ -15,6 +15,7 @@
 #include <DataTypes/DataTypeDateTime64.h>
 #include <DataTypes/DataTypeSet.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypeFixedString.h>
 #include <DataTypes/DataTypesDecimal.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeDateTime64.h>
@@ -538,6 +539,18 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         ch_type = std::make_shared<DataTypeString>();
         ch_type = wrapNullableType(substrait_type.binary().nullability(), ch_type);
     }
+    else if (substrait_type.has_fixed_char())
+    {
+        const auto & fixed_char = substrait_type.fixed_char();
+        ch_type = std::make_shared<DataTypeFixedString>(fixed_char.length());
+        ch_type = wrapNullableType(fixed_char.nullability(), ch_type);
+    }
+    else if (substrait_type.has_fixed_binary())
+    {
+        const auto & fixed_binary = substrait_type.fixed_binary();
+        ch_type = std::make_shared<DataTypeFixedString>(fixed_binary.length());
+        ch_type = wrapNullableType(fixed_binary.nullability(), ch_type);
+    }
     else if (substrait_type.has_fp32())
     {
         ch_type = std::make_shared<DataTypeFloat32>();
@@ -610,7 +623,7 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support type {}", substrait_type.DebugString());
 
-    /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/FixedChar/VarChar/FixedBinary/UserDefined
+    /// TODO(taiyang-li): consider Time/IntervalYear/IntervalDay/TimestampTZ/UUID/VarChar/FixedBinary/UserDefined
     return std::move(ch_type);
 }
 
@@ -1462,7 +1475,9 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
 
             std::string ch_function_name = getCastFunction(rel.cast().type());
             DB::ActionsDAG::NodeRawConstPtrs args;
-            auto cast_input = rel.cast().input();
+            const auto & cast_input = rel.cast().input();
+            args.emplace_back(parseArgument(action_dag, cast_input));
+            /*
             if (cast_input.has_selection() || cast_input.has_literal())
             {
                 args.emplace_back(parseArgument(action_dag, rel.cast().input()));
@@ -1480,6 +1495,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             }
             else
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported cast input {}", rel.cast().input().DebugString());
+            */
 
             if (ch_function_name.starts_with("toDecimal"))
             {
