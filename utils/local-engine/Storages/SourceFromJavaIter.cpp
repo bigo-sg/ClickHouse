@@ -10,6 +10,9 @@
 #include <DataTypes/DataTypesNumber.h>
 #include <Common/CHUtil.h>
 
+#include <Poco/Logger.h>
+#include <base/logger_useful.h>
+
 namespace local_engine
 {
 jclass SourceFromJavaIter::serialized_record_batch_iterator_class = nullptr;

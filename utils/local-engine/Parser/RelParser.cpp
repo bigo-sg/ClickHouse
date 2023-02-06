@@ -122,10 +122,12 @@ RelParserFactory::RelParserBuilder RelParserFactory::getBuilder(DB::UInt32 k)
 
 void registerWindowRelParser(RelParserFactory & factory);
 void registerSortRelParser(RelParserFactory & factory);
+void registerExpandRelParser(RelParserFactory & factory);
 void initRelParserFactory()
 {
     auto & factory = RelParserFactory::instance();
     registerWindowRelParser(factory);
     registerSortRelParser(factory);
+    registerExpandRelParser(factory);
 }
 }
