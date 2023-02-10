@@ -48,6 +48,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"quarter", "toQuarter"},
     {"to_unix_timestamp", "toUnixTimestamp"},
     {"unix_timestamp", "toUnixTimestamp"},
+    {"date_format", "formatDateTimeInJodaSyntax"},
 
     /// arithmetic functions
     {"subtract", "minus"},
