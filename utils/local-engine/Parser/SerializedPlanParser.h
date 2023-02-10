@@ -128,6 +128,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"reverse","reverseUTF8"},
     // {"hash","murmurHash3_32"},
     {"md5","MD5"},
+    {"translate", "translateUTF8"},
 
     // in functions
     {"in", "in"},
@@ -149,6 +150,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"date_sub", "subtractDays"},
     {"datediff", "dateDiff"},
     {"second", "toSecond"},
+    {"add_months", "addMonths"},
 
     // array functions
     {"array", "array"},
