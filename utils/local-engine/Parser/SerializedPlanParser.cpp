@@ -1125,7 +1125,7 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
     else if (function_name == "extract")
     {
         if (args.size() != 2)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "extract function requires two args, function:{}", function.ShortDebugString());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Function extract requires two args, function:{}", function.ShortDebugString());
 
         // Get the first arg: field
         const auto & extract_field = args.at(0);
@@ -1168,6 +1168,27 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
         }
         else
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "The first arg of extract function is wrong.");
+    }
+    else if (function_name == "trunc")
+    {
+        if (args.size() != 2)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Function trunc requires two args, function:{}", function.ShortDebugString());
+
+        const auto & trunc_field = args.at(0);
+        if (!trunc_field.value().has_literal() || !trunc_field.value().literal().has_string())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "The second arg of trunc function is wrong.");
+
+        const auto & field_value = trunc_field.value().literal().string();
+        if (field_value == "YEAR" || field_value == "YYYY" || field_value == "YY")
+            ch_function_name = "toStartOfYear";
+        else if (field_value == "QUARTER")
+            ch_function_name = "toStartOfQuarter";
+        else if (field_value == "MONTH" || field_value == "MM" || field_value == "MON")
+            ch_function_name = "toStartOfMonth";
+        else if (field_value == "WEEK")
+            ch_function_name = "toStartOfWeek";
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "The second arg of trunc function is wrong, value:{}", field_value);
     }
     else if (function_name == "check_overflow")
     {
@@ -1230,10 +1251,15 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
             }
         }
 
-        if (function_signature.find("extract:", 0) != function_signature.npos)
+        if (startsWith(function_signature, "extract:"))
         {
-            // delete the first arg
+            // delete the first arg of extract
             args.erase(args.begin());
+        }
+        else if (startsWith(function_signature, "trunc:"))
+        {
+            // delete the second arg of trunc
+            args.pop_back();
         }
 
         if (function_signature.find("check_overflow:", 0) != function_signature.npos)
