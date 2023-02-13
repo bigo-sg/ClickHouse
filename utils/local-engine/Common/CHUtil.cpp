@@ -12,11 +12,14 @@
 #include <Core/NamesAndTypes.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/IDataType.h>
 #include <DataTypes/NestedUtils.h>
 #include <DataTypes/Serializations/ISerialization.h>
+#include <Functions/CastOverloadResolver.h>
+#include <Functions/FunctionsConversion.h>
 #include <IO/ReadBufferFromFile.h>
 #include <Interpreters/castColumn.h>
 #include <Processors/Chunk.h>
@@ -347,5 +350,22 @@ const DB::ColumnWithTypeAndName * NestedColumnExtractHelper::findColumn(const DB
     if (col)
         return col;
     return nullptr;
+}
+
+const DB::ActionsDAG::Node * ActionsDAGUtil::convertNodeType(
+    DB::ActionsDAGPtr & actions_dag, const DB::ActionsDAG::Node * node, const std::string & type_name, const std::string & result_name)
+{
+    DB::ColumnWithTypeAndName type_name_col;
+    type_name_col.name = type_name;
+    type_name_col.column = DB::DataTypeString().createColumnConst(0, type_name_col.name);
+    type_name_col.type = std::make_shared<DB::DataTypeString>();
+    const auto * right_arg = &actions_dag->addColumn(std::move(type_name_col));
+    const auto * left_arg = node;
+    DB::FunctionCastBase::Diagnostic diagnostic = {node->result_name, node->result_name};
+    DB::FunctionOverloadResolverPtr func_builder_cast
+        = DB::CastInternalOverloadResolver<DB::CastType::nonAccurate>::createImpl(std::move(diagnostic));
+
+    DB::ActionsDAG::NodeRawConstPtrs children = {left_arg, right_arg};
+    return &actions_dag->addFunction(func_builder_cast, std::move(children), result_name);
 }
 }

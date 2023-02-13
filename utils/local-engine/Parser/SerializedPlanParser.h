@@ -123,6 +123,11 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"concat_ws", "concat_ws"},
     {"base64", "base64Encode"},
     {"unbase64","base64Decode"},
+    {"lpad","leftPadUTF8"},
+    {"rpad","rightPadUTF8"},
+    {"reverse","reverseUTF8"},
+    // {"hash","murmurHash3_32"},
+    {"md5","MD5"},
 
     /// hash functions
     {"hash", "murmurHashSpark3_32"},
@@ -153,16 +158,26 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"array", "array"},
     {"size", "length"},
     {"get_array_item", "arrayElement"},
+    {"element_at", "arrayElement"},
+    {"array_contains", "has"},
 
     // map functions
     {"map", "map"},
     {"get_map_value", "arrayElement"},
+    {"map_keys", "mapKeys"},
+    {"map_values", "mapValues"},
 
     // tuple functions
     {"get_struct_field", "tupleElement"},
+    {"named_struct", "tuple"},
 
     // table-valued generator function
     {"explode", "arrayJoin"},
+
+    // json functions
+    {"get_json_object", "JSON_VALUE"},
+    {"to_json", "toJSONString"},
+    {"from_json", "JSONExtract"},
 };
 
 static const std::set<std::string> FUNCTION_NEED_KEEP_ARGUMENTS = {"alias"};
@@ -233,6 +248,23 @@ private:
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
         bool keep_result = false);
+    void parseFunctionArguments(
+        DB::ActionsDAGPtr & actions_dag,
+        ActionsDAG::NodeRawConstPtrs & parsed_args,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::Expression_ScalarFunction & scalar_function);
+    void parseFunctionArgument(
+        DB::ActionsDAGPtr & actions_dag,
+        ActionsDAG::NodeRawConstPtrs & parsed_args,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::FunctionArgument & arg);
+    const DB::ActionsDAG::Node * parseFunctionArgument(
+        DB::ActionsDAGPtr & actions_dag,
+        std::vector<String> & required_columns,
+        const std::string & function_name,
+        const substrait::FunctionArgument & arg);
     void addPreProjectStepIfNeeded(
         QueryPlan & plan,
         const substrait::AggregateRel & rel,
@@ -280,6 +312,8 @@ private:
     }
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
+
+    std::pair<DB::DataTypePtr, DB::Field> convertStructFieldType(const DB::DataTypePtr & type, const DB::Field & field);
 
     int name_no = 0;
     std::unordered_map<std::string, std::string> function_mapping;
