@@ -39,7 +39,10 @@ protected:
     std::optional<String> parseFunctionName(UInt32 function_ref);
     static DB::DataTypes parseFunctionArgumentTypes(const Block & header, const google::protobuf::RepeatedPtrField<substrait::FunctionArgument> & func_args);
     static DB::Names parseFunctionArgumentNames(const Block & header, const google::protobuf::RepeatedPtrField<substrait::FunctionArgument> & func_args);
-
+    const DB::ActionsDAG::Node * parseArgument(ActionsDAGPtr action_dag, const substrait::Expression & rel)
+    {
+        return plan_parser->parseArgument(action_dag, rel);
+    }
 private:
     SerializedPlanParser * plan_parser;
 };

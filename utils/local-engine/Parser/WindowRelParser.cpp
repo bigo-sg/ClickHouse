@@ -36,10 +36,8 @@ DB::QueryPlanPtr
 WindowRelParser::parse(DB::QueryPlanPtr current_plan_, const substrait::Rel & rel, std::list<const substrait::Rel *> & /*rel_stack_*/)
 {
     // rel_stack = rel_stack_;
-    current_plan = std::move(current_plan_);
     const auto & win_rel_pb = rel.window();
-    auto window_descriptions = parseWindowDescriptions(win_rel_pb);
-
+    current_plan = std::move(current_plan_);
     auto expected_header = current_plan->getCurrentDataStream().header;
     for (const auto & measure : win_rel_pb.measures())
     {
@@ -50,6 +48,10 @@ WindowRelParser::parse(DB::QueryPlanPtr current_plan_, const substrait::Rel & re
         named_col.column = named_col.type->createColumn();
         expected_header.insert(named_col);
     }
+    tryAddProjectionBeforeWindow(*current_plan, win_rel_pb);
+
+    auto window_descriptions = parseWindowDescriptions(win_rel_pb);
+
     /// In spark plan, there is already a sort step before each window, so we don't need to add sort steps here.
     for (auto & it : window_descriptions)
     {
@@ -105,7 +107,7 @@ std::unordered_map<DB::String, WindowDescription> WindowRelParser::parseWindowDe
             description = &win_it->second;
         }
 
-        auto win_func = parseWindowFunctionDescription(win_rel, win_func_pb);
+        auto win_func = parseWindowFunctionDescription(win_rel, win_func_pb, measures_arg_names[i]);
         description->window_functions.emplace_back(win_func);
     }
     return window_descriptions;
@@ -227,7 +229,7 @@ DB::SortDescription WindowRelParser::parsePartitionBy(const google::protobuf::Re
 }
 
 WindowFunctionDescription WindowRelParser::parseWindowFunctionDescription(
-    const substrait::WindowRel & win_rel, const substrait::Expression::WindowFunction & window_function)
+    const substrait::WindowRel & win_rel, const substrait::Expression::WindowFunction & window_function, const DB::Names & arg_names)
 {
     auto header = current_plan->getCurrentDataStream().header;
     WindowFunctionDescription description;
@@ -239,7 +241,6 @@ WindowFunctionDescription WindowRelParser::parseWindowFunctionDescription(
         throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Not found function for reference: {}", window_function.function_reference());
     DB::AggregateFunctionProperties agg_function_props;
     auto arg_types = parseFunctionArgumentTypes(header, window_function.arguments());
-    auto arg_names = parseFunctionArgumentNames(header, window_function.arguments());
     auto agg_function_ptr = getAggregateFunction(*function_name, arg_types, agg_function_props);
 
     description.argument_names = arg_names;
@@ -305,6 +306,48 @@ String WindowRelParser::getWindowFunctionColumnName(const substrait::WindowRel &
         ss << order_by_str;
     }
     return ss.str();
+}
+
+void WindowRelParser::tryAddProjectionBeforeWindow(
+    QueryPlan & plan, const substrait::WindowRel & win_rel)
+{
+    auto header = plan.getCurrentDataStream().header;
+    ActionsDAGPtr actions_dag = std::make_shared<ActionsDAG>(header.getColumnsWithTypeAndName());
+    bool need_project = false;
+    for (const auto & measure : win_rel.measures())
+    {
+        DB::Names names;
+        for (int i = 0, n = measure.measure().arguments().size(); i < n; ++i)
+        {
+            const auto & arg = measure.measure().arguments(i).value();
+            if (arg.has_selection())
+            {
+                auto name = header.getByPosition(arg.selection().direct_reference().struct_field().field()).name;
+                names.push_back(name);
+            }
+            else if (arg.has_literal())
+            {
+                // for example, sum(2) over(...), we need to add new const column for 2, otherwise
+                // an exception of not found column(2) will throw.
+                const auto * node = parseArgument(actions_dag, arg);
+                names.push_back(node->result_name);
+                actions_dag->addOrReplaceInIndex(*node);
+                need_project = true;
+            }
+            else
+            {
+                // There should be a projections ahead to eliminate complex expressions.
+                throw Exception(ErrorCodes::UNKNOWN_TYPE, "unsupported aggregate argument type {}.", arg.DebugString());
+            }
+        }
+        measures_arg_names.emplace_back(std::move(names));
+    }
+    if (need_project)
+    {
+        auto project_step = std::make_unique<ExpressionStep>(plan.getCurrentDataStream(), actions_dag);
+        project_step->setStepDescription("Add projections before aggregation");
+        plan.addStep(std::move(project_step));
+    }
 }
 
 void registerWindowRelParser(RelParserFactory & factory)

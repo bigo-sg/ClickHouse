@@ -19,6 +19,8 @@ private:
     DB::QueryPlanPtr current_plan;
     // std::list<const substrait::Rel *> * rel_stack;
     Poco::Logger * logger = &Poco::Logger::get("WindowRelParser");
+    // for constructing aggregate function argument names
+    std::vector<DB::Names> measures_arg_names;
 
     /// There will be window descrptions generated for different window frame type;
     std::unordered_map<DB::String, WindowDescription> parseWindowDescriptions(const substrait::WindowRel & win_rel);
@@ -31,10 +33,12 @@ private:
         Field & offset,
         bool & preceding);
     DB::SortDescription parsePartitionBy(const google::protobuf::RepeatedPtrField<substrait::Expression> & expressions);
-    DB::WindowFunctionDescription parseWindowFunctionDescription(const substrait::WindowRel & win_rel, const substrait::Expression::WindowFunction & window_function);
+    DB::WindowFunctionDescription parseWindowFunctionDescription(
+        const substrait::WindowRel & win_rel, const substrait::Expression::WindowFunction & window_function, const DB::Names & arg_names);
 
     String getWindowName(const substrait::WindowRel & win_rel, const substrait::Expression::WindowFunction & window_function);
     static String getWindowFunctionColumnName(const substrait::WindowRel & win_rel);
+    void tryAddProjectionBeforeWindow(QueryPlan & plan, const substrait::WindowRel & win_rel);
 };
 
 
