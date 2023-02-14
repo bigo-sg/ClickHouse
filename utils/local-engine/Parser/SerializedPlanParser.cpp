@@ -475,9 +475,9 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
         Poco::StringTokenizer name_parts(name, "#");
         if (name_parts.count() == 4)
         {
-            auto agg_function_name = name_parts[3];
+            auto agg_function_name = getFunctionName(name_parts[3], {});
             AggregateFunctionProperties properties;
-            auto tmp = AggregateFunctionFactory::instance().get(name_parts[3], {data_type}, {}, properties);
+            auto tmp = AggregateFunctionFactory::instance().get(agg_function_name, {data_type}, {}, properties);
             data_type = tmp->getStateType();
         }
         internal_cols.push_back(ColumnWithTypeAndName(data_type, name));
@@ -784,6 +784,8 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
             const auto & aggregate = rel.aggregate();
             query_plan = parseOp(aggregate.input(), rel_stack);
             rel_stack.pop_back();
+
+            // std::cout << "before aggregate header:" << query_plan->getCurrentDataStream().header.dumpStructure() << std::endl;
             bool is_final;
             auto aggregate_step = parseAggregate(*query_plan, aggregate, is_final);
 
@@ -791,6 +793,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
 
             if (is_final)
             {
+                // std::cout << "aggregate rel:" << rel.DebugString() << std::endl;
                 std::vector<int32_t> measure_positions;
                 std::vector<substrait::Type> measure_types;
                 for (int i = 0; i < aggregate.measures_size(); i++)
@@ -802,6 +805,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                 }
                 auto source = query_plan->getCurrentDataStream().header.getColumnsWithTypeAndName();
                 auto target = source;
+                // std::cout << "aggregate header:" << query_plan->getCurrentDataStream().header.dumpStructure() << std::endl;
 
                 bool need_convert = false;
                 for (size_t i = 0; i < measure_positions.size(); i++)
@@ -812,6 +816,8 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                         target[measure_positions[i]].type = target_type;
                         target[measure_positions[i]].column = target_type->createColumn();
                         need_convert = true;
+                        // std::cout << "source type:" << source[measure_positions[i]].type->getName() << std::endl;
+                        // std::cout << "target type:" << target_type->getName() << std::endl;
                     }
                 }
 
@@ -1043,7 +1049,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
         auto function_signature = function_mapping.at(std::to_string(measure.measure().function_reference()));
         auto function_name_idx = function_signature.find(':');
         //        assert(function_name_idx != function_signature.npos && ("invalid function signature: " + function_signature).c_str());
-        auto function_name = function_signature.substr(0, function_name_idx);
+        auto function_name = getFunctionName(function_signature.substr(0, function_name_idx), {});
         if (measure.measure().phase() != substrait::AggregationPhase::AGGREGATION_PHASE_INITIAL_TO_INTERMEDIATE)
         {
             agg.column_name = measure_names.at(i);
@@ -1087,6 +1093,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
     {
         auto transform_params = std::make_shared<AggregatingTransformParams>(
             getMergedAggregateParam(plan.getCurrentDataStream().header, keys, aggregates), true);
+        // std::cout << "input header:" << plan.getCurrentDataStream().header.dumpStructure() << std::endl;
         return std::make_unique<MergingAggregatedStep>(plan.getCurrentDataStream(), transform_params, false, 1, 1);
     }
     else
