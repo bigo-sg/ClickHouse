@@ -7,6 +7,7 @@ include(FindJNI)
 
 #set(JNI_NATIVE_SOURCES local_engine_jni.cpp)
 set(LOCALENGINE_SHARED_LIB ch)
+set(ENABLE_MULTITARGET_CODE ON)
 
 add_subdirectory(proto)
 
