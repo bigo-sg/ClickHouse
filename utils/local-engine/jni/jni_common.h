@@ -7,14 +7,6 @@
 #include <Poco/Logger.h>
 #include <base/logger_useful.h>
 
-namespace DB
-{
-namespace ErrorCodes
-{
-    extern const int LOGICAL_ERROR;
-}
-}
-
 namespace local_engine
 {
 jclass CreateGlobalExceptionClassReference(JNIEnv *env, const char *class_name);
@@ -34,9 +26,8 @@ jbyteArray stringTojbyteArray(JNIEnv* env, const std::string & str);
     if ((env)->ExceptionCheck())\
     {\
         LOG_ERROR(&Poco::Logger::get("local_engine"), "Enter java exception handle.");\
-        (env)->ExceptionDescribe();\
-        (env)->ExceptionClear();\
-        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Call java method failed");\
+        auto throwable = (env)->ExceptionOccurred();\
+        (env)->Throw(throwable);\
     }
 
 template <typename ... Args>
