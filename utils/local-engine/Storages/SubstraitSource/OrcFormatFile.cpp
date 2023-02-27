@@ -10,7 +10,7 @@
 #include <arrow/adapters/orc/adapter.h>
 #include <arrow/type.h>
 #include <arrow/util/key_value_metadata.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <bits/types/FILE.h>
 #include <orc/Reader.hh>
 #include <Poco/Logger.h>
@@ -165,7 +165,7 @@ FormatFile::InputFormatPtr OrcFormatFile::createInputFormat(const DB::Block & he
     auto file_format = std::make_shared<FormatFile::InputFormat>();
     file_format->read_buffer = std::move(read_buffer);
     std::vector<StripeInformation> stripes;
-    if (auto * seekable_in = dynamic_cast<DB::SeekableReadBufferWithSize *>(file_format->read_buffer.get()))
+    if (auto * seekable_in = dynamic_cast<DB::SeekableReadBuffer *>(file_format->read_buffer.get()))
     {
         stripes = collectRequiredStripes(seekable_in);
         seekable_in->seek(0, SEEK_SET);
@@ -213,7 +213,7 @@ std::vector<StripeInformation> OrcFormatFile::collectRequiredStripes(DB::ReadBuf
     DB::FormatSettings format_settings;
     format_settings.seekable_read = true;
     std::atomic<int> is_stopped{0};
-    auto arrow_file = DB::asArrowFile(*read_buffer, format_settings, is_stopped);
+    auto arrow_file = DB::asArrowFile(*read_buffer, format_settings, is_stopped, "ORC", ORC_MAGIC_BYTES);
     auto orc_reader = OrcUtil::createOrcReader(arrow_file);
     auto num_stripes = orc_reader->getNumberOfStripes();
 

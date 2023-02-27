@@ -263,7 +263,7 @@ std::shared_ptr<substrait::Type> SerializedPlanBuilder::buildType(const DB::Data
         if (which.isDecimal256())
             throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());
 
-        const auto scale = getDecimalScale(*ch_type_without_nullable, 0);
+        const auto scale = getDecimalScale(*ch_type_without_nullable);
         const auto precision = getDecimalPrecision(*ch_type_without_nullable);
         if (scale == 0 && precision == 0)
             throw Exception(ErrorCodes::UNKNOWN_TYPE, "Spark doesn't support converting from {}", ch_type->getName());

@@ -14,12 +14,6 @@ namespace ErrorCodes
 }
 }
 
-namespace CurrentMemoryTracker
-{
-extern thread_local std::function<void(Int64, bool)> before_alloc;
-extern thread_local std::function<void(Int64)> before_free;
-}
-
 namespace local_engine
 {
 using namespace DB;

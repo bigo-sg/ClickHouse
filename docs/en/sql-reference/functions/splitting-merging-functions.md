@@ -1,9 +1,10 @@
 ---
-toc_priority: 47
-toc_title: Splitting and Merging Strings and Arrays
+slug: /en/sql-reference/functions/splitting-merging-functions
+sidebar_position: 47
+sidebar_label: Splitting and Merging Strings and Arrays
 ---
 
-# Functions for Splitting and Merging Strings and Arrays {#functions-for-splitting-and-merging-strings-and-arrays}
+# Functions for Splitting and Merging Strings and Arrays
 
 ## splitByChar(separator, s[, max_substrings])
 
@@ -220,7 +221,7 @@ SELECT splitByNonAlpha('  1!  a,  b.  ');
 └───────────────────────────────────┘
 ```
 
-## arrayStringConcat(arr\[, separator\]) {#arraystringconcatarr-separator}
+## arrayStringConcat(arr\[, separator\])
 
 Concatenates string representations of values listed in the array with the separator. `separator` is an optional parameter: a constant string, set to an empty string by default.
 Returns the string.
@@ -259,7 +260,7 @@ SELECT alphaTokens('abca1abc');
 └─────────────────────────┘
 ```
 
-## extractAllGroups(text, regexp) {#extractallgroups}
+## extractAllGroups(text, regexp)
 
 Extracts all groups from non-overlapping substrings matched by a regular expression.
 
@@ -298,7 +299,7 @@ Result:
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-## ngrams {#ngrams}
+## ngrams
 
 Splits the UTF-8 string into n-grams of `ngramsize` symbols.
 
@@ -335,7 +336,7 @@ Result:
 └───────────────────────────────────────────────────┘
 ```
 
-## tokens {#tokens}
+## tokens
 
 Splits a string into tokens using non-alphanumeric ASCII characters as separators.
 

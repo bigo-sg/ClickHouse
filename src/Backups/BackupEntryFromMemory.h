@@ -17,7 +17,19 @@ public:
 
     UInt64 getSize() const override { return data.size(); }
     std::optional<UInt128> getChecksum() const override { return checksum; }
-    std::unique_ptr<ReadBuffer> getReadBuffer() const override;
+    std::unique_ptr<SeekableReadBuffer> getReadBuffer() const override;
+
+    String getFilePath() const override
+    {
+        return "";
+    }
+
+    DataSourceDescription getDataSourceDescription() const override
+    {
+        return DataSourceDescription{DataSourceType::RAM, "", false, false};
+    }
+
+    DiskPtr tryGetDiskIfExists() const override { return nullptr; }
 
 private:
     const String data;

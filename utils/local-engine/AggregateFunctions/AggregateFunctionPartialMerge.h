@@ -35,7 +35,7 @@ private:
 
 public:
     AggregateFunctionPartialMerge(const AggregateFunctionPtr & nested_, const DataTypePtr & argument, const Array & params_)
-        : IAggregateFunctionHelper<AggregateFunctionPartialMerge>({argument}, params_)
+        : IAggregateFunctionHelper<AggregateFunctionPartialMerge>({argument}, params_, createResultType(nested_))
         , nested_func(nested_)
     {
         const DataTypeAggregateFunction * data_type = typeid_cast<const DataTypeAggregateFunction *>(argument.get());
@@ -47,12 +47,17 @@ public:
 
     String getName() const override
     {
-        return nested_func->getName() + "Merge";
+        return nested_func->getName() + "PartialMerge";
     }
 
-    DataTypePtr getReturnType() const override
+    static DataTypePtr createResultType(const AggregateFunctionPtr & nested_)
     {
-        return nested_func->getReturnType();
+        return nested_->getResultType();
+    }
+
+    const DataTypePtr & getResultType() const override
+    {
+        return nested_func->getResultType();
     }
 
     bool isVersioned() const override

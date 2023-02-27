@@ -1,19 +1,20 @@
 #pragma once
-#include <base/shared_ptr_helper.h>
-
-#include <Interpreters/join_common.h>
+#include <Interpreters/JoinUtils.h>
 #include <Parsers/ASTTablesInSelectQuery.h>
 #include <Storages/StorageSet.h>
-#include <Processors/Sources/SourceWithProgress.h>
 #include <Storages/TableLockHolder.h>
 #include <Common/RWLock.h>
 #include <Storages/StorageJoin.h>
 
+namespace DB
+{
+class QueryPlan;
+}
+
 namespace local_engine
 {
-class StorageJoinFromReadBuffer : public shared_ptr_helper<StorageJoinFromReadBuffer>, public DB::StorageSetOrJoinBase
+class StorageJoinFromReadBuffer : public DB::StorageSetOrJoinBase
 {
-    friend struct shared_ptr_helper<StorageJoinFromReadBuffer>;
 
 public:
     StorageJoinFromReadBuffer(
@@ -22,8 +23,8 @@ public:
         const DB::Names & key_names_,
         bool use_nulls_,
         DB::SizeLimits limits_,
-        DB::ASTTableJoin::Kind kind_,
-        DB::ASTTableJoin::Strictness strictness_,
+        DB::JoinKind kind_,
+        DB::JoinStrictness strictness_,
         const DB::ColumnsDescription & columns_,
         const DB::ConstraintsDescription & constraints_,
         const String & comment,
@@ -44,7 +45,7 @@ public:
         DB::ContextPtr context,
         DB::QueryProcessingStage::Enum processed_stage,
         size_t max_block_size,
-        unsigned num_streams) override;
+        size_t num_streams) override;
     DB::Block getRightSampleBlock() const
     {
         auto metadata_snapshot = getInMemoryMetadataPtr();
@@ -71,8 +72,8 @@ private:
     const DB::Names key_names;
     bool use_nulls;
     DB::SizeLimits limits;
-    DB::ASTTableJoin::Kind kind;                    /// LEFT | INNER ...
-    DB::ASTTableJoin::Strictness strictness;        /// ANY | ALL
+    DB::JoinKind kind;                    /// LEFT | INNER ...
+    DB::JoinStrictness strictness;        /// ANY | ALL
     bool overwrite;
 
     std::shared_ptr<DB::TableJoin> table_join;

@@ -1,24 +1,21 @@
 #include <memory>
-#include <mutex>
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
-#include <Common/ErrorCodes.h>
 #include "IO/ReadSettings.h"
-#include <IO/ReadBufferFromAzureBlobStorage.h>
+#include <Disks/IO/ReadBufferFromAzureBlobStorage.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
 #include <Storages/HDFS/ReadBufferFromHDFS.h>
 #include <IO/ReadBufferFromFile.h>
 #include <Interpreters/Context_fwd.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <Poco/URI.h>
 #include <IO/S3Common.h>
 #include <IO/ReadBufferFromS3.h>
-#include <Disks/AzureBlobStorage/AzureBlobStorageAuth.h>
 #include <aws/core/client/DefaultRetryStrategy.h>
+#include <aws/s3/S3Client.h>
 #include <Storages/StorageS3Settings.h>
 
 #include <Poco/Logger.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -72,8 +69,10 @@ public:
         std::string uriPath = "hdfs://" + file_uri.getHost();
         if (file_uri.getPort())
             uriPath += ":" + std::to_string(file_uri.getPort());
+        DB::ReadSettings read_settings;
         read_buffer = std::make_unique<DB::ReadBufferFromHDFS>(
-            uriPath, file_uri.getPath(), context->getGlobalContext()->getConfigRef());
+            uriPath, file_uri.getPath(), context->getGlobalContext()->getConfigRef(),
+            read_settings);
         return read_buffer;
     }
 };
@@ -91,7 +90,7 @@ public:
         auto client = getClient();
         std::unique_ptr<DB::ReadBuffer> readbuffer;
         readbuffer
-            = std::make_unique<DB::ReadBufferFromS3>(client, file_uri.getHost(), file_uri.getPath().substr(1), 3, DB::ReadSettings());
+            = std::make_unique<DB::ReadBufferFromS3>(client, file_uri.getHost(), file_uri.getPath().substr(1), "", DB::S3Settings::RequestSettings(),DB::ReadSettings());
         return readbuffer;
     }
 private:
@@ -106,9 +105,13 @@ private:
         DB::S3::PocoHTTPClientConfiguration client_configuration = DB::S3::ClientFactory::instance().createClientConfiguration(
             config.getString(config_prefix + ".region", ""),
             context->getRemoteHostFilter(),
-            context->getGlobalContext()->getSettingsRef().s3_max_redirects);
+            context->getGlobalContext()->getSettingsRef().s3_max_redirects,
+            false,
+            false,
+            nullptr,
+            nullptr);
 
-        DB::S3::URI uri(Poco::URI(config.getString(config_prefix + ".endpoint")));
+        DB::S3::URI uri(config.getString(config_prefix + ".endpoint"));
 
         client_configuration.connectTimeoutMs = config.getUInt(config_prefix + ".connect_timeout_ms", 10000);
         client_configuration.requestTimeoutMs = config.getUInt(config_prefix + ".request_timeout_ms", 5000);
@@ -143,7 +146,7 @@ public:
     {
         Poco::URI file_uri(file_info.uri_file());
         std::unique_ptr<DB::ReadBuffer> read_buffer;
-        read_buffer = std::make_unique<DB::ReadBufferFromAzureBlobStorage>(getClient(), file_uri.getPath(), 5, 5, DBMS_DEFAULT_BUFFER_SIZE);
+        read_buffer = std::make_unique<DB::ReadBufferFromAzureBlobStorage>(getClient(), file_uri.getPath(), DB::ReadSettings(), 5, 5);
         return read_buffer;
     }
 private:
