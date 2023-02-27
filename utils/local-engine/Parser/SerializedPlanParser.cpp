@@ -1,7 +1,7 @@
 #include "SerializedPlanParser.h"
 #include <memory>
+#include <Common/logger_useful.h>
 #include <string_view>
-#include <base/logger_useful.h>
 #include <base/Decimal.h>
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/registerAggregateFunctions.h>
@@ -46,7 +46,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/StorageMergeTreeFactory.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/wrappers.pb.h>
 #include <Poco/StringTokenizer.h>
@@ -57,6 +57,7 @@
 #include <Common/JoinHelper.h>
 #include <Common/MergeTreeTool.h>
 #include <Common/StringUtils.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/SortingStep.h>
@@ -138,7 +139,7 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         {
             auto position = expr.selection().direct_reference().struct_field().field();
             auto col_name = read_schema.getByPosition(position).name;
-            const ActionsDAG::Node * field = actions_dag->tryFindInIndex(col_name);
+            const ActionsDAG::Node * field = actions_dag->tryFindInOutputs(col_name);
             if (distinct_columns.contains(field->result_name))
             {
                 auto unique_name = getUniqueName(field->result_name);
@@ -174,7 +175,7 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         else if (expr.has_cast() || expr.has_if_then() || expr.has_literal())
         {
             const auto * node = parseArgument(actions_dag, expr);
-            actions_dag->addOrReplaceInIndex(*node);
+            actions_dag->addOrReplaceInOutputs(*node);
             if (distinct_columns.contains(node->result_name))
             {
                 auto unique_name = getUniqueName(node->result_name);
@@ -223,7 +224,6 @@ std::string getDecimalFunction(const substrait::Type_Decimal & decimal, const bo
 
     return ch_function_name;
 }
-
 /// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
 std::string getCastFunction(const substrait::Type & type)
 {
@@ -295,7 +295,7 @@ QueryPlanPtr SerializedPlanParser::parseReadRealWithLocalFile(const substrait::R
     auto header = parseNameStruct(rel.base_schema());
     auto source = std::make_shared<SubstraitFileSource>(context, header, rel.local_files());
     auto source_pipe = Pipe(source);
-    auto source_step = std::make_unique<ReadFromStorageStep>(std::move(source_pipe), "substrait local files");
+    auto source_step = std::make_unique<ReadFromStorageStep>(std::move(source_pipe), "substrait local files", nullptr);
     source_step->setStepDescription("read local files");
     auto query_plan = std::make_unique<QueryPlan>();
     query_plan->addStep(std::move(source_step));
@@ -313,7 +313,7 @@ QueryPlanPtr SerializedPlanParser::parseReadRealWithJavaIter(const substrait::Re
     auto plan = std::make_unique<QueryPlan>();
 
     auto source = std::make_shared<SourceFromJavaIter>(parseNameStruct(rel.base_schema()), input_iters[iter_index]);
-    QueryPlanStepPtr source_step = std::make_unique<ReadFromPreparedSource>(Pipe(source), context);
+    QueryPlanStepPtr source_step = std::make_unique<ReadFromPreparedSource>(Pipe(source));
     source_step->setStepDescription("Read From Java Iter");
     plan->addStep(std::move(source_step));
 
@@ -385,7 +385,7 @@ QueryPlanPtr SerializedPlanParser::parseMergeTreeTable(const substrait::ReadRel 
     {
         query_info->prewhere_info = parsePreWhereInfo(rel.filter(), header, not_null_columns);
     }
-    auto data_parts = query_context.custom_storage_merge_tree->getDataPartsVector();
+    auto data_parts = query_context.custom_storage_merge_tree->getAllDataPartsVector();
     int min_block = merge_tree_table.min_block;
     int max_block = merge_tree_table.max_block;
     MergeTreeData::DataPartsVector selected_parts;
@@ -419,7 +419,7 @@ PrewhereInfoPtr SerializedPlanParser::parsePreWhereInfo(const substrait::Express
     if (rel.has_singular_or_list())
     {
         const auto *in_node = parseArgument(prewhere_info->prewhere_actions, rel);
-        prewhere_info->prewhere_actions->addOrReplaceInIndex(*in_node);
+        prewhere_info->prewhere_actions->addOrReplaceInOutputs(*in_node);
         filter_name = in_node->result_name;
     }
     else
@@ -443,7 +443,6 @@ PrewhereInfoPtr SerializedPlanParser::parsePreWhereInfo(const substrait::Express
                 prewhere_info->prewhere_actions->tryRestoreColumn(name);
             }
         }
-        auto output = prewhere_info->prewhere_actions->getIndex();
     }
     else
     {
@@ -953,7 +952,7 @@ void SerializedPlanParser::addPreProjectStepIfNeeded(
         else if (arg.has_literal())
         {
             const auto * node = parseArgument(expression, arg);
-            expression->addOrReplaceInIndex(*node);
+            expression->addOrReplaceInOutputs(*node);
             measure_name = node->result_name;
             measure_names.emplace_back(measure_name);
             need_pre_project = true;
@@ -966,7 +965,7 @@ void SerializedPlanParser::addPreProjectStepIfNeeded(
 
         if (which_measure_type.isNullable() &&
             measure.measure().phase() == substrait::AGGREGATION_PHASE_INITIAL_TO_INTERMEDIATE &&
-            !expression->findInIndex(measure_name).result_type->isNullable()
+            !expression->findInOutputs(measure_name).result_type->isNullable()
             )
         {
             to_wrap_nullable.emplace_back(measure_name);
@@ -1020,14 +1019,14 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
     std::map<std::string, std::string> nullable_measure_names;
     addPreProjectStepIfNeeded(plan, rel, measure_names, nullable_measure_names);
 
-    ColumnNumbers keys = {};
+    Names keys = {};
     if (rel.groupings_size() == 1)
     {
         for (const auto & group : rel.groupings(0).grouping_expressions())
         {
             if (group.has_selection() && group.selection().has_direct_reference())
             {
-                keys.emplace_back(group.selection().direct_reference().struct_field().field());
+                keys.emplace_back(plan.getCurrentDataStream().header.getNames().at(group.selection().direct_reference().struct_field().field()));
             }
             else
             {
@@ -1066,7 +1065,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
         {
             input_column = entry->second;
         }
-        agg.arguments = ColumnNumbers{plan.getCurrentDataStream().header.getPositionByName(input_column)};
+        agg.argument_names = {input_column};
         auto arg_type = plan.getCurrentDataStream().header.getByName(input_column).type;
         if (const auto * function_type = checkAndGetDataType<DataTypeAggregateFunction>(arg_type.get()))
         {
@@ -1091,24 +1090,35 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
 
     if (has_final_stage)
     {
-        auto transform_params = std::make_shared<AggregatingTransformParams>(
-            getMergedAggregateParam(plan.getCurrentDataStream().header, keys, aggregates), true);
-        // std::cout << "input header:" << plan.getCurrentDataStream().header.dumpStructure() << std::endl;
-        return std::make_unique<MergingAggregatedStep>(plan.getCurrentDataStream(), transform_params, false, 1, 1);
+        return std::make_unique<MergingAggregatedStep>(plan.getCurrentDataStream(),
+                                                       getMergedAggregateParam( keys, aggregates),
+                                                       true,
+                                                       false,
+                                                       1,
+                                                       1,
+                                                       false,
+                                                       context->getSettingsRef().max_block_size,
+                                                       context->getSettingsRef().aggregation_in_order_max_block_bytes,
+                                                       SortDescription(),
+                                                       context->getSettingsRef().enable_memory_bound_merging_of_aggregation_results);
     }
     else
     {
         auto aggregating_step = std::make_unique<AggregatingStep>(
             plan.getCurrentDataStream(),
-            getAggregateParam(plan.getCurrentDataStream().header, keys, aggregates),
+            getAggregateParam(keys, aggregates),
+            GroupingSetsParamsList(),
             false,
-            1000000,
-            1,
+            context->getSettingsRef().max_block_size,
+            context->getSettingsRef().aggregation_in_order_max_block_bytes,
             1,
             1,
             false,
-            nullptr,
-            SortDescription());
+            false,
+            SortDescription(),
+            SortDescription(),
+            false,
+            false);
         return std::move(aggregating_step);
     }
 }
@@ -1128,6 +1138,39 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
     if (function_name == "cast")
     {
         ch_function_name = getCastFunction(output_type);
+    }
+    else if (function_name == "trim")
+    {
+        if (args.size() == 1)
+        {
+            ch_function_name = "trimBoth";
+        }
+        if (args.size() == 2)
+        {
+            ch_function_name = "sparkTrimBoth";
+        }
+    }
+    else if (function_name == "ltrim")
+    {
+        if (args.size() == 1)
+        {
+            ch_function_name = "trimLeft";
+        }
+        if (args.size() == 2)
+        {
+            ch_function_name = "sparkTrimLeft";
+        }
+    }
+    else if (function_name == "rtrim")
+    {
+        if (args.size() == 1)
+        {
+            ch_function_name = "trimRight";
+        }
+        if (args.size() == 2)
+        {
+            ch_function_name = "sparkTrimRigth";
+        }
     }
     else if (function_name == "extract")
     {
@@ -1209,8 +1252,8 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     if (function_name == "alias")
     {
         result_name = args[0]->result_name;
-        actions_dag->addOrReplaceInIndex(*args[0]);
-        result_node = &actions_dag->addAlias(actions_dag->findInIndex(result_name), result_name);
+        actions_dag->addOrReplaceInOutputs(*args[0]);
+        result_node = &actions_dag->addAlias(actions_dag->findInOutputs(result_name), result_name);
     }
     else if (function_name == "arrayJoin")
     {
@@ -1219,7 +1262,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         result_name = function_name + "(" + args_name + ")";
         result_node = &actions_dag->addArrayJoin(*args[0], result_name);
         if (keep_result)
-            actions_dag->addOrReplaceInIndex(*result_node);
+            actions_dag->addOrReplaceInOutputs(*result_node);
     }
     else
     {
@@ -1285,7 +1328,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
                 function_node->result_name);
         }
         if (keep_result)
-            actions_dag->addOrReplaceInIndex(*result_node);
+            actions_dag->addOrReplaceInOutputs(*result_node);
     }
     return result_node;
 }
@@ -1373,6 +1416,17 @@ void SerializedPlanParser::parseFunctionArguments(
         else
             parsed_args.push_back(index_node);
 
+    }
+    else if (function_name == "repeat")
+    {
+        // repeat. the field index must be unsigned integer in CH, cast the signed integer in substrait
+        // which must be a positive value into unsigned integer here.
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
+        const DB::ActionsDAG::Node * repeat_times_node =
+            parseFunctionArgument(actions_dag, required_columns, function_name, args[1]);
+        DB::DataTypeNullable target_type(std::make_shared<DB::DataTypeUInt32>());
+        repeat_times_node = ActionsDAGUtil::convertNodeType(actions_dag, repeat_times_node, target_type.getName());
+        parsed_args.emplace_back(repeat_times_node);
     }
     else
     {
@@ -1616,7 +1670,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 throw Exception(ErrorCodes::BAD_ARGUMENTS, "Can only have direct struct references in selections");
 
             const auto * field = action_dag->getInputs()[rel.selection().direct_reference().struct_field().field()];
-            return action_dag->tryFindInIndex(field->result_name);
+            return action_dag->tryFindInOutputs(field->result_name);
         }
 
         case substrait::Expression::RexTypeCase::kCast: {
@@ -1661,7 +1715,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             }
 
             const auto * function_node = toFunctionNode(action_dag, ch_function_name, args);
-            action_dag->addOrReplaceInIndex(*function_node);
+            action_dag->addOrReplaceInOutputs(*function_node);
             return function_node;
         }
 
@@ -1687,7 +1741,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             join(args, ',', args_name);
             auto result_name = "multiIf(" + args_name + ")";
             const auto * function_node = &action_dag->addFunction(function_multi_if, args, result_name);
-            action_dag->addOrReplaceInIndex(*function_node);
+            action_dag->addOrReplaceInOutputs(*function_node);
             return function_node;
         }
 
@@ -1757,7 +1811,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             args.emplace_back(&action_dag->addColumn(ColumnWithTypeAndName(std::move(arg), std::make_shared<DataTypeSet>(), name)));
 
             const auto * function_node = toFunctionNode(action_dag, "in", args);
-            action_dag->addOrReplaceInIndex(*function_node);
+            action_dag->addOrReplaceInOutputs(*function_node);
             if (nullable)
             {
                 /// if sets has `null` and value not in sets
@@ -1769,7 +1823,6 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 auto cast = FunctionFactory::instance().get("if", context);
                 function_node = toFunctionNode(action_dag, "if", cast_args);
             }
-
             return function_node;
         }
 
@@ -1852,23 +1905,23 @@ DB::QueryPlanPtr SerializedPlanParser::parseJoin(substrait::JoinRel join, DB::Qu
     auto table_join = std::make_shared<TableJoin>(global_context->getSettings(), global_context->getTemporaryVolume());
     if (join.type() == substrait::JoinRel_JoinType_JOIN_TYPE_INNER)
     {
-        table_join->setKind(DB::ASTTableJoin::Kind::Inner);
-        table_join->setStrictness(DB::ASTTableJoin::Strictness::All);
+        table_join->setKind(DB::JoinKind::Inner);
+        table_join->setStrictness(DB::JoinStrictness::All);
     }
     else if (join.type() == substrait::JoinRel_JoinType_JOIN_TYPE_LEFT_SEMI)
     {
-        table_join->setKind(DB::ASTTableJoin::Kind::Left);
-        table_join->setStrictness(DB::ASTTableJoin::Strictness::Semi);
+        table_join->setKind(DB::JoinKind::Left);
+        table_join->setStrictness(DB::JoinStrictness::Semi);
     }
     else if (join.type() == substrait::JoinRel_JoinType_JOIN_TYPE_ANTI)
     {
-        table_join->setKind(DB::ASTTableJoin::Kind::Left);
-        table_join->setStrictness(DB::ASTTableJoin::Strictness::Anti);
+        table_join->setKind(DB::JoinKind::Left);
+        table_join->setStrictness(DB::JoinStrictness::Anti);
     }
     else if (join.type() == substrait::JoinRel_JoinType_JOIN_TYPE_LEFT)
     {
-        table_join->setKind(DB::ASTTableJoin::Kind::Left);
-        table_join->setStrictness(DB::ASTTableJoin::Strictness::All);
+        table_join->setKind(DB::JoinKind::Left);
+        table_join->setStrictness(DB::JoinStrictness::All);
     }
     else
     {
@@ -1891,14 +1944,14 @@ DB::QueryPlanPtr SerializedPlanParser::parseJoin(substrait::JoinRel join, DB::Qu
     }
 
     table_join->addDisjunct();
-    table_join->setColumnsFromJoinedTable(right->getCurrentDataStream().header.getNamesAndTypesList());
-
     NameSet left_columns_set;
     for (const auto & col : left->getCurrentDataStream().header.getNames())
     {
         left_columns_set.emplace(col);
     }
-    table_join->deduplicateAndQualifyColumnNames(left_columns_set, getUniqueName("right") + ".");
+    table_join->setColumnsFromJoinedTable(right->getCurrentDataStream().header.getNamesAndTypesList(),
+                                          left_columns_set,
+                                          getUniqueName("right") + ".");
     // fix right table key duplicate
     NamesWithAliases right_table_alias;
     for (size_t idx = 0; idx < table_join->columnsFromJoinedTable().size(); idx++)
@@ -1975,7 +2028,7 @@ DB::QueryPlanPtr SerializedPlanParser::parseJoin(substrait::JoinRel join, DB::Qu
     {
         auto hash_join = std::make_shared<HashJoin>(table_join, right->getCurrentDataStream().header.cloneEmpty());
         QueryPlanStepPtr join_step
-            = std::make_unique<DB::JoinStep>(left->getCurrentDataStream(), right->getCurrentDataStream(), hash_join, 8192);
+            = std::make_unique<DB::JoinStep>(left->getCurrentDataStream(), right->getCurrentDataStream(), hash_join, 8192, 1, false);
 
         join_step->setStepDescription("JOIN");
 
@@ -2019,9 +2072,9 @@ void SerializedPlanParser::removeNullable(std::vector<String> require_columns, A
     {
         auto function_builder = FunctionFactory::instance().get("assumeNotNull", context);
         ActionsDAG::NodeRawConstPtrs args;
-        args.emplace_back(&actionsDag->findInIndex(item));
+        args.emplace_back(&actionsDag->findInOutputs(item));
         const auto & node = actionsDag->addFunction(function_builder, args, item);
-        actionsDag->addOrReplaceInIndex(node);
+        actionsDag->addOrReplaceInOutputs(node);
     }
 }
 
@@ -2031,9 +2084,9 @@ void SerializedPlanParser::wrapNullable(std::vector<String> columns, ActionsDAGP
     for (const auto & item : columns)
     {
         ActionsDAG::NodeRawConstPtrs args;
-        args.emplace_back(&actionsDag->findInIndex(item));
+        args.emplace_back(&actionsDag->findInOutputs(item));
         const auto * node = toFunctionNode(actionsDag, "toNullable", args);
-        actionsDag->addOrReplaceInIndex(*node);
+        actionsDag->addOrReplaceInOutputs(*node);
         nullable_measure_names[item] = node->result_name;
     }
 }

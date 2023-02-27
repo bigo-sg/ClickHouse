@@ -9,7 +9,7 @@
 #include <Common/Exception.h>
 #include <Interpreters/castColumn.h>
 #include <Interpreters/joinDispatch.h>
-
+#include <Processors/ISource.h>
 
 namespace DB
 {
@@ -44,11 +44,11 @@ size_t rawSize(const StringRef & t)
     return t.size;
 }
 
-class JoinSource : public SourceWithProgress
+class JoinSource : public ISource
 {
 public:
     JoinSource(HashJoinPtr join_, TableLockHolder lock_holder_, UInt64 max_block_size_, Block sample_block_)
-        : SourceWithProgress(sample_block_)
+        : ISource(sample_block_)
         , join(join_)
         , lock_holder(lock_holder_)
         , max_block_size(max_block_size_)
@@ -109,7 +109,7 @@ private:
 
     std::unique_ptr<void, std::function<void(void *)>> position; /// type erasure
 
-    template <ASTTableJoin::Kind KIND, ASTTableJoin::Strictness STRICTNESS, typename Maps>
+    template <JoinKind KIND, JoinStrictness STRICTNESS, typename Maps>
     Chunk createChunk(const Maps & maps)
     {
         MutableColumns mut_columns = restored_block.cloneEmpty().mutateColumns();
@@ -156,7 +156,7 @@ private:
         return Chunk(std::move(columns), num_rows);
     }
 
-    template <ASTTableJoin::Kind KIND, ASTTableJoin::Strictness STRICTNESS, typename Map>
+    template <JoinKind KIND, JoinStrictness STRICTNESS, typename Map>
     size_t fillColumns(const Map & map, MutableColumns & columns)
     {
         size_t rows_added = 0;
@@ -171,33 +171,33 @@ private:
 
         for (; it != end; ++it)
         {
-            if constexpr (STRICTNESS == ASTTableJoin::Strictness::RightAny)
+            if constexpr (STRICTNESS == JoinStrictness::RightAny)
             {
                 fillOne<Map>(columns, column_indices, it, key_pos, rows_added);
             }
-            else if constexpr (STRICTNESS == ASTTableJoin::Strictness::All)
+            else if constexpr (STRICTNESS == JoinStrictness::All)
             {
                 fillAll<Map>(columns, column_indices, it, key_pos, rows_added);
             }
-            else if constexpr (STRICTNESS == ASTTableJoin::Strictness::Any)
+            else if constexpr (STRICTNESS == JoinStrictness::Any)
             {
-                if constexpr (KIND == ASTTableJoin::Kind::Left || KIND == ASTTableJoin::Kind::Inner)
+                if constexpr (KIND == JoinKind::Left || KIND == JoinKind::Inner)
                     fillOne<Map>(columns, column_indices, it, key_pos, rows_added);
-                else if constexpr (KIND == ASTTableJoin::Kind::Right)
+                else if constexpr (KIND == JoinKind::Right)
                     fillAll<Map>(columns, column_indices, it, key_pos, rows_added);
             }
-            else if constexpr (STRICTNESS == ASTTableJoin::Strictness::Semi)
+            else if constexpr (STRICTNESS == JoinStrictness::Semi)
             {
-                if constexpr (KIND == ASTTableJoin::Kind::Left)
+                if constexpr (KIND == JoinKind::Left)
                     fillOne<Map>(columns, column_indices, it, key_pos, rows_added);
-                else if constexpr (KIND == ASTTableJoin::Kind::Right)
+                else if constexpr (KIND == JoinKind::Right)
                     fillAll<Map>(columns, column_indices, it, key_pos, rows_added);
             }
-            else if constexpr (STRICTNESS == ASTTableJoin::Strictness::Anti)
+            else if constexpr (STRICTNESS == JoinStrictness::Anti)
             {
-                if constexpr (KIND == ASTTableJoin::Kind::Left)
+                if constexpr (KIND == JoinKind::Left)
                     fillOne<Map>(columns, column_indices, it, key_pos, rows_added);
-                else if constexpr (KIND == ASTTableJoin::Kind::Right)
+                else if constexpr (KIND == JoinKind::Right)
                     fillAll<Map>(columns, column_indices, it, key_pos, rows_added);
             }
             else
@@ -278,7 +278,7 @@ DB::Pipe StorageJoinFromReadBuffer::read(
     DB::ContextPtr context,
     DB::QueryProcessingStage::Enum  /*processed_stage*/,
     size_t max_block_size,
-    unsigned int  /*num_streams*/)
+    size_t /*num_streams*/)
 {
     storage_snapshot->check(column_names);
 
@@ -330,8 +330,8 @@ StorageJoinFromReadBuffer::StorageJoinFromReadBuffer(
     const Names & key_names_,
     bool use_nulls_,
     DB::SizeLimits limits_,
-    DB::ASTTableJoin::Kind kind_,
-    DB::ASTTableJoin::Strictness strictness_,
+    DB::JoinKind kind_,
+    DB::JoinStrictness strictness_,
     const ColumnsDescription & columns_,
     const ConstraintsDescription & constraints_,
     const String & comment,

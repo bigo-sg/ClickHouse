@@ -3,9 +3,11 @@
 #include <Core/ColumnNumbers.h>
 #include <Core/ColumnsWithTypeAndName.h>
 #include <Core/Names.h>
+#include <Core/IResolvedFunction.h>
+#include <Common/Exception.h>
 #include <DataTypes/IDataType.h>
 
-#include "config_core.h"
+#include "config.h"
 
 #include <memory>
 
@@ -67,6 +69,11 @@ protected:
       */
     virtual bool useDefaultImplementationForNulls() const { return true; }
 
+    /** Default implementation in presence of arguments with type Nothing is the following:
+      *  If some of arguments have type Nothing then default implementation is to return constant column with type Nothing
+      */
+    virtual bool useDefaultImplementationForNothing() const { return true; }
+
     /** If the function have non-zero number of arguments,
       *  and if all arguments are constant, that we could automatically provide default implementation:
       *  arguments are converted to ordinary columns with single value, then function is executed as usual,
@@ -106,6 +113,9 @@ private:
     ColumnPtr defaultImplementationForNulls(
             const ColumnsWithTypeAndName & args, const DataTypePtr & result_type, size_t input_rows_count, bool dry_run) const;
 
+    ColumnPtr defaultImplementationForNothing(
+            const ColumnsWithTypeAndName & args, const DataTypePtr & result_type, size_t input_rows_count) const;
+
     ColumnPtr executeWithoutLowCardinalityColumns(
             const ColumnsWithTypeAndName & args, const DataTypePtr & result_type, size_t input_rows_count, bool dry_run) const;
 
@@ -120,11 +130,11 @@ using Values = std::vector<llvm::Value *>;
 /** Function with known arguments and return type (when the specific overload was chosen).
   * It is also the point where all function-specific properties are known.
   */
-class IFunctionBase
+class IFunctionBase : public IResolvedFunction
 {
 public:
 
-    virtual ~IFunctionBase() = default;
+    ~IFunctionBase() override = default;
 
     virtual ColumnPtr execute( /// NOLINT
         const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count, bool dry_run = false) const
@@ -135,8 +145,10 @@ public:
     /// Get the main function name.
     virtual String getName() const = 0;
 
-    virtual const DataTypes & getArgumentTypes() const = 0;
-    virtual const DataTypePtr & getResultType() const = 0;
+    const Array & getParameters() const final
+    {
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "IFunctionBase doesn't support getParameters method");
+    }
 
     /// Do preparations and return executable.
     /// sample_columns should contain data types of arguments and values of constants, if relevant.
@@ -156,7 +168,7 @@ public:
       */
     virtual llvm::Value * compile(llvm::IRBuilderBase & /*builder*/, Values /*values*/) const
     {
-        throw Exception(getName() + " is not JIT-compilable", ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "{} is not JIT-compilable", getName());
     }
 
 #endif
@@ -169,11 +181,11 @@ public:
       */
     virtual bool isSuitableForConstantFolding() const { return true; }
 
-    /** If function isSuitableForConstantFolding then, this method will be called during query analyzis
+    /** If function isSuitableForConstantFolding then, this method will be called during query analysis
       * if some arguments are constants. For example logical functions (AndFunction, OrFunction) can
       * return they result based on some constant arguments.
-      * Arguments are passed without modifications, useDefaultImplementationForNulls, useDefaultImplementationForConstants,
-      * useDefaultImplementationForLowCardinality are not applied.
+      * Arguments are passed without modifications, useDefaultImplementationForNulls, useDefaultImplementationForNothing,
+      * useDefaultImplementationForConstants, useDefaultImplementationForLowCardinality are not applied.
       */
     virtual ColumnPtr getConstantResultForNonConstArguments(
         const ColumnsWithTypeAndName & /* arguments */, const DataTypePtr & /* result_type */) const { return nullptr; }
@@ -263,9 +275,10 @@ public:
     /// The property of monotonicity for a certain range.
     struct Monotonicity
     {
-        bool is_monotonic = false;    /// Is the function monotonous (non-decreasing or non-increasing).
-        bool is_positive = true;    /// true if the function is non-decreasing, false if non-increasing. If is_monotonic = false, then it does not matter.
+        bool is_monotonic = false;   /// Is the function monotonous (non-decreasing or non-increasing).
+        bool is_positive = true;     /// true if the function is non-decreasing, false if non-increasing. If is_monotonic = false, then it does not matter.
         bool is_always_monotonic = false; /// Is true if function is monotonic on the whole input range I
+        bool is_strict = false;      /// true if the function is strictly decreasing or increasing.
     };
 
     /** Get information about monotonicity on a range of values. Call only if hasInformationAboutMonotonicity.
@@ -273,12 +286,12 @@ public:
       */
     virtual Monotonicity getMonotonicityForRange(const IDataType & /*type*/, const Field & /*left*/, const Field & /*right*/) const
     {
-        throw Exception("Function " + getName() + " has no information about its monotonicity", ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Function {} has no information about its monotonicity", getName());
     }
 
 };
 
-using FunctionBasePtr = std::shared_ptr<IFunctionBase>;
+using FunctionBasePtr = std::shared_ptr<const IFunctionBase>;
 
 
 /** Creates IFunctionBase from argument types list (chooses one function overload).
@@ -318,7 +331,7 @@ public:
     /// This function will replace it with DataTypeFunction containing actual types.
     virtual void getLambdaArgumentTypesImpl(DataTypes & arguments [[maybe_unused]]) const
     {
-        throw Exception("Function " + getName() + " can't have lambda-expressions as arguments", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+        throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Function {} can't have lambda-expressions as arguments", getName());
     }
 
     /// Returns indexes of arguments, that must be ColumnConst
@@ -332,12 +345,12 @@ protected:
 
     virtual FunctionBasePtr buildImpl(const ColumnsWithTypeAndName & /* arguments */, const DataTypePtr & /* result_type */) const
     {
-        throw Exception("buildImpl is not implemented for " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "buildImpl is not implemented for {}", getName());
     }
 
     virtual DataTypePtr getReturnTypeImpl(const DataTypes & /*arguments*/) const
     {
-        throw Exception("getReturnType is not implemented for " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "getReturnType is not implemented for {}", getName());
     }
 
     /// This function will be called in default implementation. You can overload it or the previous one.
@@ -360,7 +373,13 @@ protected:
       */
     virtual bool useDefaultImplementationForNulls() const { return true; }
 
-    /** If useDefaultImplementationForNulls() is true, then change arguments for getReturnType() and build().
+    /** If useDefaultImplementationForNothing() is true, then change arguments for getReturnType() and build():
+      *  if some of arguments are Nothing then don't call getReturnType(), call build() with return_type = Nothing,
+      * Otherwise build returns build(arguments, getReturnType(arguments));
+      */
+    virtual bool useDefaultImplementationForNothing() const { return true; }
+
+    /** If useDefaultImplementationForLowCardinalityColumns() is true, then change arguments for getReturnType() and build().
       * If function arguments has low cardinality types, convert them to ordinary types.
       * getReturnType returns ColumnLowCardinality if at least one argument type is ColumnLowCardinality.
       */
@@ -373,7 +392,7 @@ protected:
       */
     virtual bool useDefaultImplementationForSparseColumns() const { return true; }
 
-    // /// If it isn't, will convert all ColumnLowCardinality arguments to full columns.
+    /// If it isn't, will convert all ColumnLowCardinality arguments to full columns.
     virtual bool canBeExecutedOnLowCardinalityDictionary() const { return true; }
 
 private:
@@ -385,7 +404,7 @@ private:
 
 
 /// Old function interface. Check documentation in IFunction.h.
-/// If client do not need statefull properties it can implement this interface.
+/// If client do not need stateful properties it can implement this interface.
 class IFunction
 {
 public:
@@ -407,6 +426,11 @@ public:
       *   and wrap result in Nullable column where NULLs are in all rows where any of arguments are NULL.
       */
     virtual bool useDefaultImplementationForNulls() const { return true; }
+
+    /** Default implementation in presence of arguments with type Nothing is the following:
+      *  If some of arguments have type Nothing then default implementation is to return constant column with type Nothing
+      */
+    virtual bool useDefaultImplementationForNothing() const { return true; }
 
     /** If the function have non-zero number of arguments,
       *  and if all arguments are constant, that we could automatically provide default implementation:
@@ -457,7 +481,7 @@ public:
     using Monotonicity = IFunctionBase::Monotonicity;
     virtual Monotonicity getMonotonicityForRange(const IDataType & /*type*/, const Field & /*left*/, const Field & /*right*/) const
     {
-        throw Exception("Function " + getName() + " has no information about its monotonicity", ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Function {} has no information about its monotonicity", getName());
     }
 
     /// For non-variadic functions, return number of arguments; otherwise return zero (that should be ignored).
@@ -465,7 +489,7 @@ public:
 
     virtual DataTypePtr getReturnTypeImpl(const DataTypes & /*arguments*/) const
     {
-        throw Exception("getReturnType is not implemented for " + getName(), ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "getReturnType is not implemented for {}", getName());
     }
 
     /// Get the result type by argument type. If the function does not apply to these arguments, throw an exception.
@@ -482,7 +506,7 @@ public:
 
     virtual void getLambdaArgumentTypes(DataTypes & /*arguments*/) const
     {
-        throw Exception("Function " + getName() + " can't have lambda-expressions as arguments", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT);
+        throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Function {} can't have lambda-expressions as arguments", getName());
     }
 
     virtual ColumnNumbers getArgumentsThatDontImplyNullableReturnType(size_t /*number_of_arguments*/) const { return {}; }
@@ -504,7 +528,7 @@ protected:
 
     virtual llvm::Value * compileImpl(llvm::IRBuilderBase &, const DataTypes &, Values) const
     {
-        throw Exception(getName() + " is not JIT-compilable", ErrorCodes::NOT_IMPLEMENTED);
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "{} is not JIT-compilable", getName());
     }
 
 #endif

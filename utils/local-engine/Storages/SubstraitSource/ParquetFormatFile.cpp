@@ -29,7 +29,7 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
     res->read_buffer = std::move(read_buffer_builder->build(file_info));
     std::vector<int> row_group_indices;
     std::vector<RowGroupInfomation> required_row_groups;
-    if (auto * seekable_in = dynamic_cast<DB::SeekableReadBufferWithSize *>(res->read_buffer.get()))
+    if (auto * seekable_in = dynamic_cast<DB::SeekableReadBuffer *>(res->read_buffer.get()))
     {
         // reuse the read_buffer to avoid opening the file twice.
         // especially，the cost of opening a hdfs file is large.
@@ -84,7 +84,7 @@ std::vector<RowGroupInfomation> ParquetFormatFile::collectRequiredRowGroups(DB::
     format_settings.seekable_read = true;
     std::atomic<int> is_stopped{0};
     auto status = parquet::arrow::OpenFile(
-        asArrowFile(*read_buffer, format_settings, is_stopped), arrow::default_memory_pool(), &reader);
+        asArrowFile(*read_buffer, format_settings, is_stopped, "Parquet", PARQUET_MAGIC_BYTES), arrow::default_memory_pool(), &reader);
     if (!status.ok())
     {
         throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "Open file({}) failed. {}", file_info.uri_file(), status.ToString());
