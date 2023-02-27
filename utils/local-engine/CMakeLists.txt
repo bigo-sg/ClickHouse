@@ -7,6 +7,7 @@ include(FindJNI)
 
 #set(JNI_NATIVE_SOURCES local_engine_jni.cpp)
 set(LOCALENGINE_SHARED_LIB ch)
+set (ENABLE_CURL_BUILD OFF)
 
 add_subdirectory(proto)
 
@@ -19,6 +20,7 @@ add_headers_and_sources(shuffle Shuffle)
 add_headers_and_sources(operator Operator)
 add_headers_and_sources(jni jni)
 add_headers_and_sources(aggregate AggregateFunctions)
+add_headers_and_sources(functions Functions)
 
 include_directories(
         ${JNI_INCLUDE_DIRS}
@@ -30,6 +32,9 @@ include_directories(
         ${ClickHouse_SOURCE_DIR}/base
         ${ClickHouse_SOURCE_DIR}/contrib/orc/c++/include
         ${CMAKE_BINARY_DIR}/contrib/orc/c++/include
+        ${ClickHouse_SOURCE_DIR}/contrib/azure/sdk/storage/azure-storage-blobs/inc
+        ${ClickHouse_SOURCE_DIR}/contrib/azure/sdk/core/azure-core/inc
+        ${ClickHouse_SOURCE_DIR}/contrib/azure/sdk/storage/azure-storage-common/inc
 )
 
 add_subdirectory(Storages/ch_parquet)
@@ -46,10 +51,12 @@ add_library(${LOCALENGINE_SHARED_LIB} SHARED
         ${substrait_source}
         ${operator_sources}
         ${aggregate_sources}
+        ${functions_sources}
         local_engine_jni.cpp)
 
 
-target_compile_options(${LOCALENGINE_SHARED_LIB} PUBLIC -fPIC)
+target_compile_options(${LOCALENGINE_SHARED_LIB} PUBLIC -fPIC
+        -Wno-shorten-64-to-32)
 
 target_link_libraries(${LOCALENGINE_SHARED_LIB} PUBLIC
         clickhouse_aggregate_functions
@@ -63,7 +70,6 @@ target_link_libraries(${LOCALENGINE_SHARED_LIB} PUBLIC
         ch_parquet
         substait_source
 )
-
 # if (USE_LIBCXX)
 target_compile_options(unwind PRIVATE -fPIC)
 target_compile_options(cxxabi PRIVATE -fPIC)
@@ -115,6 +121,8 @@ target_compile_options(_icuuc PRIVATE -fPIC)
 target_compile_options(_icui18n PRIVATE -fPIC)
 target_compile_options(_cpuid PRIVATE -fPIC)
 target_compile_options(re2_st PRIVATE -fPIC)
+target_compile_options(_hashidsxx PRIVATE -fPIC)
+target_compile_options(_vectorscan PRIVATE -fPIC)
 target_compile_options(_boost_program_options PRIVATE -fPIC)
 target_compile_options(_boost_context PRIVATE -fPIC)
 target_compile_options(clickhouse_common_io PRIVATE -fPIC)
@@ -124,7 +132,8 @@ target_compile_options(clickhouse_parsers PRIVATE -fPIC)
 target_compile_options(clickhouse_aggregate_functions PRIVATE -fPIC)
 target_compile_options(clickhouse_common_config PRIVATE -fPIC)
 target_compile_options(clickhouse_dictionaries PRIVATE -fPIC)
-target_compile_options(clickhouse_functions PRIVATE -fPIC)
+target_compile_options(clickhouse_functions_obj PRIVATE -fPIC)
+target_compile_options(clickhouse_functions_uniqtheta PRIVATE -fPIC)
 target_compile_options(clickhouse_common_access PRIVATE -fPIC)
 target_compile_options(clickhouse_storages_system PRIVATE -fPIC)
 target_compile_options(clickhouse_table_functions PRIVATE -fPIC)
@@ -172,6 +181,7 @@ if (ENABLE_EMBEDDED_COMPILER)
     target_compile_options(LLVMX86Info PRIVATE -fPIC)
     target_compile_options(LLVMCFGuard PRIVATE -fPIC)
     target_compile_options(LLVMExecutionEngine PRIVATE -fPIC)
+    target_compile_options(LLVMRuntimeDyld PRIVATE -fPIC)
 endif()
 
 target_compile_options(_roaring PRIVATE -fPIC)
@@ -181,7 +191,7 @@ target_compile_options(clickhouse_functions_jsonpath PRIVATE -fPIC)
 target_compile_options(_dragonbox_to_chars PRIVATE -fPIC)
 target_compile_options(clickhouse_functions_gatherutils PRIVATE -fPIC)
 target_compile_options(clickhouse_functions_array PRIVATE -fPIC)
-target_compile_options(_hyperscan PRIVATE -fPIC)
+#target_compile_options(_hyperscan PRIVATE -fPIC)
 target_compile_options(_simdjson PRIVATE -fPIC)
 target_compile_options(divide_impl_avx2 PRIVATE -fPIC)
 target_compile_options(divide_impl PRIVATE -fPIC)
@@ -208,9 +218,9 @@ if (ENABLE_NLP)
     target_compile_options(_lemmagen PRIVATE -fPIC)
 endif ()
 
-target_compile_options(_aws_s3 PRIVATE -fPIC)
-target_compile_options(_azure_sdk PRIVATE -fPIC)
-target_compile_options(_curl PRIVATE -fPIC)
+#target_compile_options(_aws_s3 PRIVATE -fPIC)
+#target_compile_options(_azure_sdk PRIVATE -fPIC)
+#target_compile_options(_curl PRIVATE -fPIC)
 if (ENABLE_HDFS)
     target_compile_options(_hdfs3 PRIVATE -fPIC)
 endif ()
@@ -219,21 +229,28 @@ target_compile_options(_gsasl PRIVATE -fPIC)
 target_compile_options(_parquet PRIVATE -fPIC)
 target_compile_options(_arrow PRIVATE -fPIC)
 target_compile_options(_thrift PRIVATE -fPIC)
-target_compile_options(_aws_s3_checksums PRIVATE -fPIC)
+#target_compile_options(_aws_s3_checksums PRIVATE -fPIC)
 
 target_compile_options(absl_str_format_internal PRIVATE -fPIC)
 target_compile_options(absl_strings PRIVATE -fPIC)
 target_compile_options(absl_raw_logging_internal PRIVATE -fPIC)
 target_compile_options(absl_int128 PRIVATE -fPIC)
 target_compile_options(absl_raw_hash_set PRIVATE -fPIC)
-target_compile_options(absl_raw_hash_set PRIVATE -fPIC)
 target_compile_options(absl_base PRIVATE -fPIC)
 target_compile_options(absl_spinlock_wait PRIVATE -fPIC)
+target_compile_options(absl_hash PRIVATE -fPIC)
+target_compile_options(absl_throw_delegate PRIVATE -fPIC)
+
+target_compile_options(_c-ares PRIVATE -fPIC)
+target_compile_options(_aws PRIVATE -fPIC)
+target_compile_options(_minizip PRIVATE -fPIC)
+target_compile_options(_rocksdb PRIVATE -fPIC)
 
 add_compile_options(-fPIC)
 if (ENABLE_JEMALLOC)
     target_compile_options(_jemalloc PRIVATE -fPIC)
 endif ()
+
 
 message(COMPILER_FLAGS ${COMPILER_FLAGS})
 message(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})

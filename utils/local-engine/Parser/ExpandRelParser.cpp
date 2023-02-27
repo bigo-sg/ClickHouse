@@ -3,7 +3,7 @@
 #include <Parser/RelParser.h>
 #include <Parser/SerializedPlanParser.h>
 #include <Processors/QueryPlan/QueryPlan.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <Poco/Logger.h>
 #include <Core/Block.h>
 #include <Core/ColumnWithTypeAndName.h>

@@ -40,7 +40,7 @@
 #include <Poco/StreamCopier.h>
 #include <Poco/Util/LayeredConfiguration.h>
 #include <base/range.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <grpc++/security/server_credentials.h>
 #include <grpc++/server.h>
 #include <grpc++/server_builder.h>
@@ -243,10 +243,9 @@ namespace
         {
             auto max_session_timeout = config.getUInt("max_session_timeout", 3600);
             if (session_timeout > max_session_timeout)
-                throw Exception(
-                    "Session timeout '" + std::to_string(session_timeout) + "' is larger than max_session_timeout: "
-                        + std::to_string(max_session_timeout) + ". Maximum session timeout could be modified in configuration file.",
-                    ErrorCodes::INVALID_SESSION_TIMEOUT);
+                throw Exception(ErrorCodes::INVALID_SESSION_TIMEOUT, "Session timeout '{}' is larger than max_session_timeout: {}. "
+                    "Maximum session timeout could be modified in configuration file.",
+                    std::to_string(session_timeout), std::to_string(max_session_timeout));
         }
         else
             session_timeout = config.getInt("default_session_timeout", 60);
@@ -390,7 +389,7 @@ namespace
             case CALL_WITH_STREAM_IO: return "ExecuteQueryWithStreamIO()";
             case CALL_MAX: break;
         }
-        __builtin_unreachable();
+        UNREACHABLE();
     }
 
     bool isInputStreaming(CallType call_type)
@@ -429,7 +428,7 @@ namespace
 
         void write(const GRPCResult &, const CompletionCallback &) override
         {
-            throw Exception("Responder<CALL_SIMPLE>::write() should not be called", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Responder<CALL_SIMPLE>::write() should not be called");
         }
 
         void writeAndFinish(const GRPCResult & result, const grpc::Status & status, const CompletionCallback & callback) override
@@ -461,7 +460,7 @@ namespace
 
         void write(const GRPCResult &, const CompletionCallback &) override
         {
-            throw Exception("Responder<CALL_WITH_STREAM_INPUT>::write() should not be called", ErrorCodes::LOGICAL_ERROR);
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Responder<CALL_WITH_STREAM_INPUT>::write() should not be called");
         }
 
         void writeAndFinish(const GRPCResult & result, const grpc::Status & status, const CompletionCallback & callback) override
@@ -550,7 +549,7 @@ namespace
             case CALL_WITH_STREAM_IO: return std::make_unique<Responder<CALL_WITH_STREAM_IO>>();
             case CALL_MAX: break;
         }
-        __builtin_unreachable();
+        UNREACHABLE();
     }
 
 
@@ -627,7 +626,7 @@ namespace
         void executeQuery();
 
         void processInput();
-        void initializeBlockInputStream(const Block & header);
+        void initializePipeline(const Block & header);
         void createExternalTables();
 
         void generateOutput();
@@ -662,6 +661,7 @@ namespace
         std::optional<Session> session;
         ContextMutablePtr query_context;
         std::optional<CurrentThread::QueryScope> query_scope;
+        OpenTelemetry::TracingContextHolderPtr thread_trace_context;
         String query_text;
         ASTPtr ast;
         ASTInsertQuery * insert_query = nullptr;
@@ -777,7 +777,7 @@ namespace
         readQueryInfo();
 
         if (query_info.cancel())
-            throw Exception("Initial query info cannot set the 'cancel' field", ErrorCodes::INVALID_GRPC_QUERY_INFO);
+            throw Exception(ErrorCodes::INVALID_GRPC_QUERY_INFO, "Initial query info cannot set the 'cancel' field");
 
         LOG_DEBUG(log, "Received initial QueryInfo: {}", getQueryDescription(query_info));
     }
@@ -840,6 +840,12 @@ namespace
         query_context->setCurrentQueryId(query_info.query_id());
         query_scope.emplace(query_context);
 
+        /// Set up tracing context for this query on current thread
+        thread_trace_context = std::make_unique<OpenTelemetry::TracingContextHolder>("GRPCServer",
+            query_context->getClientInfo().client_trace_context,
+            query_context->getSettingsRef(),
+            query_context->getOpenTelemetrySpanLog());
+
         /// Prepare for sending exceptions and logs.
         const Settings & settings = query_context->getSettingsRef();
         send_exception_with_stacktrace = settings.calculate_text_stack_trace;
@@ -848,6 +854,7 @@ namespace
         {
             logs_queue = std::make_shared<InternalTextLogsQueue>();
             logs_queue->max_priority = Poco::Logger::parseLevel(client_logs_level.toString());
+            logs_queue->setSourceRegexp(settings.send_logs_source_regexp);
             CurrentThread::attachInternalTextLogsQueue(logs_queue, client_logs_level);
             CurrentThread::setFatalErrorCallback([this]{ onFatalError(); });
         }
@@ -868,7 +875,7 @@ namespace
         query_text = std::move(*(query_info.mutable_query()));
         const char * begin = query_text.data();
         const char * end = begin + query_text.size();
-        ParserQuery parser(end);
+        ParserQuery parser(end, settings.allow_settings_after_format_in_insert);
         ast = parseQuery(parser, begin, end, "", settings.max_query_size, settings.max_parser_depth);
 
         /// Choose input format.
@@ -910,7 +917,7 @@ namespace
         query_context->setExternalTablesInitializer([this] (ContextPtr context)
         {
             if (context != query_context)
-                throw Exception("Unexpected context in external tables initializer", ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected context in external tables initializer");
             createExternalTables();
         });
 
@@ -918,15 +925,15 @@ namespace
         query_context->setInputInitializer([this] (ContextPtr context, const StoragePtr & input_storage)
         {
             if (context != query_context)
-                throw Exception("Unexpected context in Input initializer", ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected context in Input initializer");
             input_function_is_used = true;
-            initializeBlockInputStream(input_storage->getInMemoryMetadataPtr()->getSampleBlock());
+            initializePipeline(input_storage->getInMemoryMetadataPtr()->getSampleBlock());
         });
 
         query_context->setInputBlocksReaderCallback([this](ContextPtr context) -> Block
         {
             if (context != query_context)
-                throw Exception("Unexpected context in InputBlocksReader", ErrorCodes::LOGICAL_ERROR);
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "Unexpected context in InputBlocksReader");
 
             Block block;
             while (!block && pipeline_executor->pull(block));
@@ -954,14 +961,20 @@ namespace
         if (!has_data_to_insert)
         {
             if (!insert_query)
-                throw Exception("Query requires data to insert, but it is not an INSERT query", ErrorCodes::NO_DATA_TO_INSERT);
+                throw Exception(ErrorCodes::NO_DATA_TO_INSERT, "Query requires data to insert, but it is not an INSERT query");
             else
-                throw Exception("No data to insert", ErrorCodes::NO_DATA_TO_INSERT);
+            {
+                const auto & settings = query_context->getSettingsRef();
+                if (settings.throw_if_no_data_to_insert)
+                    throw Exception(ErrorCodes::NO_DATA_TO_INSERT, "No data to insert");
+                else
+                    return;
+            }
         }
 
         /// This is significant, because parallel parsing may be used.
         /// So we mustn't touch the input stream from other thread.
-        initializeBlockInputStream(io.pipeline.getHeader());
+        initializePipeline(io.pipeline.getHeader());
 
         PushingPipelineExecutor executor(io.pipeline);
         executor.start();
@@ -976,7 +989,7 @@ namespace
         executor.finish();
     }
 
-    void Call::initializeBlockInputStream(const Block & header)
+    void Call::initializePipeline(const Block & header)
     {
         assert(!read_buffer);
         read_buffer = std::make_unique<ReadBufferFromCallback>([this]() -> std::pair<const void *, size_t>
@@ -1012,7 +1025,7 @@ namespace
                     break;
 
                 if (!isInputStreaming(call_type))
-                    throw Exception("next_query_info is allowed to be set only for streaming input", ErrorCodes::INVALID_GRPC_QUERY_INFO);
+                    throw Exception(ErrorCodes::INVALID_GRPC_QUERY_INFO, "next_query_info is allowed to be set only for streaming input");
 
                 readQueryInfo();
                 if (!query_info.query().empty() || !query_info.query_id().empty() || !query_info.settings().empty()
@@ -1020,9 +1033,9 @@ namespace
                     || query_info.external_tables_size() || !query_info.user_name().empty() || !query_info.password().empty()
                     || !query_info.quota().empty() || !query_info.session_id().empty())
                 {
-                    throw Exception("Extra query infos can be used only to add more input data. "
-                                    "Only the following fields can be set: input_data, next_query_info, cancel",
-                                    ErrorCodes::INVALID_GRPC_QUERY_INFO);
+                    throw Exception(ErrorCodes::INVALID_GRPC_QUERY_INFO,
+                                    "Extra query infos can be used only to add more input data. "
+                                    "Only the following fields can be set: input_data, next_query_info, cancel");
                 }
 
                 if (isQueryCancelled())
@@ -1041,10 +1054,7 @@ namespace
         auto source = query_context->getInputFormat(
             input_format, *read_buffer, header, query_context->getSettings().max_insert_block_size);
 
-        QueryPipelineBuilder builder;
-        builder.init(Pipe(source));
-
-        pipeline = std::make_unique<QueryPipeline>(QueryPipelineBuilder::getPipeline(std::move(builder)));
+        pipeline = std::make_unique<QueryPipeline>(std::move(source));
         pipeline_executor = std::make_unique<PullingPipelineExecutor>(*pipeline);
     }
 
@@ -1071,7 +1081,8 @@ namespace
                     NamesAndTypesList columns;
                     for (size_t column_idx : collections::range(external_table.columns_size()))
                     {
-                        const auto & name_and_type = external_table.columns(column_idx);
+                        /// TODO: consider changing protocol
+                        const auto & name_and_type = external_table.columns(static_cast<int>(column_idx));
                         NameAndTypePair column;
                         column.name = name_and_type.name();
                         if (column.name.empty())
@@ -1136,7 +1147,7 @@ namespace
                 break;
 
             if (!isInputStreaming(call_type))
-                throw Exception("next_query_info is allowed to be set only for streaming input", ErrorCodes::INVALID_GRPC_QUERY_INFO);
+                throw Exception(ErrorCodes::INVALID_GRPC_QUERY_INFO, "next_query_info is allowed to be set only for streaming input");
 
             readQueryInfo();
             if (!query_info.query().empty() || !query_info.query_id().empty() || !query_info.settings().empty()
@@ -1144,9 +1155,11 @@ namespace
                 || !query_info.output_format().empty() || !query_info.user_name().empty() || !query_info.password().empty()
                 || !query_info.quota().empty() || !query_info.session_id().empty())
             {
-                throw Exception("Extra query infos can be used only to add more data to input or more external tables. "
-                                "Only the following fields can be set: input_data, external_tables, next_query_info, cancel",
-                                ErrorCodes::INVALID_GRPC_QUERY_INFO);
+                throw Exception(ErrorCodes::INVALID_GRPC_QUERY_INFO,
+                                "Extra query infos can be used only "
+                                "to add more data to input or more external tables. "
+                                "Only the following fields can be set: "
+                                "input_data, external_tables, next_query_info, cancel");
             }
             if (isQueryCancelled())
                 break;
@@ -1284,7 +1297,7 @@ namespace
     {
         io.onException();
 
-        LOG_ERROR(log, fmt::runtime(getExceptionMessage(exception, true)));
+        LOG_ERROR(log, getExceptionMessageAndPattern(exception, /* with_stacktrace */ true));
 
         if (responder && !responder_finished)
         {
@@ -1355,6 +1368,7 @@ namespace
         io = {};
         query_scope.reset();
         query_context.reset();
+        thread_trace_context.reset();
         session.reset();
     }
 
@@ -1426,9 +1440,9 @@ namespace
         if (failed_to_read_query_info)
         {
             if (initial_query_info_read)
-                throw Exception("Failed to read extra QueryInfo", ErrorCodes::NETWORK_ERROR);
+                throw Exception(ErrorCodes::NETWORK_ERROR, "Failed to read extra QueryInfo");
             else
-                throw Exception("Failed to read initial QueryInfo", ErrorCodes::NETWORK_ERROR);
+                throw Exception(ErrorCodes::NETWORK_ERROR, "Failed to read initial QueryInfo");
         }
     }
 
@@ -1476,7 +1490,7 @@ namespace
 
     void Call::addProgressToResult()
     {
-        auto values = progress.fetchAndResetPiecewiseAtomically();
+        auto values = progress.fetchValuesAndResetPiecewiseAtomically();
         if (!values.read_rows && !values.read_bytes && !values.total_rows_to_read && !values.written_rows && !values.written_bytes)
             return;
         auto & grpc_progress = *result.mutable_progress();
@@ -1569,14 +1583,14 @@ namespace
                 auto & log_entry = *result.add_logs();
                 log_entry.set_time(column_time.getElement(row));
                 log_entry.set_time_microseconds(column_time_microseconds.getElement(row));
-                StringRef query_id = column_query_id.getDataAt(row);
-                log_entry.set_query_id(query_id.data, query_id.size);
+                std::string_view query_id = column_query_id.getDataAt(row).toView();
+                log_entry.set_query_id(query_id.data(), query_id.size());
                 log_entry.set_thread_id(column_thread_id.getElement(row));
                 log_entry.set_level(static_cast<::clickhouse::grpc::LogsLevel>(column_level.getElement(row)));
-                StringRef source = column_source.getDataAt(row);
-                log_entry.set_source(source.data, source.size);
-                StringRef text = column_text.getDataAt(row);
-                log_entry.set_text(text.data, text.size);
+                std::string_view source = column_source.getDataAt(row).toView();
+                log_entry.set_source(source.data(), source.size());
+                std::string_view text = column_text.getDataAt(row).toView();
+                log_entry.set_text(text.data(), text.size());
             }
         }
     }
@@ -1671,7 +1685,7 @@ namespace
     void Call::throwIfFailedToSendResult()
     {
         if (failed_to_send_result)
-            throw Exception("Failed to send result to the client", ErrorCodes::NETWORK_ERROR);
+            throw Exception(ErrorCodes::NETWORK_ERROR, "Failed to send result to the client");
     }
 
     void Call::sendException(const Exception & exception)
@@ -1858,6 +1872,11 @@ void GRPCServer::start()
 
     queue = builder.AddCompletionQueue();
     grpc_server = builder.BuildAndStart();
+    if (nullptr == grpc_server)
+    {
+        throw DB::Exception(DB::ErrorCodes::NETWORK_ERROR, "Can't start grpc server, there is a port conflict");
+    }
+
     runner->start();
 }
 

@@ -137,6 +137,7 @@ void RangeSelectorBuilder::initSortInformation(Poco::JSON::Array::Ptr orderings)
     {
         auto ordering = orderings->get(i).extract<Poco::JSON::Object::Ptr>();
         auto col_pos = ordering->get("column_ref").convert<DB::Int32>();
+        auto col_name = ordering->get("column_name").convert<String>();
 
         auto sort_direction = ordering->get("direction").convert<int>();
         auto d_iter = direction_map.find(sort_direction);
@@ -144,7 +145,7 @@ void RangeSelectorBuilder::initSortInformation(Poco::JSON::Array::Ptr orderings)
         {
             throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Unsupported sorting direction:{}", sort_direction);
         }
-        DB::SortColumnDescription ch_col_sort_descr(col_pos, d_iter->second.first, d_iter->second.second);
+        DB::SortColumnDescription ch_col_sort_descr(col_name, d_iter->second.first, d_iter->second.second);
         sort_descriptions.emplace_back(ch_col_sort_descr);
 
         auto type_name = ordering->get("data_type").convert<std::string>();
@@ -263,6 +264,13 @@ void RangeSelectorBuilder::computePartitionIdByBinarySearch(DB::Block & block, s
     auto total_rows = block.rows();
     const auto & bounds_columns = range_bounds_block.getColumns();
     auto max_part = bounds_columns[0]->size();
+    for (size_t i = 0; i < bounds_columns.size(); i++)
+    {
+        if (bounds_columns[i]->isNullable() && !input_columns[sorting_key_columns[i]]->isNullable())
+        {
+            input_columns[sorting_key_columns[i]] = makeNullable(input_columns[sorting_key_columns[i]]);
+        }
+    }
     for (size_t r = 0; r < total_rows; ++r)
     {
         size_t selected_partition = 0;

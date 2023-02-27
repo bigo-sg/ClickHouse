@@ -29,7 +29,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/SubstraitSource/ReadBufferBuilder.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <benchmark/benchmark.h>
 #include <Common/DebugUtils.h>
 #include <Common/Logger.h>

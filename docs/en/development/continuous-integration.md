@@ -1,9 +1,10 @@
 ---
-toc_priority: 62
-toc_title: Continuous Integration Checks
+slug: /en/development/continuous-integration
+sidebar_position: 62
+sidebar_label: Continuous Integration Checks
+title: Continuous Integration Checks
+description: When you submit a pull request, some automated checks are ran for your code by the ClickHouse continuous integration (CI) system
 ---
-
-# Continuous Integration Checks
 
 When you submit a pull request, some automated checks are ran for your code by
 the ClickHouse [continuous integration (CI) system](tests.md#test-automation).
@@ -30,7 +31,7 @@ If you are not sure what to do, ask a maintainer for help.
 ## Merge With Master
 
 Verifies that the PR can be merged to master. If not, it will fail with the
-message 'Cannot fetch mergecommit'. To fix this check, resolve the conflict as
+message `Cannot fetch mergecommit`. To fix this check, resolve the conflict as
 described in the [GitHub
 documentation](https://docs.github.com/en/github/collaborating-with-issues-and-pull-requests/resolving-a-merge-conflict-on-github),
 or merge the `master` branch to your pull request branch using git.
@@ -56,7 +57,7 @@ You have to specify a changelog category for your change (e.g., Bug Fix), and
 write a user-readable message describing the change for [CHANGELOG.md](../whats-new/changelog/index.md)
 
 
-## Push To Dockerhub
+## Push To DockerHub
 
 Builds docker images used for build and tests, then pushes them to DockerHub.
 
@@ -117,22 +118,18 @@ Builds ClickHouse in various configurations for use in further steps. You have t
 - **Compiler**: `gcc-9` or `clang-10` (or `clang-10-xx` for other architectures e.g. `clang-10-freebsd`).
 - **Build type**: `Debug` or `RelWithDebInfo` (cmake).
 - **Sanitizer**: `none` (without sanitizers), `address` (ASan), `memory` (MSan), `undefined` (UBSan), or `thread` (TSan).
-- **Splitted** `splitted` is a [split build](../development/build.md#split-build)
 - **Status**: `success` or `fail`
 - **Build log**: link to the building and files copying log, useful when build failed.
 - **Build time**.
 - **Artifacts**: build result files (with `XXX` being the server version e.g. `20.8.1.4344`).
-  - `clickhouse-client_XXX_all.deb`
+  - `clickhouse-client_XXX_amd64.deb`
   - `clickhouse-common-static-dbg_XXX[+asan, +msan, +ubsan, +tsan]_amd64.deb`
   - `clickhouse-common-staticXXX_amd64.deb`
-  - `clickhouse-server_XXX_all.deb`
-  - `clickhouse_XXX_amd64.buildinfo`
-  - `clickhouse_XXX_amd64.changes`
+  - `clickhouse-server_XXX_amd64.deb`
   - `clickhouse`: Main built binary.
   - `clickhouse-odbc-bridge`
   - `unit_tests_dbms`: GoogleTest binary with ClickHouse unit tests.
-  - `shared_build.tgz`: build with shared libraries.
-  - `performance.tgz`: Special package for performance tests.
+  - `performance.tar.zst`: Special package for performance tests.
 
 
 ## Special Build Check
@@ -150,15 +147,11 @@ checks page](../development/build.md#you-dont-have-to-build-clickhouse), or buil
 
 
 ## Functional Stateful Tests
-Runs [stateful functional tests](tests.md#functional-tests). Treat them in the same way as the functional stateless tests. The difference is that they require `hits` and `visits` tables from the [Yandex.Metrica dataset](../getting-started/example-datasets/metrica.md) to run.
+Runs [stateful functional tests](tests.md#functional-tests). Treat them in the same way as the functional stateless tests. The difference is that they require `hits` and `visits` tables from the [clickstream dataset](../getting-started/example-datasets/metrica.md) to run.
 
 
 ## Integration Tests
 Runs [integration tests](tests.md#integration-tests).
-
-
-## Testflows Check
-Runs some tests using Testflows test system. See [here](https://github.com/ClickHouse/ClickHouse/tree/master/tests/testflows#running-tests-locally) how to run them locally.
 
 
 ## Stress Test
@@ -168,16 +161,6 @@ concurrency-related errors. If it fails:
     * Fix all other test failures first;
     * Look at the report to find the server logs and check them for possible causes
       of error.
-
-
-## Split Build Smoke Test
-
-Checks that the server build in [split build](../development/build.md#split-build)
-configuration can start and run simple queries.  If it fails:
-
-    * Fix other test errors first;
-    * Build the server in [split build](../development/build.md#split-build) configuration
-      locally and check whether it can start and run `select 1`.
 
 
 ## Compatibility Check

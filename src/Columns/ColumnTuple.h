@@ -35,7 +35,8 @@ public:
     static Ptr create(const TupleColumns & columns);
     static Ptr create(Columns && arg) { return create(arg); }
 
-    template <typename Arg, typename = typename std::enable_if<std::is_rvalue_reference<Arg &&>::value>::type>
+    template <typename Arg>
+    requires std::is_rvalue_reference_v<Arg &&>
     static MutablePtr create(Arg && arg) { return Base::create(std::forward<Arg>(arg)); }
 
     std::string getName() const override;
@@ -96,13 +97,15 @@ public:
     size_t byteSizeAt(size_t n) const override;
     size_t allocatedBytes() const override;
     void protect() override;
-    void forEachSubcolumn(ColumnCallback callback) override;
+    void forEachSubcolumn(ColumnCallback callback) const override;
+    void forEachSubcolumnRecursively(RecursiveColumnCallback callback) const override;
     bool structureEquals(const IColumn & rhs) const override;
     bool isCollationSupported() const override;
     ColumnPtr compress() const override;
     double getRatioOfDefaultRows(double sample_ratio) const override;
     void getIndicesOfNonDefaultRows(Offsets & indices, size_t from, size_t limit) const override;
-    SerializationInfoPtr getSerializationInfo() const override;
+    void finalize() override;
+    bool isFinalized() const override;
 
     size_t tupleSize() const { return columns.size(); }
 

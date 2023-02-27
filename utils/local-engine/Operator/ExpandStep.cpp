@@ -10,7 +10,7 @@
 #include <Processors/IProcessor.h>
 #include <QueryPipeline/Pipe.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 #include <Poco/Logger.h>
 
 namespace local_engine
@@ -104,6 +104,10 @@ void ExpandStep::describePipeline(DB::IQueryPlanStep::FormatSettings & settings)
 {
     if (!processors.empty())
         DB::IQueryPlanStep::describePipeline(processors, settings);
+}
+void ExpandStep::updateOutputStream()
+{
+    createOutputStream(input_streams.front(), output_header, getDataStreamTraits());
 }
 
 }

@@ -1,6 +1,7 @@
 ---
-toc_priority: 69
-toc_title: "Именованные соединения"
+slug: /ru/operations/named-collections
+sidebar_position: 69
+sidebar_label: "Именованные соединения"
 ---
 
 # Хранение реквизитов для подключения к внешним источникам в конфигурационных файлах {#named-collections}
