@@ -144,7 +144,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"collect_list", "groupArray"},
 
     // date or datetime functions
-    {"from_unixtime", "FROM_UNIXTIME"},
+    {"from_unixtime", "fromUnixTimestampInJodaSyntax"},
     {"date_add", "addDays"},
     {"date_sub", "subtractDays"},
     {"datediff", "dateDiff"},
@@ -238,9 +238,22 @@ private:
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
         bool keep_result = false);
+    DB::ActionsDAGPtr parseArrayJoin(
+        const Block & input,
+        const substrait::Expression & rel,
+        std::vector<String> & result_names,
+        std::vector<String> & required_columns,
+        DB::ActionsDAGPtr actions_dag = nullptr,
+        bool keep_result = false);
     const ActionsDAG::Node * parseFunctionWithDAG(
         const substrait::Expression & rel,
-        std::string & result_name,
+        std::string & result_names,
+        std::vector<String> & required_columns,
+        DB::ActionsDAGPtr actions_dag = nullptr,
+        bool keep_result = false);
+    ActionsDAG::NodeRawConstPtrs parseArrayJoinWithDAG(
+        const substrait::Expression & rel,
+        std::vector<String> & result_name,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
         bool keep_result = false);
