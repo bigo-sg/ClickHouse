@@ -36,7 +36,8 @@ public:
     static Ptr create(const ColumnPtr & column) { return ColumnMap::create(column->assumeMutable()); }
     static Ptr create(ColumnPtr && arg) { return create(arg); }
 
-    template <typename ... Args, typename = typename std::enable_if<IsMutableColumns<Args ...>::value>::type>
+    template <typename ... Args>
+    requires (IsMutableColumns<Args ...>::value)
     static MutablePtr create(Args &&... args) { return Base::create(std::forward<Args>(args)...); }
 
     std::string getName() const override;
@@ -88,10 +89,13 @@ public:
     size_t byteSizeAt(size_t n) const override;
     size_t allocatedBytes() const override;
     void protect() override;
-    void forEachSubcolumn(ColumnCallback callback) override;
+    void forEachSubcolumn(ColumnCallback callback) const override;
+    void forEachSubcolumnRecursively(RecursiveColumnCallback callback) const override;
     bool structureEquals(const IColumn & rhs) const override;
     double getRatioOfDefaultRows(double sample_ratio) const override;
     void getIndicesOfNonDefaultRows(Offsets & indices, size_t from, size_t limit) const override;
+    void finalize() override { nested->finalize(); }
+    bool isFinalized() const override { return nested->isFinalized(); }
 
     const ColumnArray & getNestedColumn() const { return assert_cast<const ColumnArray &>(*nested); }
     ColumnArray & getNestedColumn() { return assert_cast<ColumnArray &>(*nested); }

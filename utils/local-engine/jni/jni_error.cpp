@@ -4,7 +4,7 @@
 #include <jni.h>
 #include <Poco/Logger.h>
 #include "Common/Exception.h"
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 namespace local_engine
 {

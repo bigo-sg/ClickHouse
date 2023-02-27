@@ -28,7 +28,7 @@ namespace fs = std::filesystem;
 namespace local_engine
 {
 extern void registerAggregateFunctionCombinatorPartialMerge(AggregateFunctionCombinatorFactory &);
-extern void registerFunctionsHashingExtended(FunctionFactory & factory);
+extern void registerFunctions(FunctionFactory &);
 }
 
 #ifdef __cplusplus
@@ -38,20 +38,17 @@ extern "C" {
 void registerAllFunctions()
 {
     registerFunctions();
-
     registerAggregateFunctions();
-
-    /// register ordinary functions from local_engine
-    {
-        auto & factory = FunctionFactory::instance();
-        local_engine::registerFunctionsHashingExtended(factory);
-    }
 
     /// register aggregate function combinators from local_engine
     {
         auto & factory = AggregateFunctionCombinatorFactory::instance();
         local_engine::registerAggregateFunctionCombinatorPartialMerge(factory);
     }
+
+    /// register ordinary functions from local_engine
+    auto & factory = FunctionFactory::instance();
+    local_engine::registerFunctions(factory);
 
 }
 constexpr auto CH_BACKEND_CONF_PREFIX = "spark.gluten.sql.columnar.backend.ch";
@@ -215,7 +212,7 @@ void init(const std::string & plan)
                 local_engine::SerializedPlanParser::global_context->makeGlobalContext();
                 local_engine::SerializedPlanParser::global_context->setConfig(config);
                 local_engine::SerializedPlanParser::global_context->setSettings(settings);
-
+                local_engine::SerializedPlanParser::global_context->setTemporaryStoragePath("/tmp/libch", 0);
                 auto path = config->getString("path", "/");
                 local_engine::SerializedPlanParser::global_context->setPath(path);
                 LOG_INFO(&Poco::Logger::get("ClickHouseBackend"), "Init global context.");

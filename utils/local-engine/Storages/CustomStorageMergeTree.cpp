@@ -15,7 +15,6 @@ CustomStorageMergeTree::CustomStorageMergeTree(
     bool  /*has_force_restore_data_flag*/)
     : MergeTreeData(
         table_id_,
-        relative_data_path_,
         metadata_,
         context_,
         date_column_name,
@@ -26,6 +25,7 @@ CustomStorageMergeTree::CustomStorageMergeTree(
     , writer(*this)
     , reader(*this)
 {
+    initializeDirectoriesAndFormatVersion(relative_data_path_, attach, date_column_name);
 }
 void CustomStorageMergeTree::dropPartNoWaitNoThrow(const String & /*part_name*/)
 {

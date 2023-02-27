@@ -4,7 +4,6 @@
 #include <Storages/MergeTree/MergeTreeDataSelectExecutor.h>
 #include <Storages/MergeTree/MergeTreeDataWriter.h>
 #include <Storages/MutationCommands.h>
-#include <base/shared_ptr_helper.h>
 
 namespace local_engine
 {
@@ -12,9 +11,8 @@ using namespace DB;
 
 class CustomMergeTreeSink;
 
-class CustomStorageMergeTree final : public shared_ptr_helper<CustomStorageMergeTree>, public MergeTreeData
+class CustomStorageMergeTree final : public MergeTreeData
 {
-    friend struct shared_ptr_helper<CustomStorageMergeTree>;
     friend class CustomMergeTreeSink;
 
 public:
@@ -51,6 +49,10 @@ protected:
     void movePartitionToTable(const StoragePtr & dest_table, const ASTPtr & partition, ContextPtr context) override;
     bool partIsAssignedToBackgroundOperation(const DataPartPtr & part) const override;
     MutationCommands getFirstAlterMutationCommandsForPart(const DataPartPtr & part) const override;
+    void attachRestoredParts(MutableDataPartsVector && parts) override
+    {
+        throw std::runtime_error("not implement");
+    };
 };
 
 }

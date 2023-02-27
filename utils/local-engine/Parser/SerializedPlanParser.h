@@ -10,7 +10,6 @@
 #include <Processors/QueryPlan/AggregatingStep.h>
 #include <Processors/QueryPlan/ISourceStep.h>
 #include <Processors/QueryPlan/QueryPlan.h>
-#include <Processors/Sources/SourceWithProgress.h>
 #include <QueryPipeline/Pipe.h>
 #include <Storages/CustomStorageMergeTree.h>
 #include <Storages/IStorage.h>
@@ -97,7 +96,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"shiftright", "bitShiftRight"},
     {"check_overflow", "check_overflow"},
     {"factorial", "factorial"},
-    {"rand", "canonicalRand"},
+    {"rand", "randCanonical"},
 
     /// string functions
     {"like", "like"},
@@ -108,9 +107,9 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"substring", "substring"},
     {"lower", "lower"},
     {"upper", "upper"},
-    {"trim", "trimBoth"},
-    {"ltrim", "trimLeft"},
-    {"rtrim", "trimRight"},
+    {"trim", ""},
+    {"ltrim", ""},
+    {"rtrim", ""},
     {"concat", "concat"},
     {"strpos", "position"},
     {"char_length", "char_length"},
@@ -128,6 +127,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"reverse","reverseUTF8"},
     // {"hash","murmurHash3_32"},
     {"md5","MD5"},
+    {"repeat","repeat"},
 
     /// hash functions
     {"hash", "murmurHashSpark3_32"},
@@ -282,12 +282,11 @@ private:
     void wrapNullable(std::vector<String> columns, ActionsDAGPtr actionsDag,
                       std::map<std::string, std::string>& nullable_measure_names);
 
-    static Aggregator::Params getAggregateParam(const Block & header, const ColumnNumbers & keys,
+    static Aggregator::Params getAggregateParam(const Names & keys,
                                                 const AggregateDescriptions & aggregates)
     {
         Settings settings;
         return Aggregator::Params(
-            header,
             keys,
             aggregates,
             false,
@@ -301,14 +300,17 @@ private:
             settings.max_threads,
             settings.min_free_disk_space_for_temporary_data,
             true,
-            3);
+            3,
+            settings.max_block_size,
+            false,
+            false);
     }
 
     static Aggregator::Params
-    getMergedAggregateParam(const Block & header, const ColumnNumbers & keys, const AggregateDescriptions & aggregates)
+    getMergedAggregateParam(const Names & keys, const AggregateDescriptions & aggregates)
     {
         Settings settings;
-        return Aggregator::Params(header, keys, aggregates, false, settings.max_threads);
+        return Aggregator::Params(keys, aggregates, false, settings.max_threads, settings.max_block_size);
     }
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);

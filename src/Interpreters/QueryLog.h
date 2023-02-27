@@ -5,6 +5,8 @@
 #include <Core/Settings.h>
 #include <Interpreters/SystemLog.h>
 #include <Interpreters/ClientInfo.h>
+#include <Interpreters/TransactionVersionMetadata.h>
+
 
 namespace ProfileEvents
 {
@@ -72,10 +74,12 @@ struct QueryLogElement
     std::unordered_set<String> used_functions;
     std::unordered_set<String> used_storages;
     std::unordered_set<String> used_table_functions;
+    std::set<String> used_row_policies;
 
     Int32 exception_code{}; // because ErrorCodes are int
     String exception;
     String stack_trace;
+    std::string_view exception_format_string{};
 
     ClientInfo client_info;
 
@@ -85,11 +89,14 @@ struct QueryLogElement
     std::shared_ptr<ProfileEvents::Counters::Snapshot> profile_counters;
     std::shared_ptr<Settings> query_settings;
 
+    TransactionID tid;
+
     static std::string name() { return "QueryLog"; }
 
     static NamesAndTypesList getNamesAndTypes();
     static NamesAndAliases getNamesAndAliases();
     void appendToBlock(MutableColumns & columns) const;
+    static const char * getCustomColumnList() { return nullptr; }
 
     static void appendClientInfo(const ClientInfo & client_info, MutableColumns & columns, size_t & i);
 };

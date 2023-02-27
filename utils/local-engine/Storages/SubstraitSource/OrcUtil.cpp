@@ -133,7 +133,7 @@ void OrcUtil::getFileReaderAndSchema(
     const DB::FormatSettings & format_settings,
     std::atomic<int> & is_stopped)
 {
-    auto arrow_file = DB::asArrowFile(in, format_settings, is_stopped);
+    auto arrow_file = DB::asArrowFile(in, format_settings, is_stopped, "ORC", ORC_MAGIC_BYTES);
     if (is_stopped)
         return;
 

@@ -20,7 +20,6 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/SubstraitSource/FormatFile.h>
 #include <Storages/SubstraitSource/SubstraitFileSource.h>
-#include <base/logger_useful.h>
 #include <base/types.h>
 #include <substrait/plan.pb.h>
 #include <magic_enum.hpp>
@@ -30,6 +29,16 @@
 #include <Common/Exception.h>
 #include <Common/StringUtils.h>
 #include <Common/typeid_cast.h>
+#include <Core/Block.h>
+#include <Core/Types.h>
+#include <Storages/SubstraitSource/FormatFile.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
+#include <substrait/plan.pb.h>
+
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+#include <magic_enum.hpp>
+#include <Common/CHUtil.h>
 namespace DB
 {
 namespace ErrorCodes
@@ -52,7 +61,7 @@ static DB::Block getRealHeader(const DB::Block & header)
 }
 
 SubstraitFileSource::SubstraitFileSource(DB::ContextPtr context_, const DB::Block & header_, const substrait::ReadRel::LocalFiles & file_infos)
-    : DB::SourceWithProgress(getRealHeader(header_), false)
+    : DB::ISource(getRealHeader(header_), false)
     , context(context_)
     , output_header(header_)
 {

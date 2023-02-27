@@ -2,7 +2,7 @@
 #include <Parser/RelParser.h>
 #include <Processors/QueryPlan/SortingStep.h>
 #include <Poco/Logger.h>
-#include <base/logger_useful.h>
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -24,19 +24,14 @@ SortRelParser::parse(DB::QueryPlanPtr query_plan, const substrait::Rel & rel, st
 {
     size_t limit = parseLimit(rel_stack_);
     const auto & sort_rel = rel.sort();
-    auto sort_descr = parseSortDescription(sort_rel.sorts());
+    auto sort_descr = parseSortDescription(sort_rel.sorts(), query_plan->getCurrentDataStream().header);
     const auto & settings = getContext()->getSettingsRef();
     auto sorting_step = std::make_unique<DB::SortingStep>(
         query_plan->getCurrentDataStream(),
         sort_descr,
-        settings.max_block_size,
         limit,
-        SizeLimits(settings.max_rows_to_sort, settings.max_bytes_to_sort, settings.sort_overflow_mode),
-        settings.max_bytes_before_remerge_sort,
-        settings.remerge_sort_lowered_memory_bytes_ratio,
-        settings.max_bytes_before_external_sort,
-        getContext()->getTemporaryVolume(),
-        settings.min_free_disk_space_for_temporary_data);
+        SortingStep::Settings(*getContext()),
+        false);
     sorting_step->setStepDescription("Sorting step");
     query_plan->addStep(std::move(sorting_step));
     return query_plan;
@@ -66,13 +61,14 @@ SortRelParser::parseSortDescription(const google::protobuf::RepeatedPtrField<sub
         }
         if (header.columns())
         {
-            auto & col_name = header.getByPosition(field_pos).name;
+            const auto & col_name = header.getByPosition(field_pos).name;
             sort_descr.emplace_back(col_name, direction_iter->second.first, direction_iter->second.second);
-            sort_descr.back().column_number = field_pos;
+            sort_descr.back().column_name = col_name;
         }
         else
         {
-            sort_descr.emplace_back(field_pos, direction_iter->second.first, direction_iter->second.second);
+            const auto & col_name = header.getByPosition(field_pos).name;
+            sort_descr.emplace_back(col_name, direction_iter->second.first, direction_iter->second.second);
         }
     }
     return sort_descr;

@@ -8,8 +8,6 @@ from helpers.cluster import ClickHouseCluster
 from helpers.network import PartitionManager
 from helpers.test_tools import TSV
 
-cluster = ClickHouseCluster(__file__)
-
 NODES = {"node" + str(i): None for i in (1, 2)}
 
 IS_DEBUG = False
@@ -94,7 +92,7 @@ def _check_exception(exception, expected_tries=3):
 
 @pytest.fixture(scope="module", params=["configs", "configs_secure"])
 def started_cluster(request):
-    cluster = ClickHouseCluster(__file__)
+    cluster = ClickHouseCluster(__file__, request.param)
     cluster.__with_ssl_config = request.param == "configs_secure"
     main_configs = []
     main_configs += [os.path.join(request.param, "config.d/remote_servers.xml")]
@@ -131,15 +129,7 @@ def started_cluster(request):
 def _check_timeout_and_exception(node, user, query_base, query):
     repeats = EXPECTED_BEHAVIOR[user]["times"]
 
-    extra_repeats = 1
-    # Table function remote() are executed two times.
-    # It tries to get table structure from remote shards.
-    # On 'node2' it will firstly try to get structure from 'node1' (which is not available),
-    # so there are 1 extra connection attempts for 'node2' and 'remote'
-    if node.name == "node2" and query_base == "remote":
-        extra_repeats = 2
-
-    expected_timeout = EXPECTED_BEHAVIOR[user]["timeout"] * repeats * extra_repeats
+    expected_timeout = EXPECTED_BEHAVIOR[user]["timeout"] * repeats
 
     start = timeit.default_timer()
     exception = node.query_and_get_error(query, user=user)
