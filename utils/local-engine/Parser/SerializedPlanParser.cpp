@@ -1310,8 +1310,8 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
         result_names.push_back(val_name);
         if (keep_result)
         {
-            actions_dag->addOrReplaceInIndex(*key_node);
-            actions_dag->addOrReplaceInIndex(*val_node);
+            actions_dag->addOrReplaceInOutputs(*key_node);
+            actions_dag->addOrReplaceInOutputs(*val_node);
         }
         return {key_node, val_node};
     }
@@ -1319,7 +1319,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     {
         result_names.push_back(array_join_name);
         if (keep_result)
-            actions_dag->addOrReplaceInIndex(*array_join_node);
+            actions_dag->addOrReplaceInOutputs(*array_join_node);
         return {array_join_node};
     }
     else
