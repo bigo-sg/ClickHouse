@@ -1,9 +1,12 @@
 #pragma once
 
 #include <city.h>
-#include <xxhash.h>
 #include <base/types.h>
-#include <MurmurHash3.h>
+
+#ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wused-but-marked-unused"
+#endif
 
 #include <Functions/FunctionsHashing.h>
 
@@ -21,7 +24,7 @@ struct ImplXxHashSpark64
     using ReturnType = UInt64;
     using uint128_t = CityHash_v1_0_2::uint128;
 
-    static auto apply(const char * s, const size_t len) { return XXH64(s, len, 42); }
+    static auto apply(const char * s, const size_t len) { return XXH_INLINE_XXH64(s, len, 42); }
 
     /*
        With current implementation with more than 1 arguments it will give the results

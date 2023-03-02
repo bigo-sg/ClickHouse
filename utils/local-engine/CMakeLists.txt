@@ -69,7 +69,7 @@ target_link_libraries(${LOCALENGINE_SHARED_LIB} PUBLIC
         loggers
         ch_parquet
         substait_source
-        ch_contrib::lz4
+        xxHash
 )
 # if (USE_LIBCXX)
 target_compile_options(unwind PRIVATE -fPIC)
@@ -246,6 +246,7 @@ target_compile_options(_c-ares PRIVATE -fPIC)
 target_compile_options(_aws PRIVATE -fPIC)
 target_compile_options(_minizip PRIVATE -fPIC)
 target_compile_options(_rocksdb PRIVATE -fPIC)
+target_compile_options(xxHash PRIVATE -fPIC)
 
 add_compile_options(-fPIC)
 if (ENABLE_JEMALLOC)
