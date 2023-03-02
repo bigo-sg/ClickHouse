@@ -311,7 +311,7 @@ private:
 
     void addRemoveNullableStep(QueryPlan & plan, std::vector<String> columns);
 
-    std::pair<DB::DataTypePtr, DB::Field> convertStructFieldType(const DB::DataTypePtr & type, const DB::Field & field);
+    static std::pair<DB::DataTypePtr, DB::Field> convertStructFieldType(const DB::DataTypePtr & type, const DB::Field & field);
 
     int name_no = 0;
     std::unordered_map<std::string, std::string> function_mapping;
