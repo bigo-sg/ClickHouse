@@ -719,7 +719,8 @@ int64_t VariableLengthDataWriter::writeStruct(size_t row_idx, const DB::Tuple & 
         {
             FixedLengthDataWriter writer(field_type);
             // writer.write(field_value, buffer_address + offset + start + len_null_bitmap + i * 8);
-            writer.unsafeWrite(reinterpret_cast<char*>(&field_value.safeGet<char>()), buffer_address + offset + start + len_null_bitmap + i * 8);
+            writer.unsafeWrite(
+                reinterpret_cast<const char *>(&field_value.get<char>()), buffer_address + offset + start + len_null_bitmap + i * 8);
         }
         else
         {
