@@ -247,7 +247,7 @@ private:
         bool keep_result = false);
     const ActionsDAG::Node * parseFunctionWithDAG(
         const substrait::Expression & rel,
-        std::string & result_names,
+        std::string & result_name,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
         bool keep_result = false);
