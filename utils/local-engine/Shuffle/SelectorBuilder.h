@@ -38,14 +38,12 @@ class HashSelectorBuilder
 public:
     explicit HashSelectorBuilder(
         UInt32 parts_num_,
-        const std::vector<std::string> & exprs_,
-        const std::vector<std::size_t> & exprs_index_,
+        const std::vector<size_t> & exprs_index_,
         const std::string & hash_function_name_);
     PartitionInfo build(DB::Block & block);
 private:
     UInt32 parts_num;
-    std::vector<std::string> exprs;
-    std::vector<std::size_t> exprs_index;
+    std::vector<size_t> exprs_index;
     std::string hash_function_name;
     DB::FunctionBasePtr hash_function;
 };
