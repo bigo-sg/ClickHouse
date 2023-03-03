@@ -1258,6 +1258,14 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     ActionsDAG::NodeRawConstPtrs args;
     parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
+    /// If the first argument of function formatDateTimeInJodaSyntax is integer, replace formatDateTimeInJodaSyntax with fromUnixTimestampInJodaSyntax
+    /// to avoid exception
+    if (function_name == "formatDateTimeInJodaSyntax")
+    {
+        if (args.size() > 1 && isInteger(DB::removeNullable(args[0]->result_type)))
+            function_name = "fromUnixTimestampInJodaSyntax";
+    }
+
     const ActionsDAG::Node * result_node;
     if (function_name == "alias")
     {
