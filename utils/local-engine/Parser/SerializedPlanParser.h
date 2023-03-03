@@ -152,7 +152,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"datediff", "dateDiff"},
     {"second", "toSecond"},
     {"add_months", "addMonths"},
-    {"trunc", "trunc"},  /// dummy mapping
+    {"trunc", ""},  /// dummy mapping
 
     // array functions
     {"array", "array"},
