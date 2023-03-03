@@ -779,7 +779,6 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
             query_plan = parseOp(aggregate.input(), rel_stack);
             rel_stack.pop_back();
 
-            // std::cout << "before aggregate header:" << query_plan->getCurrentDataStream().header.dumpStructure() << std::endl;
             bool is_final;
             auto aggregate_step = parseAggregate(*query_plan, aggregate, is_final);
 
@@ -787,7 +786,6 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
 
             if (is_final)
             {
-                // std::cout << "aggregate rel:" << rel.DebugString() << std::endl;
                 std::vector<int32_t> measure_positions;
                 std::vector<substrait::Type> measure_types;
                 for (int i = 0; i < aggregate.measures_size(); i++)
