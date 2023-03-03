@@ -595,19 +595,14 @@ DataTypePtr SerializedPlanParser::parseType(const substrait::Type & substrait_ty
         for (size_t i = 0; i < ch_field_types.size(); ++i)
         {
             if (names)
-            {
                 field_names.push_back(names->front());
-            }
+
             ch_field_types[i] = std::move(parseType(substrait_type.struct_().types()[i], names));
         }
-        if (field_names.size())
-        {
+        if (!field_names.empty())
             ch_type = std::make_shared<DataTypeTuple>(ch_field_types, field_names);
-        }
         else
-        {
             ch_type = std::make_shared<DataTypeTuple>(ch_field_types);
-        }
         ch_type = wrapNullableType(substrait_type.struct_().nullability(), ch_type);
     }
     else if (substrait_type.has_list())
@@ -1422,13 +1417,25 @@ void SerializedPlanParser::parseFunctionArguments(
         repeat_times_node = ActionsDAGUtil::convertNodeType(actions_dag, repeat_times_node, target_type.getName());
         parsed_args.emplace_back(repeat_times_node);
     }
+    else if (function_name == "leftPadUTF8" || function_name == "rightPadUTF8")
+    {
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[0]);
+
+        /// Make sure the second function arguemnt's type is unsigned integer
+        /// TODO: delete this branch after Kyligence/Clickhouse upgraged to 23.2
+        const DB::ActionsDAG::Node * pad_length_node =
+            parseFunctionArgument(actions_dag, required_columns, function_name, args[1]);
+        DB::DataTypeNullable target_type(std::make_shared<DB::DataTypeUInt64>());
+        pad_length_node = ActionsDAGUtil::convertNodeType(actions_dag, pad_length_node, target_type.getName());
+        parsed_args.emplace_back(pad_length_node);
+
+        parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, args[2]);
+    }
     else
     {
         // Default handle
         for (const auto & arg : args)
-        {
             parseFunctionArgument(actions_dag, parsed_args, required_columns, function_name, arg);
-        }
     }
 }
 
@@ -1469,9 +1476,9 @@ SerializedPlanParser::convertStructFieldType(const DB::DataTypePtr & type, const
 {
     // For tupelElement, field index starts from 1, but int substrait plan, it starts from 0.
     #define UINT_CONVERT(type_ptr, field, type_name) \
-        if (type_ptr->getTypeId() == DB::TypeIndex::type_name) \
+        if ((type_ptr)->getTypeId() == DB::TypeIndex::type_name) \
         {\
-            return {std::make_shared<DB::DataTypeU##type_name>(), static_cast<U##type_name>(field.get<type_name>()) + 1};\
+            return {std::make_shared<DB::DataTypeU##type_name>(), static_cast<U##type_name>((field).get<type_name>()) + 1};\
         }
 
     auto type_id = type->getTypeId();
@@ -2147,7 +2154,7 @@ bool LocalExecutor::hasNext()
     {
         LOG_ERROR(
             &Poco::Logger::get("LocalExecutor"), "run query plan failed. {}\n{}", e.message(), PlanUtil::explainPlan(*current_query_plan));
-        throw e;
+        throw;
     }
     return has_next;
 }
