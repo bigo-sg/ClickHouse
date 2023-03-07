@@ -47,6 +47,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"quarter", "toQuarter"},
     {"to_unix_timestamp", "toUnixTimestamp"},
     {"unix_timestamp", "toUnixTimestamp"},
+    {"date_format", "formatDateTimeInJodaSyntax"},
 
     /// arithmetic functions
     {"subtract", "minus"},
@@ -127,7 +128,12 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"reverse","reverseUTF8"},
     // {"hash","murmurHash3_32"},
     {"md5","MD5"},
+    {"translate", "translateUTF8"},
     {"repeat","repeat"},
+
+    /// hash functions
+    {"hash", "murmurHashSpark3_32"},
+    {"xxhash64", "xxHashSpark64"},
 
     // in functions
     {"in", "in"},
@@ -149,6 +155,8 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"date_sub", "subtractDays"},
     {"datediff", "dateDiff"},
     {"second", "toSecond"},
+    {"add_months", "addMonths"},
+    {"trunc", ""},  /// dummy mapping
 
     // array functions
     {"array", "array"},

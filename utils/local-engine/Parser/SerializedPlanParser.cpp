@@ -491,9 +491,9 @@ Block SerializedPlanParser::parseNameStruct(const substrait::NamedStruct & struc
         Poco::StringTokenizer name_parts(name, "#");
         if (name_parts.count() == 4)
         {
-            auto agg_function_name = name_parts[3];
+            auto agg_function_name = getFunctionName(name_parts[3], {});
             AggregateFunctionProperties properties;
-            auto tmp = AggregateFunctionFactory::instance().get(name_parts[3], {data_type}, {}, properties);
+            auto tmp = AggregateFunctionFactory::instance().get(agg_function_name, {data_type}, {}, properties);
             data_type = tmp->getStateType();
         }
         internal_cols.push_back(ColumnWithTypeAndName(data_type, name));
@@ -795,6 +795,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
             const auto & aggregate = rel.aggregate();
             query_plan = parseOp(aggregate.input(), rel_stack);
             rel_stack.pop_back();
+
             bool is_final;
             auto aggregate_step = parseAggregate(*query_plan, aggregate, is_final);
 
@@ -813,6 +814,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                 }
                 auto source = query_plan->getCurrentDataStream().header.getColumnsWithTypeAndName();
                 auto target = source;
+                // std::cout << "aggregate header:" << query_plan->getCurrentDataStream().header.dumpStructure() << std::endl;
 
                 bool need_convert = false;
                 for (size_t i = 0; i < measure_positions.size(); i++)
@@ -823,6 +825,8 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                         target[measure_positions[i]].type = target_type;
                         target[measure_positions[i]].column = target_type->createColumn();
                         need_convert = true;
+                        // std::cout << "source type:" << source[measure_positions[i]].type->getName() << std::endl;
+                        // std::cout << "target type:" << target_type->getName() << std::endl;
                     }
                 }
 
@@ -1054,7 +1058,7 @@ QueryPlanStepPtr SerializedPlanParser::parseAggregate(QueryPlan & plan, const su
         auto function_signature = function_mapping.at(std::to_string(measure.measure().function_reference()));
         auto function_name_idx = function_signature.find(':');
         //        assert(function_name_idx != function_signature.npos && ("invalid function signature: " + function_signature).c_str());
-        auto function_name = function_signature.substr(0, function_name_idx);
+        auto function_name = getFunctionName(function_signature.substr(0, function_name_idx), {});
         if (measure.measure().phase() != substrait::AggregationPhase::AGGREGATION_PHASE_INITIAL_TO_INTERMEDIATE)
         {
             agg.column_name = measure_names.at(i);
@@ -1181,7 +1185,7 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
     else if (function_name == "extract")
     {
         if (args.size() != 2)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "extract function requires two args, function:{}", function.ShortDebugString());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Function extract requires two args, function:{}", function.ShortDebugString());
 
         // Get the first arg: field
         const auto & extract_field = args.at(0);
@@ -1224,6 +1228,27 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
         }
         else
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "The first arg of extract function is wrong.");
+    }
+    else if (function_name == "trunc")
+    {
+        if (args.size() != 2)
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Function trunc requires two args, function:{}", function.ShortDebugString());
+
+        const auto & trunc_field = args.at(0);
+        if (!trunc_field.value().has_literal() || !trunc_field.value().literal().has_string())
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "The second arg of trunc function is wrong.");
+
+        const auto & field_value = trunc_field.value().literal().string();
+        if (field_value == "YEAR" || field_value == "YYYY" || field_value == "YY")
+            ch_function_name = "toStartOfYear";
+        else if (field_value == "QUARTER")
+            ch_function_name = "toStartOfQuarter";
+        else if (field_value == "MONTH" || field_value == "MM" || field_value == "MON")
+            ch_function_name = "toStartOfMonth";
+        else if (field_value == "WEEK")
+            ch_function_name = "toStartOfWeek";
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "The second arg of trunc function is wrong, value:{}", field_value);
     }
     else if (function_name == "check_overflow")
     {
@@ -1338,6 +1363,14 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
     ActionsDAG::NodeRawConstPtrs args;
     parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
+    /// If the first argument of function formatDateTimeInJodaSyntax is integer, replace formatDateTimeInJodaSyntax with fromUnixTimestampInJodaSyntax
+    /// to avoid exception
+    if (function_name == "formatDateTimeInJodaSyntax")
+    {
+        if (args.size() > 1 && isInteger(DB::removeNullable(args[0]->result_type)))
+            function_name = "fromUnixTimestampInJodaSyntax";
+    }
+
     const ActionsDAG::Node * result_node;
     if (function_name == "alias")
     {
@@ -1361,10 +1394,15 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
             }
         }
 
-        if (function_signature.find("extract:", 0) != function_signature.npos)
+        if (startsWith(function_signature, "extract:"))
         {
-            // delete the first arg
+            // delete the first arg of extract
             args.erase(args.begin());
+        }
+        else if (startsWith(function_signature, "trunc:"))
+        {
+            // delete the second arg of trunc
+            args.pop_back();
         }
 
         if (function_signature.find("check_overflow:", 0) != function_signature.npos)

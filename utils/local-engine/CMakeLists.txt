@@ -19,7 +19,7 @@ add_headers_and_sources(external External)
 add_headers_and_sources(shuffle Shuffle)
 add_headers_and_sources(operator Operator)
 add_headers_and_sources(jni jni)
-add_headers_and_sources(aggregate AggregateFunctions)
+add_headers_and_sources(aggregate_functions AggregateFunctions)
 add_headers_and_sources(functions Functions)
 
 include_directories(
@@ -50,7 +50,7 @@ add_library(${LOCALENGINE_SHARED_LIB} SHARED
         ${jni_sources}
         ${substrait_source}
         ${operator_sources}
-        ${aggregate_sources}
+        ${aggregate_functions_sources}
         ${functions_sources}
         local_engine_jni.cpp)
 
@@ -69,6 +69,7 @@ target_link_libraries(${LOCALENGINE_SHARED_LIB} PUBLIC
         loggers
         ch_parquet
         substait_source
+        xxHash
 )
 # if (USE_LIBCXX)
 target_compile_options(unwind PRIVATE -fPIC)
@@ -245,6 +246,7 @@ target_compile_options(_c-ares PRIVATE -fPIC)
 target_compile_options(_aws PRIVATE -fPIC)
 target_compile_options(_minizip PRIVATE -fPIC)
 target_compile_options(_rocksdb PRIVATE -fPIC)
+target_compile_options(xxHash PRIVATE -fPIC)
 
 add_compile_options(-fPIC)
 if (ENABLE_JEMALLOC)

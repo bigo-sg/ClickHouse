@@ -21,12 +21,14 @@ namespace ErrorCodes
 extern const int BAD_ARGUMENTS;
 }
 }
+
 using namespace DB;
 namespace fs = std::filesystem;
 
-namespace local_engine {
-    extern void registerAggregateFunctionCombinatorPartialMerge(AggregateFunctionCombinatorFactory &);
-    extern void registerFunctions(FunctionFactory  &);
+namespace local_engine
+{
+extern void registerAggregateFunctionCombinatorPartialMerge(AggregateFunctionCombinatorFactory &);
+extern void registerFunctions(FunctionFactory &);
 }
 
 #ifdef __cplusplus
@@ -36,10 +38,15 @@ extern "C" {
 void registerAllFunctions()
 {
     registerFunctions();
-
     registerAggregateFunctions();
-    auto & factoryAgg = AggregateFunctionCombinatorFactory::instance();
-    local_engine::registerAggregateFunctionCombinatorPartialMerge(factoryAgg);
+
+    /// register aggregate function combinators from local_engine
+    {
+        auto & factory = AggregateFunctionCombinatorFactory::instance();
+        local_engine::registerAggregateFunctionCombinatorPartialMerge(factory);
+    }
+
+    /// register ordinary functions from local_engine
     auto & factory = FunctionFactory::instance();
     local_engine::registerFunctions(factory);
 
