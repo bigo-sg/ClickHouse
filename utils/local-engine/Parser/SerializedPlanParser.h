@@ -148,6 +148,8 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"min", "min"},
     {"max", "max"},
     {"collect_list", "groupArray"},
+    {"stddev_samp", "stddev_samp"},
+    {"stddev_pop", "stddev_pop"},
 
     // date or datetime functions
     {"from_unixtime", "fromUnixTimestampInJodaSyntax"},
