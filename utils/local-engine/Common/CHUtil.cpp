@@ -24,6 +24,8 @@
 #include <Interpreters/castColumn.h>
 #include <Processors/Chunk.h>
 #include <Processors/QueryPlan/QueryPlan.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
+#include <QueryPipeline/printPipeline.h>
 #include <Common/logger_useful.h>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -368,4 +370,13 @@ const DB::ActionsDAG::Node * ActionsDAGUtil::convertNodeType(
     DB::ActionsDAG::NodeRawConstPtrs children = {left_arg, right_arg};
     return &actions_dag->addFunction(func_builder_cast, std::move(children), result_name);
 }
+
+String QueryPipelineUtil::explainPipeline(DB::QueryPipeline & pipeline)
+{
+    DB::WriteBufferFromOwnString buf;
+    const auto & processors = pipeline.getProcessors();
+    DB::printPipelineCompact(processors, buf, true);
+    return buf.str();
+}
+
 }

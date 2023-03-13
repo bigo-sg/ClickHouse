@@ -2261,6 +2261,7 @@ void LocalExecutor::execute(QueryPlanPtr query_plan)
             .actions_settings = ExpressionActionsSettings{
                 .can_compile_expressions = true, .min_count_to_compile_expression = 3, .compile_expressions = CompileExpressions::yes}});
     query_pipeline = QueryPipelineBuilder::getPipeline(std::move(*pipeline_builder));
+    LOG_DEBUG(&Poco::Logger::get("LocalExecutor"), "clickhouse pipeline:{}", QueryPipelineUtil::explainPipeline(query_pipeline));
     auto t_pipeline = stopwatch.elapsedMicroseconds();
     executor = std::make_unique<PullingPipelineExecutor>(query_pipeline);
     auto t_executor = stopwatch.elapsedMicroseconds() - t_pipeline;

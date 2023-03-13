@@ -75,4 +75,10 @@ public:
         const std::string & result_name = "");
 };
 
+class QueryPipelineUtil
+{
+public:
+    static String explainPipeline(DB::QueryPipeline & pipeline);
+};
+
 }
