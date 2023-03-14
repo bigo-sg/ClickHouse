@@ -22,6 +22,7 @@
 #include <Storages/MergeTree/MergeTreeSettings.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/CustomStorageMergeTree.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <gtest/gtest.h>
 #include <substrait/plan.pb.h>
 #include "testConfig.h"
@@ -272,8 +273,6 @@ TEST(TestSimpleAgg, TestGenerate)
     local_executor.execute(std::move(query_plan));
     while (local_executor.hasNext())
     {
-        //local_engine::SparkRowInfoPtr spark_row_info = local_executor.next();
-
         auto block = local_executor.nextColumnar();
         debug::headBlock(*block);
     }
