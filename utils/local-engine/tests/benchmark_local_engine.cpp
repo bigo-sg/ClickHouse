@@ -48,7 +48,6 @@
 using namespace local_engine;
 using namespace dbms;
 
-bool inside_main = true;
 DB::ContextMutablePtr global_context;
 
 [[maybe_unused]] static void BM_CHColumnToSparkRow(benchmark::State & state)

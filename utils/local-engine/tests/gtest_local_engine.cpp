@@ -86,7 +86,6 @@ TEST(TestSelect, ReadDate)
     }
 }
 
-bool inside_main = true;
 TEST(TestSelect, TestFilter)
 {
     dbms::SerializedSchemaBuilder schema_builder;

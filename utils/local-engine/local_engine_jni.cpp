@@ -27,8 +27,6 @@
 #include <Common/QueryContext.h>
 
 
-bool inside_main = true;
-
 #ifdef __cplusplus
 std::vector<std::string> stringSplit(const std::string & str, char delim)
 {
