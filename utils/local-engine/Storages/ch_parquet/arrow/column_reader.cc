@@ -1931,8 +1931,6 @@ namespace internal {
             } else if (descr->path()->ToDotVector().size() == 1 && descr->logical_type()->type() == LogicalType::Type::type::STRING) {
                 /// CHByteArrayChunkedRecordReader is only for reading columns with type String and is not nested in complex type
                 /// This fixes issue: https://github.com/Kyligence/ClickHouse/issues/166
-                std::cout << "descr:" << descr->ToString() << std::endl;
-                std::cout << "leaf_info:" << leaf_info << std::endl;
                 return std::make_shared<CHByteArrayChunkedRecordReader>(descr, leaf_info, pool);
             } else {
                 return std::make_shared<ByteArrayChunkedRecordReader>(descr, leaf_info, pool);
