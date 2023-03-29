@@ -100,6 +100,31 @@ set(SRCS
     "${HDFS3_SOURCE_DIR}/common/SWCrc32c.cpp"
     "${HDFS3_SOURCE_DIR}/common/Thread.cpp"
     "${HDFS3_SOURCE_DIR}/common/IntelAsmCrc32c.cpp"
+    "${HDFS3_SOURCE_DIR}/client/StripedInputStreamImpl.cpp"
+    "${HDFS3_SOURCE_DIR}/client/StripedOutputStreamImpl.cpp"
+    "${HDFS3_SOURCE_DIR}/client/ErasureCoderOptions.cpp"
+    "${HDFS3_SOURCE_DIR}/client/SystemECPolicies.cpp"
+    "${HDFS3_SOURCE_DIR}/client/RawErasureDecoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/StatefulStripeReader.cpp"
+    "${HDFS3_SOURCE_DIR}/client/RawErasureEncoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/Preconditions.cpp"
+    "${HDFS3_SOURCE_DIR}/client/GF256.cpp"
+    "${HDFS3_SOURCE_DIR}/client/ECChunk.cpp"
+    "${HDFS3_SOURCE_DIR}/client/GaloisField.cpp"
+    "${HDFS3_SOURCE_DIR}/client/CoderUtil.cpp"
+    "${HDFS3_SOURCE_DIR}/client/ByteBufferEncodingState.cpp"
+    "${HDFS3_SOURCE_DIR}/client/RSUtil.cpp"
+    "${HDFS3_SOURCE_DIR}/client/ByteBufferDecodingState.cpp"
+    "${HDFS3_SOURCE_DIR}/client/StripeReader.cpp"
+    "${HDFS3_SOURCE_DIR}/client/StripedBlockUtil.cpp"
+    "${HDFS3_SOURCE_DIR}/client/DataReader.cpp"
+    "${HDFS3_SOURCE_DIR}/client/AbstractNativeRawDecoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/AbstractNativeRawEncoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/dump.cpp"
+    "${HDFS3_SOURCE_DIR}/client/erasure_coder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/NativeRSRawDecoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/NativeRSRawEncoder.cpp"
+    "${HDFS3_SOURCE_DIR}/client/RawErasureCoderFactory.cpp"
     ${PROTO_SOURCES}
 )
 
@@ -148,9 +173,15 @@ if (TARGET OpenSSL::SSL)
     target_link_libraries(_hdfs3 PRIVATE OpenSSL::Crypto OpenSSL::SSL)
 endif()
 
+#find_library(ISAL_LIBRARY NAMES libisal.so)
+#if (ISAL_LIBRARY)
+#    add_definitions(-DHADOOP_ISAL_LIBRARY)
+#    target_link_libraries(_hdfs3 PRIVATE ${ISAL_LIBRARY})
+#endif (ISAL_LIBRARY)
+
 add_library(ch_contrib::hdfs ALIAS _hdfs3)
 
-if (ENABLE_CLICKHOUSE_BENCHMARK)
-     add_executable(perf_checksum ${HDFS3_SOURCE_DIR}/common/perf_checksum.cpp)
-     target_link_libraries(perf_checksum PRIVATE ch_contrib::hdfs)
-endif ()
+# if (ENABLE_CLICKHOUSE_BENCHMARK)
+#      add_executable(perf_checksum ${HDFS3_SOURCE_DIR}/common/perf_checksum.cpp)
+#      target_link_libraries(perf_checksum PRIVATE ch_contrib::hdfs)
+# endif ()
