@@ -86,7 +86,7 @@ private:
     std::mutex mutex;
     std::optional<size_t> total_rows;
 
-    std::vector<StripeInformation> collectRequiredStripes();
-    std::vector<StripeInformation> collectRequiredStripes(DB::ReadBuffer * read_buffer);
+    std::vector<StripeInformation> collectRequiredStripes(UInt64 & total_stripes);
+    std::vector<StripeInformation> collectRequiredStripes(DB::ReadBuffer * read_buffer, UInt64 & total_strpes);
 };
 }

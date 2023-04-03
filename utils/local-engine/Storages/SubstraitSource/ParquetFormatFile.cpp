@@ -40,13 +40,13 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
     else
         required_row_groups = collectRequiredRowGroups(total_row_groups);
 
-    std::vector<int> required_row_group_indices;
-    required_row_group_indices.reserve(required_row_groups.size());
-    for (const auto & row_group : required_row_groups)
-        required_row_group_indices.emplace_back(row_group.index);
 
     std::vector<int> total_row_group_indices(total_row_groups);
     std::iota(total_row_group_indices.begin(), total_row_group_indices.end(), 0);
+
+    std::vector<int> required_row_group_indices(required_row_groups.size());
+    for (size_t i = 0; i < required_row_groups.size(); ++i)
+        required_row_group_indices[i] = required_row_groups[i].index;
 
     std::vector<int> skip_row_group_indices;
     std::set_difference(total_row_group_indices.begin(), total_row_group_indices.end(),
