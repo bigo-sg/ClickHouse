@@ -27,8 +27,8 @@ private:
     std::mutex mutex;
     std::optional<size_t> total_rows;
 
-    std::vector<RowGroupInfomation> collectRequiredRowGroups();
-    std::vector<RowGroupInfomation> collectRequiredRowGroups(DB::ReadBuffer * read_buffer);
+    std::vector<RowGroupInfomation> collectRequiredRowGroups(int & total_row_groups);
+    std::vector<RowGroupInfomation> collectRequiredRowGroups(DB::ReadBuffer * read_buffer, int & total_row_groups);
 };
 
 }

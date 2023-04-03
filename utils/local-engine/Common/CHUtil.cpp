@@ -526,8 +526,10 @@ void BackendInitializerUtil::initSettings()
     settings.set("join_use_nulls", true);
     settings.set("input_format_orc_allow_missing_columns", true);
     settings.set("input_format_orc_case_insensitive_column_matching", true);
+    settings.set("input_format_orc_import_nested", true);
     settings.set("input_format_parquet_allow_missing_columns", true);
     settings.set("input_format_parquet_case_insensitive_column_matching", true);
+    settings.set("input_format_parquet_import_nested", true);
 }
 
 void BackendInitializerUtil::initContexts()

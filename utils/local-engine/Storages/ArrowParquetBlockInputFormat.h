@@ -17,7 +17,6 @@ class ArrowParquetBlockInputFormat : public DB::OptimizedParquetBlockInputFormat
 {
 public:
     ArrowParquetBlockInputFormat(DB::ReadBuffer & in, const DB::Block & header, const DB::FormatSettings & formatSettings, const std::vector<int> & row_group_indices_ = {});
-    //virtual ~ArrowParquetBlockInputFormat();
 
 private:
     DB::Chunk generate() override;

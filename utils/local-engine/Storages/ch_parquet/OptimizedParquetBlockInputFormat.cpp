@@ -193,6 +193,7 @@ NamesAndTypesList OptimizedParquetSchemaReader::readSchema()
     return header.getNamesAndTypesList();
 }
 
+/*
 void registerInputFormatParquet(FormatFactory & factory)
 {
     factory.registerInputFormat(
@@ -232,6 +233,7 @@ void registerInputFormatParquet(FormatFactory &)
 }
 
 void registerOptimizedParquetSchemaReader(FormatFactory &) {}
+*/
 }
 
 #endif
