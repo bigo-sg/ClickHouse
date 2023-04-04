@@ -170,6 +170,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"get_array_item", "arrayElement"},
     {"element_at", "arrayElement"},
     {"array_contains", "has"},
+    {"range", "range"}, /// dummy mapping
 
     // map functions
     {"map", "map"},
