@@ -167,13 +167,14 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
             std::vector<String> useless;
             if (function_name == "arrayJoin")
             {
-                actions_dag = parseArrayJoin(header, expr, result_names, useless, actions_dag, true);
+                /// Whether the function from spark is explode or posexplode
+                bool position = startsWith(function_signature, "posexplode");
+                actions_dag = parseArrayJoin(header, expr, result_names, useless, actions_dag, true, position);
             }
             else
             {
                 result_names.resize(1);
                 actions_dag = parseFunction(header, expr, result_names[0], useless, actions_dag, true);
-
             }
 
             for (const auto & result_name : result_names)
@@ -1284,10 +1285,10 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     std::vector<String> & result_names,
     std::vector<String> & required_columns,
     DB::ActionsDAGPtr actions_dag,
-    bool keep_result)
+    bool keep_result, bool position)
 {
     if (!rel.has_scalar_function())
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "the root of expression should be a scalar function:\n {}", rel.DebugString());
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "The root of expression should be a scalar function:\n {}", rel.DebugString());
 
     const auto & scalar_function = rel.scalar_function();
     auto function_signature = function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
@@ -1295,7 +1296,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     if (function_name != "arrayJoin")
         throw Exception(
             ErrorCodes::LOGICAL_ERROR,
-            "parseArrayJoinWithDAG should only process arrayJoin function, but input is {}",
+            "Function parseArrayJoinWithDAG should only process arrayJoin function, but input is {}",
             rel.ShortDebugString());
 
     ActionsDAG::NodeRawConstPtrs args;
@@ -1315,7 +1316,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     }
 
     if (args.size() != 1)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "argument number of arrayJoin should be 1 but is {}", args.size());
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument number of arrayJoin should be 1 but is {}", args.size());
 
     /// arrayJoin(args[0])
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
@@ -1323,44 +1324,114 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
 
     auto arg_type = DB::removeNullable(args[0]->result_type);
     WhichDataType which(arg_type.get());
-    if (which.isMap())
+    if (!position)
     {
-        /// In Spark: explode(map(k, v)) output 2 columns with default names "key" and "value"
-        /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
-        /// So we must wrap arrayJoin with tupleElement function for compatiability.
-        auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
-        auto index_type = std::make_shared<DataTypeUInt32>();
-
-        /// arrayJoin(args[0]).1
-        ColumnWithTypeAndName key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
-        const auto * key_index_node = &actions_dag->addColumn(std::move(key_index_col));
-        auto key_name = "tupleElement(" + array_join_name + ",1)";
-        const auto * key_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, key_index_node}, key_name);
-
-        /// arrayJoin(args[0]).2
-        ColumnWithTypeAndName val_index_col(index_type->createColumnConst(1, 2), index_type, getUniqueName("2"));
-        const auto * val_index_node = &actions_dag->addColumn(std::move(val_index_col));
-        auto val_name = "tupleElement(" + array_join_name + ",1)";
-        const auto * val_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, val_index_node}, val_name);
-
-        result_names.push_back(key_name);
-        result_names.push_back(val_name);
-        if (keep_result)
+        /// Spark: explode(array_or_map) -> CH: arrayJoin(array_or_map)
+        if (which.isMap())
         {
-            actions_dag->addOrReplaceInOutputs(*key_node);
-            actions_dag->addOrReplaceInOutputs(*val_node);
+            /// In Spark: explode(map(k, v)) output 2 columns with default names "key" and "value"
+            /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
+            /// So we must wrap arrayJoin with tupleElement function for compatiability.
+            auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
+            auto index_type = std::make_shared<DataTypeUInt32>();
+
+            /// arrayJoin(args[0]).1
+            ColumnWithTypeAndName key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
+            const auto * key_index_node = &actions_dag->addColumn(std::move(key_index_col));
+            auto key_name = "tupleElement(" + array_join_name + ",1)";
+            const auto * key_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, key_index_node}, key_name);
+
+            /// arrayJoin(args[0]).2
+            ColumnWithTypeAndName val_index_col(index_type->createColumnConst(1, 2), index_type, getUniqueName("2"));
+            const auto * val_index_node = &actions_dag->addColumn(std::move(val_index_col));
+            auto val_name = "tupleElement(" + array_join_name + ",1)";
+            const auto * val_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, val_index_node}, val_name);
+
+            result_names.push_back(key_name);
+            result_names.push_back(val_name);
+            if (keep_result)
+            {
+                actions_dag->addOrReplaceInOutputs(*key_node);
+                actions_dag->addOrReplaceInOutputs(*val_node);
+            }
+            return {key_node, val_node};
         }
-        return {key_node, val_node};
-    }
-    else if (which.isArray())
-    {
-        result_names.push_back(array_join_name);
-        if (keep_result)
-            actions_dag->addOrReplaceInOutputs(*array_join_node);
-        return {array_join_node};
+        else if (which.isArray())
+        {
+            result_names.push_back(array_join_name);
+            if (keep_result)
+                actions_dag->addOrReplaceInOutputs(*array_join_node);
+            return {array_join_node};
+        }
+        else
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument type of arrayJoin converted from explode should be Array or Map but is {}", arg_type->getName());
     }
     else
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "argument type of arrayJoin should be Array or Map but is {}", arg_type->getName());
+    {
+        /// Spark: posexplode(array_or_map) -> CH: arrayJoin(map), in which map = mapFromArrays(range(length(array_or_map)), array_or_map)
+        if (which.isMap())
+        {
+            /// In Spark: posexplode(array_of_map) output 2 or 3 columns: (pos, col) or (pos, key, value)
+            /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
+            /// So we must wrap arrayJoin with tupleElement function for compatiability.
+            auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
+            auto index_type = std::make_shared<DataTypeUInt32>();
+
+            /// pos = arrayJoin(args[0]).1
+            ColumnWithTypeAndName key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
+            const auto * key_index_node = &actions_dag->addColumn(std::move(key_index_col));
+            auto key_name = "tupleElement(" + array_join_name + ",1)";
+            const auto * key_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, key_index_node}, key_name);
+
+            /// arrayJoin(args[0]).2
+            ColumnWithTypeAndName item_index_col(index_type->createColumnConst(1, 2), index_type, getUniqueName("2"));
+            const auto * item_index_node = &actions_dag->addColumn(std::move(item_index_col));
+            auto item_name = "tupleElement(" + array_join_name + ",2)";
+            const auto * item_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, item_index_node}, item_name);
+
+            auto raw_child_type = DB::removeNullable(args[0]->children[1]->result_type);
+            if (isMap(raw_child_type))
+            {
+                // key = arrayJoin(args[0]).2.1
+                ColumnWithTypeAndName item_key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
+                const auto * item_key_index_node = &actions_dag->addColumn(item_key_index_col);
+                auto item_key_name = "tupleElement(" + item_name + ",1)";
+                const auto * item_key_node = &actions_dag->addFunction(tuple_element_builder, {item_node, item_key_index_node}, item_key_name);
+
+                // value = arrayJoin(args[0]).2.2
+                ColumnWithTypeAndName item_value_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
+                const auto * item_value_index_node = &actions_dag->addColumn(item_value_index_col);
+                auto item_value_name = "tupleElement(" + item_name + ",2)";
+                const auto * item_value_node = &actions_dag->addFunction(tuple_element_builder, {item_node, item_value_index_node}, item_value_name);
+
+                result_names.push_back(key_name);
+                result_names.push_back(item_key_name);
+                result_names.push_back(item_value_name);
+                if (keep_result)
+                {
+                    actions_dag->addOrReplaceInOutputs(*key_node);
+                    actions_dag->addOrReplaceInOutputs(*item_key_node);
+                    actions_dag->addOrReplaceInOutputs(*item_value_node);
+                }
+            }
+            else if (isArray(raw_child_type))
+            {
+                // col = arrayJoin(args[0]).2
+                result_names.push_back(item_name);
+                if (keep_result)
+                    actions_dag->addOrReplaceInOutputs(*item_node);
+            }
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "The raw input of arrayJoin converted from posexplode should be Array or Map type but is {}",
+                raw_child_type->getName());
+        }
+        else
+            throw Exception(
+                ErrorCodes::BAD_ARGUMENTS,
+                "Argument type of arrayJoin converted from posexplode should be Map but is {}",
+                arg_type->getName());
+    }
 }
 
 const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
@@ -1727,12 +1798,12 @@ ActionsDAGPtr SerializedPlanParser::parseArrayJoin(
     std::vector<String> & result_names,
     std::vector<String> & required_columns,
     ActionsDAGPtr actions_dag,
-    bool keep_result)
+    bool keep_result, bool position)
 {
     if (!actions_dag)
         actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(input));
 
-    parseArrayJoinWithDAG(rel, result_names, required_columns, actions_dag, keep_result);
+    parseArrayJoinWithDAG(rel, result_names, required_columns, actions_dag, keep_result, position);
     return actions_dag;
 }
 

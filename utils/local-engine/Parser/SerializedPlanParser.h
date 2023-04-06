@@ -184,6 +184,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
 
     // table-valued generator function
     {"explode", "arrayJoin"},
+    {"posexplode", "arrayJoin"},
 
     // json functions
     {"get_json_object", "JSON_VALUE"},
@@ -267,7 +268,8 @@ private:
         std::vector<String> & result_names,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
-        bool keep_result = false);
+        bool keep_result = false,
+        bool position = false);
     const ActionsDAG::Node * parseFunctionWithDAG(
         const substrait::Expression & rel,
         std::string & result_name,
@@ -279,7 +281,8 @@ private:
         std::vector<String> & result_name,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
-        bool keep_result = false);
+        bool keep_result = false,
+        bool position = false);
     void parseFunctionArguments(
         DB::ActionsDAGPtr & actions_dag,
         ActionsDAG::NodeRawConstPtrs & parsed_args,
