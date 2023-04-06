@@ -177,6 +177,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"get_map_value", "arrayElement"},
     {"map_keys", "mapKeys"},
     {"map_values", "mapValues"},
+    {"map_from_arrays", "mapFromArrays"},
 
     // tuple functions
     {"get_struct_field", "tupleElement"},

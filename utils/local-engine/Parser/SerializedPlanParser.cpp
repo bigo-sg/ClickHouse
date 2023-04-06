@@ -168,6 +168,7 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
             if (function_name == "arrayJoin")
             {
                 /// Whether the function from spark is explode or posexplode
+                std::cout << "array join expression:" << expr.DebugString() << std::endl;
                 bool position = startsWith(function_signature, "posexplode");
                 actions_dag = parseArrayJoin(header, expr, result_names, useless, actions_dag, true, position);
             }
@@ -832,7 +833,6 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                 }
                 auto source = query_plan->getCurrentDataStream().header.getColumnsWithTypeAndName();
                 auto target = source;
-                // std::cout << "aggregate header:" << query_plan->getCurrentDataStream().header.dumpStructure() << std::endl;
 
                 bool need_convert = false;
                 for (size_t i = 0; i < measure_positions.size(); i++)
@@ -843,8 +843,6 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
                         target[measure_positions[i]].type = target_type;
                         target[measure_positions[i]].column = target_type->createColumn();
                         need_convert = true;
-                        // std::cout << "source type:" << source[measure_positions[i]].type->getName() << std::endl;
-                        // std::cout << "target type:" << target_type->getName() << std::endl;
                     }
                 }
 
@@ -1322,6 +1320,8 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
     const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
 
+    std::cout << "array_join_node:" << actions_dag->dumpDAG() << std::endl;
+
     auto arg_type = DB::removeNullable(args[0]->result_type);
     WhichDataType which(arg_type.get());
     if (!position)
@@ -1389,16 +1389,18 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             auto item_name = "tupleElement(" + array_join_name + ",2)";
             const auto * item_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, item_index_node}, item_name);
 
-            auto raw_child_type = DB::removeNullable(args[0]->children[1]->result_type);
+            /// Get type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
+            auto raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
             if (isMap(raw_child_type))
             {
-                // key = arrayJoin(args[0]).2.1
+                std::cout << "ismap" << std::endl;
+                /// key = arrayJoin(args[0]).2.1
                 ColumnWithTypeAndName item_key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
                 const auto * item_key_index_node = &actions_dag->addColumn(item_key_index_col);
                 auto item_key_name = "tupleElement(" + item_name + ",1)";
                 const auto * item_key_node = &actions_dag->addFunction(tuple_element_builder, {item_node, item_key_index_node}, item_key_name);
 
-                // value = arrayJoin(args[0]).2.2
+                /// value = arrayJoin(args[0]).2.2
                 ColumnWithTypeAndName item_value_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
                 const auto * item_value_index_node = &actions_dag->addColumn(item_value_index_col);
                 auto item_value_name = "tupleElement(" + item_name + ",2)";
@@ -1416,15 +1418,23 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             }
             else if (isArray(raw_child_type))
             {
-                // col = arrayJoin(args[0]).2
+                /// col = arrayJoin(args[0]).2
+                std::cout << "isarray" << std::endl;
+                result_names.push_back(key_name);
                 result_names.push_back(item_name);
+                std::cout << "isarray11" << std::endl;
                 if (keep_result)
+                {
+                    actions_dag->addOrReplaceInOutputs(*key_node);
                     actions_dag->addOrReplaceInOutputs(*item_node);
+                }
+                std::cout << "isarray22" << std::endl;
             }
-            throw Exception(
-                ErrorCodes::BAD_ARGUMENTS,
-                "The raw input of arrayJoin converted from posexplode should be Array or Map type but is {}",
-                raw_child_type->getName());
+            else
+                throw Exception(
+                    ErrorCodes::BAD_ARGUMENTS,
+                    "The raw input of arrayJoin converted from posexplode should be Array or Map type but is {}",
+                    raw_child_type->getName());
         }
         else
             throw Exception(
@@ -1533,6 +1543,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
         result_name = function_name + "(" + args_name + ")";
         const auto * function_node = &actions_dag->addFunction(function_builder, args, result_name);
         result_node = function_node;
+
         if (!isTypeMatched(rel.scalar_function().output_type(), function_node->result_type))
         {
             result_node = ActionsDAGUtil::convertNodeType(
@@ -1541,6 +1552,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseFunctionWithDAG(
                 SerializedPlanParser::parseType(rel.scalar_function().output_type())->getName(),
                 function_node->result_name);
         }
+
         if (keep_result)
             actions_dag->addOrReplaceInOutputs(*result_node);
     }
