@@ -132,7 +132,7 @@ public:
     static void finalizeGlobally();
 
     /// Release session level resources like StorageJoinBuilder. Invoked every time executor/driver shutdown.
-    static void finalizeSessionall();
+    static void finalizeSessionally();
 };
 
 }
