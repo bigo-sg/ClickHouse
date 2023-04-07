@@ -347,7 +347,6 @@ DB::ContextMutablePtr global_context;
             .data_file = root + "/data.dat",
             .map_id = 1,
             .partition_nums = 4,
-            .exprs = {"l_partkey", "l_suppkey"},
             .compress_method = local_engine::ShuffleSplitter::compress_methods[state.range(1)]};
         auto splitter = local_engine::ShuffleSplitter::create("hash", options);
         while (executor.pull(chunk))
