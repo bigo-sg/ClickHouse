@@ -637,6 +637,8 @@ void BackendInitializerUtil::init(const std::string & plan)
 
 void BackendFinalizerUtil::finalizeGlobally()
 {
+    local_engine::BroadCastJoinBuilder::clean();
+
     auto & global_context = SerializedPlanParser::global_context;
     auto & shared_context = SerializedPlanParser::shared_context;
     auto * logger = BackendInitializerUtil::logger;
@@ -650,9 +652,6 @@ void BackendFinalizerUtil::finalizeGlobally()
 
 void BackendFinalizerUtil::finalizeSessionall()
 {
-    /// TODO: figure out why BroadCastJoinBuilder::clean would cause core issue
-    /// Currently remove it as a workaround
-    // local_engine::BroadCastJoinBuilder::clean();
 }
 
 }

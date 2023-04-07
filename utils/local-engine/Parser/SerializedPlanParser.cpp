@@ -198,7 +198,7 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
         }
         else if (expr.has_cast() || expr.has_if_then() || expr.has_literal())
         {
-            const auto * node = parseArgument(actions_dag, expr);
+            const auto * node = parseExpression(actions_dag, expr);
             actions_dag->addOrReplaceInOutputs(*node);
             if (distinct_columns.contains(node->result_name))
             {
@@ -442,7 +442,7 @@ PrewhereInfoPtr SerializedPlanParser::parsePreWhereInfo(const substrait::Express
     // for in function
     if (rel.has_singular_or_list())
     {
-        const auto *in_node = parseArgument(prewhere_info->prewhere_actions, rel);
+        const auto *in_node = parseExpression(prewhere_info->prewhere_actions, rel);
         prewhere_info->prewhere_actions->addOrReplaceInOutputs(*in_node);
         filter_name = in_node->result_name;
     }
@@ -750,7 +750,7 @@ QueryPlanPtr SerializedPlanParser::parseOp(const substrait::Rel & rel, std::list
             else
             {
                 actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
-                const auto * node = parseArgument(actions_dag, filter.condition());
+                const auto * node = parseExpression(actions_dag, filter.condition());
                 filter_name = node->result_name;
             }
 
@@ -977,7 +977,7 @@ void SerializedPlanParser::addPreProjectStepIfNeeded(
         }
         else if (arg.has_literal())
         {
-            const auto * node = parseArgument(expression, arg);
+            const auto * node = parseExpression(expression, arg);
             expression->addOrReplaceInOutputs(*node);
             measure_name = node->result_name;
             measure_names.emplace_back(measure_name);
@@ -1289,6 +1289,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "The root of expression should be a scalar function:\n {}", rel.DebugString());
 
     const auto & scalar_function = rel.scalar_function();
+
     auto function_signature = function_mapping.at(std::to_string(rel.scalar_function().function_reference()));
     auto function_name = getFunctionName(function_signature, scalar_function);
     if (function_name != "arrayJoin")
@@ -1297,33 +1298,32 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             "Function parseArrayJoinWithDAG should only process arrayJoin function, but input is {}",
             rel.ShortDebugString());
 
-    ActionsDAG::NodeRawConstPtrs args;
-    for (const auto & arg : scalar_function.arguments())
-    {
-        if (arg.value().has_scalar_function())
-        {
-            std::string arg_name;
-            bool keep_arg = FUNCTION_NEED_KEEP_ARGUMENTS.contains(function_name);
-            parseFunctionWithDAG(arg.value(), arg_name, required_columns, actions_dag, keep_arg);
-            args.emplace_back(&actions_dag->getNodes().back());
-        }
-        else
-        {
-            args.emplace_back(parseArgument(actions_dag, arg.value()));
-        }
-    }
+    /// The argument number of arrayJoin(converted from Spark explode/posexplode) should be 1
+    if (scalar_function.arguments_size() != 1)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument number of arrayJoin should be 1 but is {}", scalar_function.arguments_size());
 
-    if (args.size() != 1)
-            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Argument number of arrayJoin should be 1 but is {}", args.size());
+    ActionsDAG::NodeRawConstPtrs args;
+    parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
     /// arrayJoin(args[0])
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
     const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
-
     std::cout << "array_join_node:" << actions_dag->dumpDAG() << std::endl;
 
     auto arg_type = DB::removeNullable(args[0]->result_type);
     WhichDataType which(arg_type.get());
+    auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
+    auto tuple_index_type = std::make_shared<DataTypeUInt32>();
+
+    auto add_tuple_element = [&](const ActionsDAG::Node * tuple_node, size_t i) -> const ActionsDAG::Node *
+    {
+        ColumnWithTypeAndName index_col(tuple_index_type->createColumnConst(1, i), tuple_index_type, getUniqueName(std::to_string(i)));
+        const auto * index_node = &actions_dag->addColumn(std::move(index_col));
+        auto result_name = "tupleElement(" + tuple_node->result_name + ", " + index_node->result_name + ")";
+        return &actions_dag->addFunction(tuple_element_builder, {tuple_node, index_node}, result_name);
+    };
+
+    /// Special process to keep compatiable with Spark
     if (!position)
     {
         /// Spark: explode(array_or_map) -> CH: arrayJoin(array_or_map)
@@ -1332,23 +1332,15 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In Spark: explode(map(k, v)) output 2 columns with default names "key" and "value"
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
-            auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
-            auto index_type = std::make_shared<DataTypeUInt32>();
 
             /// arrayJoin(args[0]).1
-            ColumnWithTypeAndName key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
-            const auto * key_index_node = &actions_dag->addColumn(std::move(key_index_col));
-            auto key_name = "tupleElement(" + array_join_name + ",1)";
-            const auto * key_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, key_index_node}, key_name);
+            const auto * key_node = add_tuple_element(array_join_node, 1);
 
             /// arrayJoin(args[0]).2
-            ColumnWithTypeAndName val_index_col(index_type->createColumnConst(1, 2), index_type, getUniqueName("2"));
-            const auto * val_index_node = &actions_dag->addColumn(std::move(val_index_col));
-            auto val_name = "tupleElement(" + array_join_name + ",1)";
-            const auto * val_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, val_index_node}, val_name);
+            const auto * val_node = add_tuple_element(array_join_node, 2);
 
-            result_names.push_back(key_name);
-            result_names.push_back(val_name);
+            result_names.push_back(key_node->result_name);
+            result_names.push_back(val_node->result_name);
             if (keep_result)
             {
                 actions_dag->addOrReplaceInOutputs(*key_node);
@@ -1374,20 +1366,12 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In Spark: posexplode(array_of_map) output 2 or 3 columns: (pos, col) or (pos, key, value)
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
-            auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
-            auto index_type = std::make_shared<DataTypeUInt32>();
 
             /// pos = arrayJoin(args[0]).1
-            ColumnWithTypeAndName key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
-            const auto * key_index_node = &actions_dag->addColumn(std::move(key_index_col));
-            auto key_name = "tupleElement(" + array_join_name + ",1)";
-            const auto * key_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, key_index_node}, key_name);
+            const auto * pos_node = add_tuple_element(array_join_node, 1);
 
-            /// arrayJoin(args[0]).2
-            ColumnWithTypeAndName item_index_col(index_type->createColumnConst(1, 2), index_type, getUniqueName("2"));
-            const auto * item_index_node = &actions_dag->addColumn(std::move(item_index_col));
-            auto item_name = "tupleElement(" + array_join_name + ",2)";
-            const auto * item_node = &actions_dag->addFunction(tuple_element_builder, {array_join_node, item_index_node}, item_name);
+            /// col = arrayJoin(args[0]).2 or (key, value) = arrayJoin(args[0]).2
+            const auto * item_node = add_tuple_element(array_join_node, 2);
 
             /// Get type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
             auto raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
@@ -1395,40 +1379,37 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             {
                 std::cout << "ismap" << std::endl;
                 /// key = arrayJoin(args[0]).2.1
-                ColumnWithTypeAndName item_key_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
-                const auto * item_key_index_node = &actions_dag->addColumn(item_key_index_col);
-                auto item_key_name = "tupleElement(" + item_name + ",1)";
-                const auto * item_key_node = &actions_dag->addFunction(tuple_element_builder, {item_node, item_key_index_node}, item_key_name);
+                const auto * item_key_node = add_tuple_element(item_node, 1);
 
                 /// value = arrayJoin(args[0]).2.2
-                ColumnWithTypeAndName item_value_index_col(index_type->createColumnConst(1, 1), index_type, getUniqueName("1"));
-                const auto * item_value_index_node = &actions_dag->addColumn(item_value_index_col);
-                auto item_value_name = "tupleElement(" + item_name + ",2)";
-                const auto * item_value_node = &actions_dag->addFunction(tuple_element_builder, {item_node, item_value_index_node}, item_value_name);
+                const auto * item_value_node = add_tuple_element(item_node, 2);
 
-                result_names.push_back(key_name);
-                result_names.push_back(item_key_name);
-                result_names.push_back(item_value_name);
+                result_names.push_back(pos_node->result_name);
+                result_names.push_back(item_key_node->result_name);
+                result_names.push_back(item_value_node->result_name);
                 if (keep_result)
                 {
-                    actions_dag->addOrReplaceInOutputs(*key_node);
+                    actions_dag->addOrReplaceInOutputs(*pos_node);
                     actions_dag->addOrReplaceInOutputs(*item_key_node);
                     actions_dag->addOrReplaceInOutputs(*item_value_node);
                 }
+
+                return {pos_node, item_key_node, item_value_node};
             }
             else if (isArray(raw_child_type))
             {
                 /// col = arrayJoin(args[0]).2
                 std::cout << "isarray" << std::endl;
-                result_names.push_back(key_name);
-                result_names.push_back(item_name);
+                result_names.push_back(pos_node->result_name);
+                result_names.push_back(item_node->result_name);
                 std::cout << "isarray11" << std::endl;
                 if (keep_result)
                 {
-                    actions_dag->addOrReplaceInOutputs(*key_node);
+                    actions_dag->addOrReplaceInOutputs(*pos_node);
                     actions_dag->addOrReplaceInOutputs(*item_node);
                 }
                 std::cout << "isarray22" << std::endl;
+                return {pos_node, item_node};
             }
             else
                 throw Exception(
@@ -1570,7 +1551,9 @@ void SerializedPlanParser::parseFunctionArguments(
     {
         return &actions_dag->addColumn(ColumnWithTypeAndName(type->createColumnConst(1, field), type, getUniqueName(toString(field))));
     };
+
     const auto & args = scalar_function.arguments();
+
     // Some functions need to be handled specially.
     if (function_name == "JSONExtract")
     {
@@ -1674,7 +1657,7 @@ void SerializedPlanParser::parseFunctionArguments(
         const DB::ActionsDAG::Node * arg_node = nullptr;
         if (args[0].value().has_cast())
         {
-            arg_node = parseArgument(actions_dag, args[0].value().cast().input());
+            arg_node = parseExpression(actions_dag, args[0].value().cast().input());
             const auto * res_type = arg_node->result_type.get();
             if (res_type->isNullable())
             {
@@ -1759,7 +1742,7 @@ const DB::ActionsDAG::Node * SerializedPlanParser::parseFunctionArgument(
     }
     else
     {
-        res = parseArgument(actions_dag, arg.value());
+        res = parseExpression(actions_dag, arg.value());
     }
     return res;
 }
@@ -1960,7 +1943,7 @@ std::pair<DataTypePtr, Field> SerializedPlanParser::parseLiteral(const substrait
     return std::make_pair(std::move(type), std::move(field));
 }
 
-const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr action_dag, const substrait::Expression & rel)
+const ActionsDAG::Node * SerializedPlanParser::parseExpression(ActionsDAGPtr action_dag, const substrait::Expression & rel)
 {
     auto add_column = [&](const DataTypePtr & type, const Field & field) -> auto
     {
@@ -1991,26 +1974,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             std::string ch_function_name = getCastFunction(rel.cast().type());
             DB::ActionsDAG::NodeRawConstPtrs args;
             const auto & cast_input = rel.cast().input();
-            args.emplace_back(parseArgument(action_dag, cast_input));
-            /*
-            if (cast_input.has_selection() || cast_input.has_literal())
-            {
-                args.emplace_back(parseArgument(action_dag, rel.cast().input()));
-            }
-            else if (cast_input.has_if_then())
-            {
-                args.emplace_back(parseArgument(action_dag, rel.cast().input()));
-            }
-            else if (cast_input.has_scalar_function())
-            {
-                std::string result;
-                std::vector<String> useless;
-                const auto * node = parseFunctionWithDAG(cast_input, result, useless, action_dag, false);
-                args.emplace_back(node);
-            }
-            else
-                throw Exception(ErrorCodes::BAD_ARGUMENTS, "unsupported cast input {}", rel.cast().input().DebugString());
-            */
+            args.emplace_back(parseExpression(action_dag, cast_input));
 
             if (ch_function_name.starts_with("toDecimal"))
             {
@@ -2039,14 +2003,14 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
             for (int i = 0; i < condition_nums; ++i)
             {
                 const auto & ifs = if_then.ifs(i);
-                const auto * if_node = parseArgument(action_dag, ifs.if_());
+                const auto * if_node = parseExpression(action_dag, ifs.if_());
                 args.emplace_back(if_node);
 
-                const auto * then_node = parseArgument(action_dag, ifs.then());
+                const auto * then_node = parseExpression(action_dag, ifs.then());
                 args.emplace_back(then_node);
             }
 
-            const auto * else_node = parseArgument(action_dag, if_then.else_());
+            const auto * else_node = parseExpression(action_dag, if_then.else_());
             args.emplace_back(else_node);
             std::string args_name;
             join(args, ',', args_name);
@@ -2072,7 +2036,7 @@ const ActionsDAG::Node * SerializedPlanParser::parseArgument(ActionsDAGPtr actio
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "Options of SingularOrList must have literal type");
 
             DB::ActionsDAG::NodeRawConstPtrs args;
-            args.emplace_back(parseArgument(action_dag, rel.singular_or_list().value()));
+            args.emplace_back(parseExpression(action_dag, rel.singular_or_list().value()));
 
             bool nullable = false;
             size_t options_len = options.size();

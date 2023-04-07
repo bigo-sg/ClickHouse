@@ -42,7 +42,7 @@ protected:
     static DB::Names parseFunctionArgumentNames(const Block & header, const google::protobuf::RepeatedPtrField<substrait::FunctionArgument> & func_args);
     const DB::ActionsDAG::Node * parseArgument(ActionsDAGPtr action_dag, const substrait::Expression & rel)
     {
-        return plan_parser->parseArgument(action_dag, rel);
+        return plan_parser->parseExpression(action_dag, rel);
     }
     std::pair<DataTypePtr, Field> parseLiteral(const substrait::Expression_Literal & literal)
     {
