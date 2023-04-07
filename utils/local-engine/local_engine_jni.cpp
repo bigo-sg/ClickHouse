@@ -168,7 +168,7 @@ void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeInitNa
 void Java_io_glutenproject_vectorized_ExpressionEvaluatorJniWrapper_nativeFinalizeNative(JNIEnv * env)
 {
     LOCAL_ENGINE_JNI_METHOD_START
-    local_engine::BackendFinalizerUtil::finalizeSessionall();
+    local_engine::BackendFinalizerUtil::finalizeSessionally();
     LOCAL_ENGINE_JNI_METHOD_END(env, )
 }
 

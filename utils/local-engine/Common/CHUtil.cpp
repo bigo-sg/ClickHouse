@@ -483,7 +483,7 @@ void BackendInitializerUtil::initConfig(const std::string &plan)
 
 void BackendInitializerUtil::initLoggers()
 {
-    auto level = config->getString("logger.level", "trace");
+    auto level = config->getString("logger.level", "error");
     if (config->has("logger.log"))
         local_engine::Logger::initFileLogger(*config, "ClickHouseBackend");
     else
@@ -650,7 +650,7 @@ void BackendFinalizerUtil::finalizeGlobally()
     }
 }
 
-void BackendFinalizerUtil::finalizeSessionall()
+void BackendFinalizerUtil::finalizeSessionally()
 {
 }
 
