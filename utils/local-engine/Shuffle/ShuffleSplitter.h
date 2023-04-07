@@ -21,8 +21,8 @@ struct SplitOptions
     int shuffle_id;
     int map_id;
     size_t partition_nums;
-    std::string exprs;
-    std::string exprs_index;
+    std::string hash_exprs;
+    std::string out_exprs;
     // std::vector<std::string> exprs;
     std::string compress_method = "zstd";
     int compress_level;
@@ -88,6 +88,8 @@ protected:
     std::vector<std::unique_ptr<DB::NativeWriter>> partition_outputs;
     std::vector<std::unique_ptr<DB::WriteBuffer>> partition_write_buffers;
     std::vector<std::unique_ptr<DB::WriteBuffer>> partition_cached_write_buffers;
+    std::vector<size_t> output_columns_indicies;
+    DB::Block output_header;
     SplitOptions options;
     SplitResult split_result;
 };
