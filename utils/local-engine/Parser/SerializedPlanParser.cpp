@@ -168,7 +168,6 @@ std::shared_ptr<DB::ActionsDAG> SerializedPlanParser::expressionsToActionsDAG(
             if (function_name == "arrayJoin")
             {
                 /// Whether the function from spark is explode or posexplode
-                std::cout << "array join expression:" << expr.DebugString() << std::endl;
                 bool position = startsWith(function_signature, "posexplode");
                 actions_dag = parseArrayJoin(header, expr, result_names, useless, actions_dag, true, position);
             }
@@ -1308,7 +1307,6 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     /// arrayJoin(args[0])
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
     const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
-    std::cout << "array_join_node:" << actions_dag->dumpDAG() << std::endl;
 
     auto arg_type = DB::removeNullable(args[0]->result_type);
     WhichDataType which(arg_type.get());
@@ -1377,7 +1375,6 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             auto raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
             if (isMap(raw_child_type))
             {
-                std::cout << "ismap" << std::endl;
                 /// key = arrayJoin(args[0]).2.1
                 const auto * item_key_node = add_tuple_element(item_node, 1);
 
@@ -1399,16 +1396,13 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             else if (isArray(raw_child_type))
             {
                 /// col = arrayJoin(args[0]).2
-                std::cout << "isarray" << std::endl;
                 result_names.push_back(pos_node->result_name);
                 result_names.push_back(item_node->result_name);
-                std::cout << "isarray11" << std::endl;
                 if (keep_result)
                 {
                     actions_dag->addOrReplaceInOutputs(*pos_node);
                     actions_dag->addOrReplaceInOutputs(*item_node);
                 }
-                std::cout << "isarray22" << std::endl;
                 return {pos_node, item_node};
             }
             else
