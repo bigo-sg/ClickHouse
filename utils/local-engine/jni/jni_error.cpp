@@ -44,7 +44,8 @@ void JniErrorsGlobalState::destroy(JNIEnv * env)
 void JniErrorsGlobalState::initialize(JNIEnv * env_)
 {
     io_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/io/IOException;");
-    runtime_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/lang/RuntimeException;");
+    // runtime_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/lang/RuntimeException;");
+    runtime_exception_class = CreateGlobalExceptionClassReference(env_, "Lorg/apache/spark/SparkRuntimeException;");
     unsupportedoperation_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/lang/UnsupportedOperationException;");
     illegal_access_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/lang/IllegalAccessException;");
     illegal_argument_exception_class = CreateGlobalExceptionClassReference(env_, "Ljava/lang/IllegalArgumentException;");
@@ -79,6 +80,5 @@ void JniErrorsGlobalState::throwRuntimeException(JNIEnv * env,const std::string 
 {
     throwException(env, runtime_exception_class, message, stack_trace);
 }
-
 
 }
