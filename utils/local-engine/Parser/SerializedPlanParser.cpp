@@ -1273,6 +1273,15 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "check_overflow function requires at least two args.");
         ch_function_name = getDecimalFunction(output_type.decimal(), args.at(1).value().literal().boolean());
     }
+    else if (function_name == "char_length")
+    {
+        /// In Spark
+        /// char_length returns the number of bytes when input is binary type, corresponding to CH length function
+        /// char_length returns the number of characters when input is string type, corresponding to CH char_length function
+        ch_function_name = SCALAR_FUNCTIONS.at(function_name);
+        if (function_signature.find("vbin") != std::string::npos)
+            ch_function_name = "length";
+    }
     else
         ch_function_name = SCALAR_FUNCTIONS.at(function_name);
 
@@ -1319,6 +1328,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
 
     /// arrayJoin(args[0])
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
+    std::cout << "actions_dag:" << actions_dag->dumpDAG() << std::endl;
     const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
 
     auto arg_type = DB::removeNullable(args[0]->result_type);
