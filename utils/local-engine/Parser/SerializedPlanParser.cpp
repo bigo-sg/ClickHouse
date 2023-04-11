@@ -246,60 +246,40 @@ std::string getDecimalFunction(const substrait::Type_Decimal & decimal, const bo
 
     return ch_function_name;
 }
+
 /// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
 std::string getCastFunction(const substrait::Type & type)
 {
     std::string ch_function_name;
     if (type.has_fp64())
-    {
         ch_function_name = "toFloat64";
-    }
     else if (type.has_fp32())
-    {
         ch_function_name = "toFloat32";
-    }
-    else if (type.has_string() || type.has_binary())
-    {
+    else if (type.has_string())
         ch_function_name = "toString";
-    }
+    else if (type.has_binary())
+        ch_function_name = "reinterpretAsStringSpark";
     else if (type.has_i64())
-    {
         ch_function_name = "toInt64";
-    }
     else if (type.has_i32())
-    {
         ch_function_name = "toInt32";
-    }
     else if (type.has_i16())
-    {
         ch_function_name = "toInt16";
-    }
     else if (type.has_i8())
-    {
         ch_function_name = "toInt8";
-    }
     else if (type.has_date())
-    {
         ch_function_name = "toDate32";
-    }
     // TODO need complete param: scale
     else if (type.has_timestamp())
-    {
         ch_function_name = "toDateTime64";
-    }
     else if (type.has_bool_())
-    {
         ch_function_name = "toUInt8";
-    }
     else if (type.has_decimal())
-    {
         ch_function_name = getDecimalFunction(type.decimal(), false);
-    }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support cast type {}", type.DebugString());
 
     /// TODO(taiyang-li): implement cast functions of other types
-
     return ch_function_name;
 }
 

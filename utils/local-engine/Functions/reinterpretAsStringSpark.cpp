@@ -18,6 +18,9 @@ namespace local_engine
 
 namespace
 {
+    /// The difference between reinterpretAsStringSpark and reinterpretAsString is that reinterpretAsStringSpark:
+    /// 1. Does not cut trailing zeros
+    /// 2. Output reinterpreted bytes in big-endian order. e.g. input: 0x1234, output: [0x00 0x00 0x12 0x34]
     class FunctionReinterpretAsStringSpark : public IFunction
     {
     public:
@@ -64,11 +67,13 @@ namespace
             ColumnString::Offset offset = 0;
             for (size_t i = 0; i < rows; ++i)
             {
-                StringRef data = src.getDataAt(i);
+                /// Transform little-endian in input to big-endian in output
+                String data = src.getDataAt(i).toString();
+                std::reverse(data.begin(), data.end());
 
-                data_to.resize(offset + data.size + 1);
-                memcpy(&data_to[offset], data.data, data.size);
-                offset += data.size;
+                data_to.resize(offset + data.size() + 1);
+                memcpy(&data_to[offset], data.data(), data.size());
+                offset += data.size();
                 data_to[offset] = 0;
                 ++offset;
                 offsets_to[i] = offset;
