@@ -1308,7 +1308,6 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
 
     /// arrayJoin(args[0])
     auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
-    std::cout << "actions_dag:" << actions_dag->dumpDAG() << std::endl;
     const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
 
     auto arg_type = DB::removeNullable(args[0]->result_type);
