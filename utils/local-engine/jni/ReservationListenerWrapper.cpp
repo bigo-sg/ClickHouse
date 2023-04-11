@@ -23,6 +23,7 @@ ReservationListenerWrapper::~ReservationListenerWrapper()
 void ReservationListenerWrapper::reserve(int64_t size)
 {
     GET_JNIENV(env)
+    std::cout << this << " reserve " << size << " strace:" << StackTrace().toString() << std::endl;
     safeCallVoidMethod(env, listener, reservation_listener_reserve, size);
     CLEAN_JNIENV
 }
@@ -30,6 +31,7 @@ void ReservationListenerWrapper::reserve(int64_t size)
 void ReservationListenerWrapper::reserveOrThrow(int64_t size)
 {
     GET_JNIENV(env)
+    std::cout << this << " reserveOrThrow " << size << " strace:" << StackTrace().toString() << std::endl;
     safeCallVoidMethod(env, listener, reservation_listener_reserve_or_throw, size);
     CLEAN_JNIENV
 
@@ -38,6 +40,7 @@ void ReservationListenerWrapper::reserveOrThrow(int64_t size)
 void ReservationListenerWrapper::free(int64_t size)
 {
     GET_JNIENV(env)
+    std::cout << this << " free " << size << " strace:" << StackTrace().toString() << std::endl;
     safeCallVoidMethod(env, listener, reservation_listener_unreserve, size);
     CLEAN_JNIENV
 }

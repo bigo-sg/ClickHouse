@@ -117,6 +117,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"char_length", "char_length"},
     {"replace", "replaceAll"},
     {"regexp_replace", "replaceRegexpAll"},
+    {"regexp_extract_all", "regexpExtractAllSpark"},
     {"chr", "char"},
     {"rlike", "match"},
     {"ascii", "ascii"},
