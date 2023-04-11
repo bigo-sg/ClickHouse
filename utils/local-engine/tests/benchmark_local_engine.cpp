@@ -261,7 +261,6 @@ DB::ContextMutablePtr global_context;
             .split_size = 8192,
             .io_buffer_size = DBMS_DEFAULT_BUFFER_SIZE,
             .data_file = root + "/data.dat",
-            .local_tmp_dir = root,
             .map_id = 1,
             .partition_nums = 4,
             .compress_method = local_engine::ShuffleSplitter::compress_methods[state.range(1)]};
@@ -346,10 +345,8 @@ DB::ContextMutablePtr global_context;
             .split_size = 8192,
             .io_buffer_size = DBMS_DEFAULT_BUFFER_SIZE,
             .data_file = root + "/data.dat",
-            .local_tmp_dir = root,
             .map_id = 1,
             .partition_nums = 4,
-            .exprs = {"l_partkey", "l_suppkey"},
             .compress_method = local_engine::ShuffleSplitter::compress_methods[state.range(1)]};
         auto splitter = local_engine::ShuffleSplitter::create("hash", options);
         while (executor.pull(chunk))
