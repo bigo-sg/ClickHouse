@@ -7,9 +7,11 @@
 #include <utility>
 
 #include <parquet/arrow/reader.h>
+#include <Common/Config.h>
 #include <Formats/FormatFactory.h>
 #include <Formats/FormatSettings.h>
 #include <IO/SeekableReadBuffer.h>
+#include <Storages/ArrowParquetBlockInputFormat.h>
 #include <Processors/Formats/Impl/ArrowBufferedStreams.h>
 #include <Processors/Formats/Impl/ParquetBlockInputFormat.h>
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
@@ -34,8 +36,9 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
 {
     auto res = std::make_shared<FormatFile::InputFormat>();
     res->read_buffer = std::move(read_buffer_builder->build(file_info));
+
     std::vector<RowGroupInfomation> required_row_groups;
-    int total_row_groups = 0;
+    [[maybe_unused]] int total_row_groups = 0;
     if (auto * seekable_in = dynamic_cast<DB::SeekableReadBuffer *>(res->read_buffer.get()))
     {
         // reuse the read_buffer to avoid opening the file twice.
@@ -46,6 +49,19 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
     else
         required_row_groups = collectRequiredRowGroups(total_row_groups);
 
+    auto format_settings = DB::getFormatSettings(context);
+
+#if USE_LOCAL_FORMATS
+    format_settings.parquet.import_nested = true;
+
+    std::vector<int> row_group_indices;
+    row_group_indices.reserve(required_row_groups.size());
+    for (const auto & row_group : required_row_groups)
+        row_group_indices.emplace_back(row_group.index);
+
+    auto input_format
+        = std::make_shared<local_engine::ArrowParquetBlockInputFormat>(*(res->read_buffer), header, format_settings, row_group_indices);
+#else
 
     std::vector<int> total_row_group_indices(total_row_groups);
     std::iota(total_row_group_indices.begin(), total_row_group_indices.end(), 0);
@@ -59,9 +75,10 @@ FormatFile::InputFormatPtr ParquetFormatFile::createInputFormat(const DB::Block 
         required_row_group_indices.begin(), required_row_group_indices.end(),
         std::back_inserter(skip_row_group_indices));
 
-    auto format_settings = DB::getFormatSettings(context);
     format_settings.parquet.skip_row_groups = std::unordered_set<int>(skip_row_group_indices.begin(), skip_row_group_indices.end());
     auto input_format = std::make_shared<DB::ParquetBlockInputFormat>(*(res->read_buffer), header, format_settings);
+#endif
+
     res->input = input_format;
     return res;
 }

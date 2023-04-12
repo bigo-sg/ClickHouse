@@ -1,19 +1,10 @@
 #include "FormatFile.h"
 
 #include <memory>
-// #include <type_traits>
-// #include <unistd.h>
-// #include <IO/ReadBuffer.h>
-// #include <Storages/PartitionCommands.h>
-// #include <sys/stat.h>
-// #include <Poco/URI.h>
-// #include <Poco/Logger.h>
 #include <Common/Exception.h>
 #include <Common/StringUtils.h>
 #include <Common/logger_useful.h>
 #include <IO/ReadBufferFromFile.h>
-// #include <Processors/Formats/IInputFormat.h>
-// #include <Storages/HDFS/ReadBufferFromHDFS.h>
 
 #if USE_PARQUET
 #include <Storages/SubstraitSource/ParquetFormatFile.h>
