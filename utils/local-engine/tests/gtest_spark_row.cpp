@@ -236,7 +236,7 @@ TEST(SparkRow, NullHandling)
     BlockPtr block;
     std::tie(spark_row_info, block) = mockSparkRowInfoAndBlock(type_and_fields);
     assertReadConsistentWithWritten(*spark_row_info, *block, type_and_fields);
-    EXPECT_TRUE(spark_row_info->getTotalBytes() == 8 + (8 * type_and_fields.size()));
+    EXPECT_TRUE(spark_row_info->getTotalBytes() == static_cast<int64_t>(8 + (8 * type_and_fields.size())));
 }
 
 TEST(SparkRow, StructTypes)

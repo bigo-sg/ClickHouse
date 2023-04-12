@@ -24,6 +24,7 @@ public:
         size_t buffer_size = DEFAULT_BLOCK_SIZE;
         size_t partition_nums;
         std::string exprs_buffer;
+        std::string schema_buffer;
     };
 
     struct Holder
@@ -48,7 +49,8 @@ protected:
     virtual void computePartitionId(DB::Block &) { }
     Options options;
     PartitionInfo partition_info;
-
+    std::vector<size_t> output_columns_indicies;
+    DB::Block output_header;
 
 private:
     void split(DB::Block & block);

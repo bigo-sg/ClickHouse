@@ -19,6 +19,7 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 }
+
 namespace local_engine
 {
 
@@ -59,10 +60,9 @@ PartitionInfo RoundRobinSelectorBuilder::build(DB::Block & block)
 
 HashSelectorBuilder::HashSelectorBuilder(
     UInt32 parts_num_,
-    const std::vector<std::string> & exprs_,
-    const std::vector<std::size_t> & exprs_index_,
+    const std::vector<size_t> & exprs_index_,
     const std::string & hash_function_name_)
-    : parts_num(parts_num_), exprs(exprs_), exprs_index(exprs_index_), hash_function_name(hash_function_name_)
+    : parts_num(parts_num_), exprs_index(exprs_index_), hash_function_name(hash_function_name_)
 {
 }
 
@@ -70,18 +70,9 @@ PartitionInfo HashSelectorBuilder::build(DB::Block & block)
 {
     ColumnsWithTypeAndName args;
     auto rows = block.rows();
-    for (size_t i = 0; i < exprs.size(); i++)
+    for (size_t i = 0; i < exprs_index.size(); i++)
     {
-        auto & name = exprs.at(i);
-        auto * type_and_name = block.findByName(name);
-        if (type_and_name == nullptr)
-        {
-            args.emplace_back(block.getByPosition(exprs_index.at(i)));
-        }
-        else
-        {
-            args.emplace_back(block.getByName(name));
-        }
+        args.emplace_back(block.getByPosition(exprs_index.at(i)));
     }
 
     if (!hash_function) [[unlikely]]
@@ -123,17 +114,6 @@ RangeSelectorBuilder::RangeSelectorBuilder(const std::string & option, const siz
 {
     Poco::JSON::Parser parser;
     auto info = parser.parse(option).extract<Poco::JSON::Object::Ptr>();
-    if (info->has("projection_plan"))
-    {
-        // for convenient, we use a serialzied protobuf to store the projeciton plan
-        String encoded_str = info->get("projection_plan").convert<std::string>();
-        Poco::MemoryInputStream istr(encoded_str.data(), encoded_str.size());
-        Poco::Base64Decoder decoder(istr);
-        String decoded_str;
-        Poco::StreamCopier::copyToString(decoder, decoded_str);
-        projection_plan_pb = std::make_unique<substrait::Plan>();
-        projection_plan_pb->ParseFromString(decoded_str);
-    }
     auto ordering_infos = info->get("ordering").extract<Poco::JSON::Array::Ptr>();
     initSortInformation(ordering_infos);
     initRangeBlock(info->get("range_bounds").extract<Poco::JSON::Array::Ptr>());
@@ -143,26 +123,7 @@ RangeSelectorBuilder::RangeSelectorBuilder(const std::string & option, const siz
 PartitionInfo RangeSelectorBuilder::build(DB::Block & block)
 {
     DB::IColumn::Selector result;
-    if (projection_plan_pb)
-    {
-        if (!has_init_actions_dag) [[unlikely]]
-            initActionsDAG(block);
-        DB::Block copied_block = block;
-        projection_expression_actions->execute(copied_block, block.rows());
-
-        // need to append the order keys columns to the original block
-        DB::ColumnsWithTypeAndName columns = block.getColumnsWithTypeAndName();
-        for (const auto & projected_col : copied_block.getColumnsWithTypeAndName())
-        {
-            columns.push_back(projected_col);
-        }
-        DB::Block projected_block(columns);
-        computePartitionIdByBinarySearch(projected_block, result);
-    }
-    else
-    {
-        computePartitionIdByBinarySearch(block, result);
-    }
+    computePartitionIdByBinarySearch(block, result);
     return PartitionInfo::fromSelector(std::move(result), partition_num);
 }
 

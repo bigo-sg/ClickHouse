@@ -530,6 +530,8 @@ void BackendInitializerUtil::initSettings()
     settings.set("input_format_parquet_allow_missing_columns", true);
     settings.set("input_format_parquet_case_insensitive_column_matching", true);
     settings.set("input_format_parquet_import_nested", true);
+    settings.set("function_json_value_return_type_allow_complex", true);
+    settings.set("function_json_value_return_type_allow_nullable", true);
 }
 
 void BackendInitializerUtil::initContexts()
@@ -639,6 +641,8 @@ void BackendInitializerUtil::init(const std::string & plan)
 
 void BackendFinalizerUtil::finalizeGlobally()
 {
+    local_engine::BroadCastJoinBuilder::clean();
+
     auto & global_context = SerializedPlanParser::global_context;
     auto & shared_context = SerializedPlanParser::shared_context;
     auto * logger = BackendInitializerUtil::logger;
@@ -650,11 +654,8 @@ void BackendFinalizerUtil::finalizeGlobally()
     }
 }
 
-void BackendFinalizerUtil::finalizeSessionall()
+void BackendFinalizerUtil::finalizeSessionally()
 {
-    /// TODO: figure out why BroadCastJoinBuilder::clean would cause core issue
-    /// Currently remove it as a workaround
-    // local_engine::BroadCastJoinBuilder::clean();
 }
 
 }
