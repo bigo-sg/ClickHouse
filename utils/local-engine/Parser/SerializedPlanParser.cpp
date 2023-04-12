@@ -1304,11 +1304,19 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     ActionsDAG::NodeRawConstPtrs args;
     parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
-    /// arrayJoin(args[0])
-    auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
-    const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
+    /// Remove Nullable from Nullable(Array(xx)) or Nullable(Map(xx, xx)) if needed
+    const auto * arg_not_null = args[0];
+    if (arg_not_null->result_type->isNullable())
+    {
+        auto assume_not_null_builder = FunctionFactory::instance().get("assumeNotNull", context);
+        arg_not_null = &actions_dag->addFunction(assume_not_null_builder, {args[0]}, "assumeNotNull(" + args[0]->result_name + ")");
+    }
 
-    auto arg_type = DB::removeNullable(args[0]->result_type);
+    /// arrayJoin(arg_not_null)
+    auto array_join_name = "arrayJoin(" + arg_not_null->result_name + ")";
+    const auto * array_join_node = &actions_dag->addArrayJoin(*arg_not_null, array_join_name);
+
+    auto arg_type = arg_not_null->result_type;
     WhichDataType which(arg_type.get());
     auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
     auto tuple_index_type = std::make_shared<DataTypeUInt32>();
@@ -1331,10 +1339,10 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
 
-            /// arrayJoin(args[0]).1
+            /// arrayJoin(arg_not_null).1
             const auto * key_node = add_tuple_element(array_join_node, 1);
 
-            /// arrayJoin(args[0]).2
+            /// arrayJoin(arg_not_null).2
             const auto * val_node = add_tuple_element(array_join_node, 2);
 
             result_names.push_back(key_node->result_name);
@@ -1365,20 +1373,35 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
 
-            /// pos = arrayJoin(args[0]).1
+            /// pos = arrayJoin(arg_not_null).1
             const auto * pos_node = add_tuple_element(array_join_node, 1);
 
-            /// col = arrayJoin(args[0]).2 or (key, value) = arrayJoin(args[0]).2
+            /// col = arrayJoin(arg_not_null).2 or (key, value) = arrayJoin(arg_not_null).2
             const auto * item_node = add_tuple_element(array_join_node, 2);
 
             /// Get type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
-            auto raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
+            DataTypePtr raw_child_type;
+            if (args[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->function_base->getName() == "mapFromArrays")
+            {
+                /// Get Type of y from node: mapFromArrays(x, y)
+                raw_child_type = DB::removeNullable(args[0]->children[1]->result_type);
+            }
+            else if (args[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->function_base->getName() == "_CAST" &&
+                args[0]->children[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->children[0]->function_base->getName() == "mapFromArrays")
+            {
+                /// Get Type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
+                raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
+            }
+            else
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid argument type of arrayJoin: {}", actions_dag->dumpDAG());
+
+
             if (isMap(raw_child_type))
             {
-                /// key = arrayJoin(args[0]).2.1
+                /// key = arrayJoin(arg_not_null).2.1
                 const auto * item_key_node = add_tuple_element(item_node, 1);
 
-                /// value = arrayJoin(args[0]).2.2
+                /// value = arrayJoin(arg_not_null).2.2
                 const auto * item_value_node = add_tuple_element(item_node, 2);
 
                 result_names.push_back(pos_node->result_name);
@@ -1395,7 +1418,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             }
             else if (isArray(raw_child_type))
             {
-                /// col = arrayJoin(args[0]).2
+                /// col = arrayJoin(arg_not_null).2
                 result_names.push_back(pos_node->result_name);
                 result_names.push_back(item_node->result_name);
                 if (keep_result)
