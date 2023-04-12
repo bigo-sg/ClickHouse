@@ -1,13 +1,19 @@
+#include "ParquetFormatFile.h"
+
+#if USE_PARQUET
+
 #include <memory>
 #include <string>
 #include <utility>
+
+#include <parquet/arrow/reader.h>
 #include <Formats/FormatFactory.h>
 #include <Formats/FormatSettings.h>
 #include <IO/SeekableReadBuffer.h>
 #include <Processors/Formats/Impl/ArrowBufferedStreams.h>
 #include <Processors/Formats/Impl/ParquetBlockInputFormat.h>
 #include <Processors/Formats/Impl/ArrowColumnToCHColumn.h>
-#include <Storages/SubstraitSource/ParquetFormatFile.h>
+
 
 namespace DB
 {
@@ -129,3 +135,4 @@ std::vector<RowGroupInfomation> ParquetFormatFile::collectRequiredRowGroups(DB::
 
 }
 }
+#endif

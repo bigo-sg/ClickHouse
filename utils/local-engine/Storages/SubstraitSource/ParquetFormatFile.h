@@ -1,9 +1,13 @@
 #pragma once
+
+#include "config.h"
+
+#if USE_PARQUET
+
 #include <memory>
-#include <Storages/SubstraitSource/FormatFile.h>
-#include <parquet/arrow/reader.h>
 #include <IO/ReadBuffer.h>
-#include <base/types.h>
+#include <Storages/SubstraitSource/FormatFile.h>
+
 namespace local_engine
 {
 struct RowGroupInfomation
@@ -32,3 +36,4 @@ private:
 };
 
 }
+#endif

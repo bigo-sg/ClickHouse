@@ -1,22 +1,16 @@
 #include "OrcFormatFile.h"
+
+#if USE_ORC
 #include <memory>
-#include <strings.h>
-#include <DataTypes/NestedUtils.h>
 #include <Formats/FormatFactory.h>
-#include <Formats/FormatSettings.h>
 #include <IO/SeekableReadBuffer.h>
 #include <Processors/Formats/Impl/ArrowBufferedStreams.h>
 #include <Storages/SubstraitSource/OrcUtil.h>
-#include <arrow/adapters/orc/adapter.h>
-#include <arrow/type.h>
-#include <arrow/util/key_value_metadata.h>
-#include <Common/logger_useful.h>
-#include <bits/types/FILE.h>
-#include <orc/Reader.hh>
-#include <Poco/Logger.h>
-#include <Common/Exception.h>
-#include <Common/Stopwatch.h>
 
+#if USE_LOCAL_FORMATS
+#include <Common/Exception.h>
+#include <DataTypes/NestedUtils.h>
+#include <Formats/FormatSettings.h>
 
 namespace DB
 {
@@ -25,9 +19,12 @@ namespace ErrorCodes
     extern const int CANNOT_READ_ALL_DATA;
 }
 }
+#endif
+
 namespace local_engine
 {
 
+#if USE_LOCAL_FORMATS
 ORCBlockInputFormat::ORCBlockInputFormat(
     DB::ReadBuffer & in_, DB::Block header_, const DB::FormatSettings & format_settings_, const std::vector<StripeInformation> & stripes_)
     : IInputFormat(std::move(header_), in_), format_settings(format_settings_), stripes(stripes_)
@@ -150,6 +147,7 @@ std::shared_ptr<arrow::RecordBatchReader> ORCBlockInputFormat::fetchNextStripe()
     file_reader->Seek(strip.start_row);
     return stepOneStripe();
 }
+#endif
 
 OrcFormatFile::OrcFormatFile(
     DB::ContextPtr context_, const substrait::ReadRel::LocalFiles::FileOrFiles & file_info_, ReadBufferBuilderPtr read_buffer_builder_)
@@ -256,3 +254,5 @@ std::vector<StripeInformation> OrcFormatFile::collectRequiredStripes(DB::ReadBuf
     return stripes;
 }
 }
+
+#endif

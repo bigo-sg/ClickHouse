@@ -1,5 +1,10 @@
 #pragma once
 
+#include "config.h"
+#include <Common/Config.h>
+
+#if USE_PARQUET && USE_LOCAL_FORMATS
+
 #include <Common/ChunkBuffer.h>
 #include "ch_parquet/OptimizedParquetBlockInputFormat.h"
 #include "ch_parquet/OptimizedArrowColumnToCHColumn.h"
@@ -28,3 +33,5 @@ private:
 };
 
 }
+
+#endif
