@@ -236,6 +236,8 @@ public:
         const DB::Block & header,
         const DB::Block & read_schema);
 
+    static std::string getFunctionName(const std::string & function_sig, const substrait::Expression_ScalarFunction & function);
+
     static ContextMutablePtr global_context;
     static Context::ConfigurationPtr config;
     static SharedContextHolder shared_context;
@@ -256,7 +258,6 @@ private:
         Names & names);
 
     static void reorderJoinOutput(DB::QueryPlan & plan, DB::Names cols);
-    static std::string getFunctionName(const std::string & function_sig, const substrait::Expression_ScalarFunction & function);
     DB::ActionsDAGPtr parseFunction(
         const Block & input,
         const substrait::Expression & rel,

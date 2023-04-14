@@ -15,6 +15,17 @@
 #include <Common/DebugUtils.h>
 #include <Poco/StringTokenizer.h>
 
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+
+namespace DB
+{
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
+}
+
 namespace local_engine
 {
 void ShuffleSplitter::split(DB::Block & block)
@@ -22,6 +33,14 @@ void ShuffleSplitter::split(DB::Block & block)
     if (block.rows() == 0)
     {
         return;
+    }
+    if (partition_buffer.empty()) [[unlikely]]
+    {
+        auto header = block.cloneEmpty();
+        for (size_t i = 0; i < options.partition_nums; ++i)
+        {
+            partition_buffer.emplace_back(std::make_unique<ColumnsBuffer>(header));
+        }
     }
     Stopwatch watch;
     watch.start();
@@ -83,13 +102,13 @@ void ShuffleSplitter::splitBlockByPartition(DB::Block & block)
             size_t length = partition_info.partition_start_points[j + 1] - from;
             if (length == 0)
                 continue; // no data for this partition continue;
-            partition_buffer[j].appendSelective(col, out_block, partition_info.partition_selector, from, length);
+            partition_buffer[j]->appendSelective(col, out_block, partition_info.partition_selector, from, length);
         }
     }
 
     for (size_t i = 0; i < options.partition_nums; ++i)
     {
-        ColumnsBuffer & buffer = partition_buffer[i];
+        ColumnsBuffer & buffer = *partition_buffer[i];
         if (buffer.size() >= options.split_size)
         {
             spillPartition(i);
@@ -107,7 +126,6 @@ void ShuffleSplitter::init()
     split_result.raw_partition_length.reserve(options.partition_nums);
     for (size_t i = 0; i < options.partition_nums; ++i)
     {
-        partition_buffer.emplace_back(ColumnsBuffer());
         split_result.partition_length.emplace_back(0);
         split_result.raw_partition_length.emplace_back(0);
         partition_outputs.emplace_back(nullptr);
@@ -124,9 +142,9 @@ void ShuffleSplitter::spillPartition(size_t partition_id)
     {
         partition_write_buffers[partition_id] = getPartitionWriteBuffer(partition_id);
         partition_outputs[partition_id]
-            = std::make_unique<DB::NativeWriter>(*partition_write_buffers[partition_id], 0, partition_buffer[partition_id].getHeader());
+            = std::make_unique<DB::NativeWriter>(*partition_write_buffers[partition_id], 0, partition_buffer[partition_id]->getHeader());
     }
-    DB::Block result = partition_buffer[partition_id].releaseColumns();
+    DB::Block result = partition_buffer[partition_id]->releaseColumns();
     if (result.rows() > 0)
     {
         partition_outputs[partition_id]->write(result);
@@ -235,38 +253,36 @@ void ShuffleSplitter::writeIndexFile()
 
 void ColumnsBuffer::add(DB::Block & block, int start, int end)
 {
-    if (header.columns() == 0)
-        header = block.cloneEmpty();
-    if (accumulated_columns.empty()) [[unlikely]]
-    {
-        accumulated_columns.reserve(block.columns());
-        for (size_t i = 0; i < block.columns(); i++)
-        {
-            auto column = block.getColumns()[i]->cloneEmpty();
-            column->reserve(prefer_buffer_size);
-            accumulated_columns.emplace_back(std::move(column));
-        }
-    }
-    assert(!accumulated_columns.empty());
+    assert (header.columns() == source.columns());
     for (size_t i = 0; i < block.columns(); ++i)
+    {
+        auto src_col = block.getByPosition(i).column;
+        if (accumulated_columns[i]->isNullable() && !src_col->isNullable()) [[unlikely]]
+        {
+            src_col = ColumnNullable::create(src_col, ColumnUInt8::create(src_col->size(), 0));
+        }
+        else if (!accumulated_columns[i]->isNullable() && src_col->isNullable()) [[unlikely]]
+        {
+            throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Mismatch nullable");
+        }
         accumulated_columns[i]->insertRangeFrom(*block.getByPosition(i).column, start, end - start);
+    }
 }
 
 void ColumnsBuffer::appendSelective(size_t column_idx, const DB::Block & source, const DB::IColumn::Selector & selector, size_t from, size_t length)
 {
-    if (header.columns() == 0)
-        header = source.cloneEmpty();
-    if (accumulated_columns.empty()) [[unlikely]]
+    assert (header.columns() == source.columns());
+    auto src_col = source.getByPosition(column_idx).column->convertToFullColumnIfConst();
+    if (accumulated_columns[column_idx]->isNullable() && !src_col->isNullable()) [[unlikely]]
     {
-        accumulated_columns.reserve(source.columns());
-        for (size_t i = 0; i < source.columns(); i++)
-        {
-            auto column = source.getColumns()[i]->convertToFullColumnIfConst()->cloneEmpty();
-            column->reserve(prefer_buffer_size);
-            accumulated_columns.emplace_back(std::move(column));
-        }
+        src_col = ColumnNullable::create(src_col, ColumnUInt8::create(src_col->size(), 0));
     }
-    accumulated_columns[column_idx]->insertRangeSelective(*source.getByPosition(column_idx).column->convertToFullColumnIfConst(), selector, from, length);
+    else if (!accumulated_columns[column_idx]->isNullable() && src_col->isNullable()) [[unlikely]]
+    {
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Mismatch nullable");
+    }
+
+    accumulated_columns[column_idx]->insertRangeSelective(*src_col, selector, from, length);
 }
 
 size_t ColumnsBuffer::size() const
@@ -294,16 +310,25 @@ DB::Block ColumnsBuffer::getHeader()
 {
     return header;
 }
-ColumnsBuffer::ColumnsBuffer(size_t prefer_buffer_size_) : prefer_buffer_size(prefer_buffer_size_)
+ColumnsBuffer::ColumnsBuffer(const DB::Block & header_, size_t prefer_buffer_size_)
+    : header(header_)
+    , prefer_buffer_size(prefer_buffer_size_)
 {
+    accumulated_columns.reserve(header.columns());
+    for (size_t i = 0; i < header.columns(); i++)
+    {
+        auto column = header.getColumns()[i]->convertToFullColumnIfConst()->cloneEmpty();
+        column->reserve(prefer_buffer_size);
+        accumulated_columns.emplace_back(std::move(column));
+    }
 }
 
 RoundRobinSplitter::RoundRobinSplitter(SplitOptions options_) : ShuffleSplitter(std::move(options_))
 {
     Poco::StringTokenizer output_column_tokenizer(options_.out_exprs, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
     selector_builder = std::make_unique<RoundRobinSelectorBuilder>(options.partition_nums);
 }
@@ -325,15 +350,15 @@ HashSplitter::HashSplitter(SplitOptions options_) : ShuffleSplitter(std::move(op
 {
     Poco::StringTokenizer exprs_list(options_.hash_exprs, ",");
     std::vector<size_t> hash_fields;
-    for (auto iter = exprs_list.begin(); iter != exprs_list.end(); ++iter)
+    for (const auto & iter : exprs_list)
     {
-        hash_fields.push_back(std::stoi(*iter));
+        hash_fields.push_back(std::stoi(iter));
     }
 
     Poco::StringTokenizer output_column_tokenizer(options_.out_exprs, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
 
     selector_builder = std::make_unique<HashSelectorBuilder>(options.partition_nums, hash_fields, "cityHash64");
@@ -359,9 +384,9 @@ std::unique_ptr<ShuffleSplitter> RangeSplitter::create(SplitOptions && options_)
 RangeSplitter::RangeSplitter(SplitOptions options_) : ShuffleSplitter(std::move(options_))
 {
     Poco::StringTokenizer output_column_tokenizer(options_.out_exprs, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
     selector_builder = std::make_unique<RangeSelectorBuilder>(options.hash_exprs, options.partition_nums);
 }

@@ -40,7 +40,7 @@ public:
     NativeSplitter(Options options, jobject input);
     bool hasNext();
     DB::Block * next();
-    int32_t nextPartitionId();
+    int32_t nextPartitionId() const;
 
 
     virtual ~NativeSplitter();
@@ -58,7 +58,7 @@ private:
     bool inputHasNext();
 
 
-    std::vector<std::shared_ptr<ColumnsBuffer>> partition_buffer;
+    std::vector<std::unique_ptr<ColumnsBuffer>> partition_buffer;
     std::stack<std::pair<int32_t, std::unique_ptr<DB::Block>>> output_buffer;
     int32_t next_partition_id = -1;
     jobject input;

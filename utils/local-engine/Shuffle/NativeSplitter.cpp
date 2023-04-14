@@ -28,6 +28,14 @@ void NativeSplitter::split(DB::Block & block)
     {
         return;
     }
+    if (partition_buffer.empty()) [[unlikely]]
+    {
+        auto header = block.cloneEmpty();
+        for (size_t i = 0; i < options.partition_nums; ++i)
+        {
+            partition_buffer.emplace_back(std::make_unique<ColumnsBuffer>(header, options.buffer_size));
+        }
+    }
     if (!output_header.columns()) [[unlikely]]
     {
         if (output_columns_indicies.empty())
@@ -80,11 +88,6 @@ NativeSplitter::NativeSplitter(Options options_, jobject input_) : options(optio
 {
     GET_JNIENV(env)
     input = env->NewGlobalRef(input_);
-    partition_buffer.reserve(options.partition_nums);
-    for (size_t i = 0; i < options.partition_nums; ++i)
-    {
-        partition_buffer.emplace_back(std::make_shared<ColumnsBuffer>(options.buffer_size));
-    }
     CLEAN_JNIENV
 }
 
@@ -105,9 +108,9 @@ bool NativeSplitter::hasNext()
         }
         else
         {
-            for (size_t i = 0; i < options.partition_nums; ++i)
+            for (size_t i = 0; i < partition_buffer.size(); ++i)
             {
-                auto buffer = partition_buffer.at(i);
+                auto & buffer = partition_buffer.at(i);
                 if (buffer->size() > 0)
                 {
                     output_buffer.emplace(std::pair(i, new Block(buffer->releaseColumns())));
@@ -135,7 +138,7 @@ DB::Block * NativeSplitter::next()
     return &currentBlock();
 }
 
-int32_t NativeSplitter::nextPartitionId()
+int32_t NativeSplitter::nextPartitionId() const
 {
     return next_partition_id;
 }
@@ -185,15 +188,15 @@ HashNativeSplitter::HashNativeSplitter(NativeSplitter::Options options_, jobject
 {
     Poco::StringTokenizer exprs_list(options_.exprs_buffer, ",");
     std::vector<size_t> hash_fields;
-    for (auto iter = exprs_list.begin(); iter != exprs_list.end(); ++iter)
+    for (const auto & iter : exprs_list)
     {
-        hash_fields.push_back(std::stoi(*iter));
+        hash_fields.push_back(std::stoi(iter));
     }
 
     Poco::StringTokenizer output_column_tokenizer(options_.schema_buffer, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
 
     selector_builder = std::make_unique<HashSelectorBuilder>(options.partition_nums, hash_fields, "cityHash64");
@@ -207,9 +210,9 @@ void HashNativeSplitter::computePartitionId(Block & block)
 RoundRobinNativeSplitter::RoundRobinNativeSplitter(NativeSplitter::Options options_, jobject input) : NativeSplitter(options_, input)
 {
     Poco::StringTokenizer output_column_tokenizer(options_.schema_buffer, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
     selector_builder = std::make_unique<RoundRobinSelectorBuilder>(options_.partition_nums);
 }
@@ -223,9 +226,9 @@ RangePartitionNativeSplitter::RangePartitionNativeSplitter(NativeSplitter::Optio
     : NativeSplitter(options_, input)
 {
     Poco::StringTokenizer output_column_tokenizer(options_.schema_buffer, ",");
-    for (auto iter = output_column_tokenizer.begin(); iter != output_column_tokenizer.end(); ++iter)
+    for (const auto & iter : output_column_tokenizer)
     {
-        output_columns_indicies.push_back(std::stoi(*iter));
+        output_columns_indicies.push_back(std::stoi(iter));
     }
     selector_builder = std::make_unique<RangeSelectorBuilder>(options_.exprs_buffer, options_.partition_nums);
 }

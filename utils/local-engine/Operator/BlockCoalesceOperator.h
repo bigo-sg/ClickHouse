@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <Shuffle/ShuffleSplitter.h>
 
 namespace DB
@@ -12,7 +13,7 @@ namespace local_engine
 class BlockCoalesceOperator
 {
 public:
-    BlockCoalesceOperator(size_t buf_size_):buf_size(buf_size_){}
+    explicit BlockCoalesceOperator(size_t buf_size_, const String & schema_);
     virtual ~BlockCoalesceOperator();
     void mergeBlock(DB::Block & block);
     bool isFull();
@@ -20,7 +21,8 @@ public:
 
 private:
     size_t buf_size;
-    ColumnsBuffer block_buffer;
+    String schema;
+    std::unique_ptr<ColumnsBuffer> block_buffer;
     DB::Block * cached_block = nullptr;
 
     void clearCache();

@@ -523,10 +523,15 @@ void Java_io_glutenproject_vectorized_CHStreamReader_nativeClose(JNIEnv * env, j
     LOCAL_ENGINE_JNI_METHOD_END(env,)
 }
 
-jlong Java_io_glutenproject_vectorized_CHCoalesceOperator_createNativeOperator(JNIEnv * env, jobject /*obj*/, jint buf_size)
+jlong Java_io_glutenproject_vectorized_CHCoalesceOperator_createNativeOperator(JNIEnv * env, jobject /*obj*/, jint buf_size, jbyteArray schema_)
 {
     LOCAL_ENGINE_JNI_METHOD_START
-    local_engine::BlockCoalesceOperator * instance = new local_engine::BlockCoalesceOperator(buf_size);
+    jsize schema_buf_size = env->GetArrayLength(schema_);
+    jbyte* schema_buf = env->GetByteArrayElements(schema_, nullptr);
+    std::string schema_str;
+    schema_str.assign(reinterpret_cast<const char *>(schema_buf), schema_buf_size);
+    local_engine::BlockCoalesceOperator * instance = new local_engine::BlockCoalesceOperator(buf_size, schema_str);
+    env->ReleaseByteArrayElements(schema_, schema_buf, JNI_ABORT);
     return reinterpret_cast<jlong>(instance);
     LOCAL_ENGINE_JNI_METHOD_END(env, -1)
 }

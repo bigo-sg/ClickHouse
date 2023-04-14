@@ -31,8 +31,8 @@ struct SplitOptions
 class ColumnsBuffer
 {
 public:
-    explicit ColumnsBuffer(size_t prefer_buffer_size = DEFAULT_BLOCK_SIZE);
-    void add(DB::Block & columns, int start, int end);
+    explicit ColumnsBuffer(const DB::Block & header_, size_t prefer_buffer_size = DEFAULT_BLOCK_SIZE);
+    void add(DB::Block & block, int start, int end);
     void appendSelective(size_t column_idx, const DB::Block & source, const DB::IColumn::Selector & selector, size_t from, size_t length);
     size_t size() const;
     DB::Block releaseColumns();
@@ -84,7 +84,7 @@ private:
 protected:
     bool stopped = false;
     PartitionInfo partition_info;
-    std::vector<ColumnsBuffer> partition_buffer;
+    std::vector<std::unique_ptr<ColumnsBuffer>> partition_buffer;
     std::vector<std::unique_ptr<DB::NativeWriter>> partition_outputs;
     std::vector<std::unique_ptr<DB::WriteBuffer>> partition_write_buffers;
     std::vector<std::unique_ptr<DB::WriteBuffer>> partition_cached_write_buffers;
