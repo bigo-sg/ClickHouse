@@ -17,6 +17,7 @@ BlockCoalesceOperator::BlockCoalesceOperator(size_t buf_size_, const String & sc
 {
     substrait::NamedStruct named_struct;
     named_struct.ParseFromString(schema);
+    LOG_ERROR(&Poco::Logger::get("BlockCoalesceOperator"), "xxx schema: {}", named_struct.DebugString());
     auto header = SerializedPlanParser::parseNameStruct(named_struct);
     block_buffer = std::make_unique<ColumnsBuffer>(header);
 }

@@ -253,6 +253,12 @@ void ShuffleSplitter::writeIndexFile()
 
 void ColumnsBuffer::add(DB::Block & block, int start, int end)
 {
+    LOG_ERROR(&Poco::Logger::get("ColumnsBuffer"), "xxx input header:{}", block.dumpStructure());
+    LOG_ERROR(
+        &Poco::Logger::get("ColumnsBuffer"),
+        "xxx accumulated header:{}.\naccumulated_columns.size:{}",
+        header.dumpStructure(),
+        accumulated_columns.size());
     assert (header.columns() == source.columns());
     for (size_t i = 0; i < block.columns(); ++i)
     {
@@ -265,7 +271,7 @@ void ColumnsBuffer::add(DB::Block & block, int start, int end)
         {
             throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Mismatch nullable");
         }
-        accumulated_columns[i]->insertRangeFrom(*block.getByPosition(i).column, start, end - start);
+        accumulated_columns[i]->insertRangeFrom(*src_col, start, end - start);
     }
 }
 
@@ -296,6 +302,12 @@ DB::Block ColumnsBuffer::releaseColumns()
 {
     DB::Columns res(std::make_move_iterator(accumulated_columns.begin()), std::make_move_iterator(accumulated_columns.end()));
     accumulated_columns.clear();
+    for (size_t i = 0; i < header.columns(); i++)
+    {
+        auto column = header.getColumns()[i]->convertToFullColumnIfConst()->cloneEmpty();
+        column->reserve(prefer_buffer_size);
+        accumulated_columns.emplace_back(std::move(column));
+    }
     if (res.empty())
     {
         return header.cloneEmpty();

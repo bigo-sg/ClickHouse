@@ -3,6 +3,9 @@
 #include <Compression/CompressionFactory.h>
 #include <boost/algorithm/string/case_conv.hpp>
 
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+
 using namespace DB;
 
 namespace local_engine
@@ -22,6 +25,7 @@ void ShuffleWriter::write(const Block & block)
 {
     if (!native_writer)
     {
+        output_header = block.cloneEmpty();
         if (compression_enable)
         {
             native_writer = std::make_unique<NativeWriter>(*compressed_out, 0, block.cloneEmpty());
@@ -30,6 +34,10 @@ void ShuffleWriter::write(const Block & block)
         {
             native_writer = std::make_unique<NativeWriter>(*write_buffer, 0, block.cloneEmpty());
         }
+    }
+    if (!DB::blocksHaveEqualStructure(output_header, block))
+    {
+        LOG_ERROR(&Poco::Logger::get("ShuffleWriter"), "xxx block structure not equal. output_header: {},\nblock: {}", output_header.dumpStructure(), block.dumpStructure());
     }
     if (block.rows() > 0)
     {

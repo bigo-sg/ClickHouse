@@ -17,5 +17,6 @@ private:
     std::unique_ptr<WriteBufferFromJavaOutputStream> write_buffer;
     std::unique_ptr<DB::NativeWriter> native_writer;
     bool compression_enable;
+    DB::Block output_header;
 };
 }
