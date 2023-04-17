@@ -23,11 +23,10 @@
 
 namespace local_engine
 {
-
 static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
-    {"is_not_null","isNotNull"},
-    {"is_null","isNull"},
-    {"gte","greaterOrEquals"},
+    {"is_not_null", "isNotNull"},
+    {"is_null", "isNull"},
+    {"gte", "greaterOrEquals"},
     {"gt", "greater"},
     {"lte", "lessOrEquals"},
     {"lt", "less"},
@@ -114,7 +113,8 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"rtrim", ""},
     {"concat", "concat"},
     {"strpos", "position"},
-    {"char_length", "char_length"},
+    {"char_length",
+     "char_length"}, /// Notice: when input argument is binary type, corresponding ch function is length instead of char_length
     {"replace", "replaceAll"},
     {"regexp_replace", "replaceRegexpAll"},
     {"regexp_extract_all", "regexpExtractAllSpark"},
@@ -124,17 +124,17 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"split", "splitByRegexp"},
     {"concat_ws", "concat_ws"},
     {"base64", "base64Encode"},
-    {"unbase64","base64Decode"},
-    {"lpad","leftPadUTF8"},
-    {"rpad","rightPadUTF8"},
-    {"reverse","reverseUTF8"},
+    {"unbase64", "base64Decode"},
+    {"lpad", "leftPadUTF8"},
+    {"rpad", "rightPadUTF8"},
+    {"reverse", "reverseUTF8"},
     // {"hash","murmurHash3_32"},
-    {"md5","MD5"},
+    {"md5", "MD5"},
     {"translate", "translateUTF8"},
-    {"repeat","repeat"},
+    {"repeat", "repeat"},
     {"position", "positionUTF8Spark"},
     {"locate", "positionUTF8Spark"},
-    {"space","space"},
+    {"space", "space"},
 
     /// hash functions
     {"hash", "murmurHashSpark3_32"},
@@ -163,7 +163,7 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"datediff", "dateDiff"},
     {"second", "toSecond"},
     {"add_months", "addMonths"},
-    {"trunc", ""},  /// dummy mapping
+    {"trunc", ""}, /// dummy mapping
 
     // array functions
     {"array", "array"},
@@ -171,12 +171,14 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
     {"get_array_item", "arrayElement"},
     {"element_at", "arrayElement"},
     {"array_contains", "has"},
+    {"range", "range"}, /// dummy mapping
 
     // map functions
     {"map", "map"},
     {"get_map_value", "arrayElement"},
     {"map_keys", "mapKeys"},
     {"map_values", "mapValues"},
+    {"map_from_arrays", "mapFromArrays"},
 
     // tuple functions
     {"get_struct_field", "tupleElement"},
@@ -184,11 +186,13 @@ static const std::map<std::string, std::string> SCALAR_FUNCTIONS = {
 
     // table-valued generator function
     {"explode", "arrayJoin"},
+    {"posexplode", "arrayJoin"},
 
     // json functions
     {"get_json_object", "JSON_VALUE"},
     {"to_json", "toJSONString"},
     {"from_json", "JSONExtract"},
+    {"json_tuple", "json_tuple"}
 };
 
 static const std::set<std::string> FUNCTION_NEED_KEEP_ARGUMENTS = {"alias"};
@@ -267,7 +271,8 @@ private:
         std::vector<String> & result_names,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
-        bool keep_result = false);
+        bool keep_result = false,
+        bool position = false);
     const ActionsDAG::Node * parseFunctionWithDAG(
         const substrait::Expression & rel,
         std::string & result_name,
@@ -279,7 +284,8 @@ private:
         std::vector<String> & result_name,
         std::vector<String> & required_columns,
         DB::ActionsDAGPtr actions_dag = nullptr,
-        bool keep_result = false);
+        bool keep_result = false,
+        bool position = false);
     void parseFunctionArguments(
         DB::ActionsDAGPtr & actions_dag,
         ActionsDAG::NodeRawConstPtrs & parsed_args,
@@ -303,7 +309,7 @@ private:
         std::vector<std::string> & measure_names,
         std::map<std::string, std::string> & nullable_measure_names);
     DB::QueryPlanStepPtr parseAggregate(DB::QueryPlan & plan, const substrait::AggregateRel & rel, bool & is_final);
-    const DB::ActionsDAG::Node * parseArgument(DB::ActionsDAGPtr action_dag, const substrait::Expression & rel);
+    const DB::ActionsDAG::Node * parseExpression(DB::ActionsDAGPtr action_dag, const substrait::Expression & rel);
     const ActionsDAG::Node *
     toFunctionNode(ActionsDAGPtr action_dag, const String & function, const DB::ActionsDAG::NodeRawConstPtrs & args);
     // remove nullable after isNotNull

@@ -26,6 +26,8 @@ namespace ErrorCodes
 {
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int ILLEGAL_TYPE_OF_ARGUMENT;
+    extern const int SIZES_OF_ARRAYS_DONT_MATCH;
+    extern const int ILLEGAL_COLUMN;
 }
 
 namespace
@@ -147,6 +149,94 @@ public:
     }
 };
 
+/// mapFromArrays(keys, values) is a function that allows you to make key-value pair from a pair of arrays
+class FunctionMapFromArrays : public IFunction
+{
+public:
+    static constexpr auto name = "mapFromArrays";
+
+    static FunctionPtr create(ContextPtr) { return std::make_shared<FunctionMapFromArrays>(); }
+    String getName() const override { return name; }
+
+    size_t getNumberOfArguments() const override { return 2; }
+
+    bool isSuitableForShortCircuitArgumentsExecution(const DataTypesWithConstInfo & /*arguments*/) const override { return false; }
+    bool useDefaultImplementationForNulls() const override { return true; }
+    bool useDefaultImplementationForConstants() const override { return true; }
+
+    DataTypePtr getReturnTypeImpl(const DataTypes & arguments) const override
+    {
+        if (arguments.size() != 2)
+            throw Exception(
+                ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+                "Function {} requires 2 arguments, but {} given",
+                getName(),
+                arguments.size());
+
+        /// The first argument should always be Array.
+        /// Because key type can not be nested type of Map, which is Tuple
+        DataTypePtr key_type;
+        if (const auto * keys_type = checkAndGetDataType<DataTypeArray>(arguments[0].get()))
+            key_type = keys_type->getNestedType();
+        else
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "First argument for function {} must be an Array", getName());
+
+        DataTypePtr value_type;
+        if (const auto * value_array_type = checkAndGetDataType<DataTypeArray>(arguments[1].get()))
+            value_type = value_array_type->getNestedType();
+        else if (const auto * value_map_type = checkAndGetDataType<DataTypeMap>(arguments[1].get()))
+            value_type = std::make_shared<DataTypeTuple>(value_map_type->getKeyValueTypes());
+        else
+            throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT, "Second argument for function {} must be Array or Map", getName());
+
+        DataTypes key_value_types{key_type, value_type};
+        return std::make_shared<DataTypeMap>(key_value_types);
+    }
+
+    ColumnPtr executeImpl(
+        const ColumnsWithTypeAndName & arguments, const DataTypePtr & /* result_type */, size_t /* input_rows_count */) const override
+    {
+        bool is_keys_const = isColumnConst(*arguments[0].column);
+        ColumnPtr holder_keys;
+        const ColumnArray * col_keys;
+        if (is_keys_const)
+        {
+            holder_keys = arguments[0].column->convertToFullColumnIfConst();
+            col_keys = checkAndGetColumn<ColumnArray>(holder_keys.get());
+        }
+        else
+        {
+            col_keys = checkAndGetColumn<ColumnArray>(arguments[0].column.get());
+        }
+
+        if (!col_keys)
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "The first argument of function {} must be Array", getName());
+
+        bool is_values_const = isColumnConst(*arguments[1].column);
+        ColumnPtr holder_values;
+        if (is_values_const)
+            holder_values = arguments[1].column->convertToFullColumnIfConst();
+        else
+            holder_values = arguments[1].column;
+
+        const ColumnArray * col_values;
+        if (const auto * col_values_array = checkAndGetColumn<ColumnArray>(holder_values.get()))
+            col_values = col_values_array;
+        else if (const auto * col_values_map = checkAndGetColumn<ColumnMap>(holder_values.get()))
+            col_values = &col_values_map->getNestedColumn();
+        else
+            throw Exception(ErrorCodes::ILLEGAL_COLUMN, "The second arguments of function {} must be Array or Map", getName());
+
+        if (!col_keys->hasEqualOffsets(*col_values))
+            throw Exception(ErrorCodes::SIZES_OF_ARRAYS_DONT_MATCH, "Two arguments for function {} must have equal sizes", getName());
+
+        const auto & data_keys = col_keys->getDataPtr();
+        const auto & data_values = col_values->getDataPtr();
+        const auto & offsets = col_keys->getOffsetsPtr();
+        auto nested_column = ColumnArray::create(ColumnTuple::create(Columns{data_keys, data_values}), offsets);
+        return ColumnMap::create(nested_column);
+    }
+};
 
 struct NameMapContains { static constexpr auto name = "mapContains"; };
 
@@ -649,6 +739,9 @@ REGISTER_FUNCTION(Map)
     factory.registerFunction<FunctionMapContainsKeyLike>();
     factory.registerFunction<FunctionExtractKeyLike>();
     factory.registerFunction<FunctionMapUpdate>();
+    factory.registerFunction<FunctionMapFromArrays>();
+    factory.registerAlias("MAP_FROM_ARRAYS", "mapFromArrays");
+
 }
 
 }

@@ -4,6 +4,7 @@
 #include <Columns/ColumnNullable.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnDecimal.h>
+#include <Columns/ColumnConst.h>
 #include <Columns/IColumn.h>
 #include <Core/Types.h>
 #include <DataTypes/DataTypeArray.h>
@@ -12,6 +13,8 @@
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <DataTypes/DataTypesDecimal.h>
+#include <DataTypes/DataTypeString.h>
+#include <DataTypes/ObjectUtils.h>
 #include <Common/Exception.h>
 
 namespace DB
@@ -232,10 +235,10 @@ static void writeValue(
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "Doesn't support type {} for writeValue", col.type->getName());
 }
 
-SparkRowInfo::SparkRowInfo(const Block & block)
-    : types(std::move(block.getDataTypes()))
-    , num_rows(block.rows())
-    , num_cols(block.columns())
+SparkRowInfo::SparkRowInfo(const DB::ColumnsWithTypeAndName & cols, const DB::DataTypes & types, const size_t & col_size, const size_t & row_size)
+    : types(types)
+    , num_rows(row_size)
+    , num_cols(col_size)
     , null_bitset_width_in_bytes(calculateBitSetWidthInBytes(num_cols))
     , total_bytes(0)
     , offsets(num_rows, 0)
@@ -254,8 +257,7 @@ SparkRowInfo::SparkRowInfo(const Block & block)
 
     for (int64_t col_idx = 0; col_idx < num_cols; ++col_idx)
     {
-        const auto & col = block.getByPosition(col_idx);
-
+        const auto & col = cols[col_idx];
         /// No need to calculate backing data length for fixed length types
         const auto type_without_nullable = removeNullable(col.type);
         if (BackingDataLengthCalculator::isVariableLengthDataType(type_without_nullable))
@@ -298,6 +300,8 @@ SparkRowInfo::SparkRowInfo(const Block & block)
     for (int64_t i = 0; i < num_rows; ++i)
         total_bytes += lengths[i];
 }
+
+SparkRowInfo::SparkRowInfo(const Block & block) : SparkRowInfo(block.getColumnsWithTypeAndName(), block.getDataTypes(), block.columns(), block.rows()){}
 
 const DB::DataTypes & SparkRowInfo::getDataTypes() const
 {
@@ -374,13 +378,82 @@ std::unique_ptr<SparkRowInfo> CHColumnToSparkRow::convertCHColumnToSparkRow(cons
     if (!block.columns())
         throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "A block with empty columns");
 
-    std::unique_ptr<SparkRowInfo> spark_row_info = std::make_unique<SparkRowInfo>(block);
+    auto block_col = block.getByPosition(0);
+    DB::ColumnPtr nested_col = block_col.column;
+    if (const auto * const_col = checkAndGetColumn<DB::ColumnConst>(nested_col.get()))
+    {
+        nested_col = const_col->getDataColumnPtr();
+    }
+    if (const auto * nullable_col = checkAndGetColumn<DB::ColumnNullable>(nested_col.get()))
+    {
+        nested_col = nullable_col->getNestedColumnPtr();
+    }
+
+    auto checkAndGetTupleDataTypes = [] (const DB::ColumnPtr& column) -> DB::DataTypes
+    {
+        DB::DataTypes data_types;
+        if (column->getDataType() != DB::TypeIndex::Tuple)
+        {
+            return data_types;
+        }
+        const auto * tuple_col = checkAndGetColumn<DB::ColumnTuple>(column.get());
+        const size_t col_size = tuple_col->tupleSize();
+        for (size_t i = 0; i < col_size; i++)
+        {
+            DB::DataTypePtr field_type;
+            const auto & field_col = tuple_col->getColumn(i);
+            if (field_col.isNullable())
+            {
+                const auto & field_nested_col= assert_cast<const ColumnNullable &>(field_col).getNestedColumn();
+                if (field_nested_col.getDataType() != DB::TypeIndex::String)
+                {
+                    data_types.clear();
+                    return data_types;
+                }
+                else
+                {
+                    DataTypePtr string_type = std::make_shared<DB::DataTypeString>();
+                    field_type = std::make_shared<DB::DataTypeNullable>(string_type);
+                }
+            }
+            else if (field_col.getDataType() == DB::TypeIndex::String)
+            {
+                field_type = std::make_shared<DB::DataTypeString>();
+            }
+            else
+            {
+                data_types.clear();
+                return data_types;
+            }
+            data_types.emplace_back(field_type);
+        }
+        return data_types;
+    };
+
+    std::unique_ptr<SparkRowInfo> spark_row_info;
+    DB::ColumnsWithTypeAndName columns;
+    auto data_types = checkAndGetTupleDataTypes(nested_col);
+    if (data_types.size() > 0)
+    {
+        const auto * tuple_col = checkAndGetColumn<DB::ColumnTuple>(nested_col.get());
+        for (size_t i = 0; i < tuple_col->tupleSize(); i++)
+        {
+            DB::ColumnWithTypeAndName col_type_name(tuple_col->getColumnPtr(i), data_types[i], "c" + std::to_string(i));
+            columns.emplace_back(col_type_name);
+        }
+        spark_row_info = std::make_unique<SparkRowInfo>(columns, data_types, tuple_col->tupleSize(), block.rows());
+    }
+    else
+    {
+        spark_row_info = std::make_unique<SparkRowInfo>(block);
+        columns = block.getColumnsWithTypeAndName();
+    }
     spark_row_info->setBufferAddress(reinterpret_cast<char *>(alloc(spark_row_info->getTotalBytes(), 64)));
     // spark_row_info->setBufferAddress(alignedAlloc(spark_row_info->getTotalBytes(), 64));
     memset(spark_row_info->getBufferAddress(), 0, spark_row_info->getTotalBytes());
     for (auto col_idx = 0; col_idx < spark_row_info->getNumCols(); col_idx++)
     {
-        const auto & col = block.getByPosition(col_idx);
+        const auto & col = columns[col_idx];
         int64_t field_offset = spark_row_info->getFieldOffset(col_idx);
 
         ColumnWithTypeAndName col_not_const{col.column->convertToFullColumnIfConst(), col.type, col.name};
@@ -641,10 +714,8 @@ int64_t VariableLengthDataWriter::writeMap(size_t row_idx, const DB::Map & map, 
     const auto start = cursor;
     cursor += 8;
 
-    /// If Map is empty, return in advance
+    /// Even if Map is empty, still write as [unsafe key array numBytes] [unsafe key array] [unsafe value array]
     const auto num_pairs = map.size();
-    if (num_pairs == 0)
-        return BackingDataLengthCalculator::getOffsetAndSize(start - parent_offset, 8);
 
     /// Construct array of keys and array of values from map
     auto key_array = Array();

@@ -66,6 +66,46 @@ Result:
 
 -   [Map(key, value)](../../sql-reference/data-types/map.md) data type
 
+## mapFromArrays
+
+Merges an [Array](../../sql-reference/data-types/array.md) of keys and an [Array](../../sql-reference/data-types/array.md) of values into a [Map(key, value)](../../sql-reference/data-types/map.md). Notice that the second argument could also be a [Map](../../sql-reference/data-types/map.md), thus it is casted to an Array when executing.
+
+The function is a more convenient alternative to `CAST((key_array, value_array_or_map), 'Map(key_type, value_type)')`. For example, instead of writing `CAST((['aa', 'bb'], [4, 5]), 'Map(String, UInt32)')`, you can write `mapFromArrays(['aa', 'bb'], [4, 5])`.
+  
+**Syntax**
+
+```sql
+mapFromArrays(keys, values)
+```  
+
+Alias: `MAP_FROM_ARRAYS(keys, values)`
+  
+**Parameters**
+-   `keys` — Given key array to create a map from. The nested type of array must be: [String](../../sql-reference/data-types/string.md), [Integer](../../sql-reference/data-types/int-uint.md), [LowCardinality](../../sql-reference/data-types/lowcardinality.md), [FixedString](../../sql-reference/data-types/fixedstring.md), [UUID](../../sql-reference/data-types/uuid.md), [Date](../../sql-reference/data-types/date.md), [DateTime](../../sql-reference/data-types/datetime.md), [Date32](../../sql-reference/data-types/date32.md), [Enum](../../sql-reference/data-types/enum.md)
+-   `values`  - Given value array or map to create a map from.
+  
+**Returned value**
+
+- A map whose keys and values are constructed from the key array and value array/map.
+  
+**Example**
+
+Query:
+
+```sql
+select mapFromArrays(['a', 'b', 'c'], [1, 2, 3])
+
+┌─mapFromArrays(['a', 'b', 'c'], [1, 2, 3])─┐
+│ {'a':1,'b':2,'c':3}                       │
+└───────────────────────────────────────────┘
+
+SELECT mapFromArrays([1, 2, 3], map('a', 1, 'b', 2, 'c', 3))
+
+┌─mapFromArrays([1, 2, 3], map('a', 1, 'b', 2, 'c', 3))─┐
+│ {1:('a',1),2:('b',2),3:('c',3)}                       │
+└───────────────────────────────────────────────────────┘
+```
+
 ## mapAdd
 
 Collect all the keys and sum corresponding values.
@@ -429,6 +469,8 @@ Result:
 │ {}                         │
 └────────────────────────────┘
 ```  
+
+
   
 ## mapApply  
   

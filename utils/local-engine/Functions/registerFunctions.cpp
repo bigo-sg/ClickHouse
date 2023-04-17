@@ -8,6 +8,7 @@ void registerFunctionSparkTrim(FunctionFactory &);
 void registerFunctionsHashingExtended(FunctionFactory &);
 void registerFunctionPositionUTF8Spark(FunctionFactory &);
 void registerFunctionRegexpExtractAllSpark(FunctionFactory &);
+void registerFunctionReinterpretAsStringSpark(FunctionFactory &);
 
 void registerFunctions(FunctionFactory  & factory)
 {
@@ -15,6 +16,7 @@ void registerFunctions(FunctionFactory  & factory)
     registerFunctionsHashingExtended(factory);
     registerFunctionPositionUTF8Spark(factory);
     registerFunctionRegexpExtractAllSpark(factory);
+    registerFunctionReinterpretAsStringSpark(factory);
 }
 
 }
