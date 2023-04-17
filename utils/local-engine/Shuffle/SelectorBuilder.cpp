@@ -91,14 +91,6 @@ PartitionInfo HashSelectorBuilder::build(DB::Block & block)
     {
         partition_ids.emplace_back(static_cast<UInt64>(hash_column->get64(i) % parts_num));
     }
-    if (result_type->isNullable())
-    {
-        for (size_t i = 0; i < rows; ++i)
-        {
-            if (hash_column->isNullAt(i))
-                partition_ids[i] = 0;
-        }
-    }
     return PartitionInfo::fromSelector(std::move(partition_ids), parts_num);
 }
 

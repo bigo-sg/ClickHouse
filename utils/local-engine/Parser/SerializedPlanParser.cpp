@@ -247,60 +247,40 @@ std::string getDecimalFunction(const substrait::Type_Decimal & decimal, const bo
 
     return ch_function_name;
 }
+
 /// TODO: This function needs to be improved for Decimal/Array/Map/Tuple types.
 std::string getCastFunction(const substrait::Type & type)
 {
     std::string ch_function_name;
     if (type.has_fp64())
-    {
         ch_function_name = "toFloat64";
-    }
     else if (type.has_fp32())
-    {
         ch_function_name = "toFloat32";
-    }
-    else if (type.has_string() || type.has_binary())
-    {
+    else if (type.has_string())
         ch_function_name = "toString";
-    }
+    else if (type.has_binary())
+        ch_function_name = "reinterpretAsStringSpark";
     else if (type.has_i64())
-    {
         ch_function_name = "toInt64";
-    }
     else if (type.has_i32())
-    {
         ch_function_name = "toInt32";
-    }
     else if (type.has_i16())
-    {
         ch_function_name = "toInt16";
-    }
     else if (type.has_i8())
-    {
         ch_function_name = "toInt8";
-    }
     else if (type.has_date())
-    {
         ch_function_name = "toDate32";
-    }
     // TODO need complete param: scale
     else if (type.has_timestamp())
-    {
         ch_function_name = "toDateTime64";
-    }
     else if (type.has_bool_())
-    {
         ch_function_name = "toUInt8";
-    }
     else if (type.has_decimal())
-    {
         ch_function_name = getDecimalFunction(type.decimal(), false);
-    }
     else
         throw Exception(ErrorCodes::UNKNOWN_TYPE, "doesn't support cast type {}", type.DebugString());
 
     /// TODO(taiyang-li): implement cast functions of other types
-
     return ch_function_name;
 }
 
@@ -701,7 +681,7 @@ QueryPlanPtr SerializedPlanParser::parse(std::unique_ptr<substrait::Plan> plan)
             ActionsDAGPtr actions_dag = std::make_shared<ActionsDAG>(blockToNameAndTypeList(query_plan->getCurrentDataStream().header));
             NamesWithAliases aliases;
             auto cols = query_plan->getCurrentDataStream().header.getNamesAndTypesList();
-            for (int i = 0; i < root_rel.root().names_size(); i++)
+            for (size_t i = 0; i < cols.getNames().size(); i++)
             {
                 aliases.emplace_back(NameWithAlias(cols.getNames()[i], root_rel.root().names(i)));
             }
@@ -1271,6 +1251,15 @@ SerializedPlanParser::getFunctionName(const std::string & function_signature, co
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "check_overflow function requires at least two args.");
         ch_function_name = getDecimalFunction(output_type.decimal(), args.at(1).value().literal().boolean());
     }
+    else if (function_name == "char_length")
+    {
+        /// In Spark
+        /// char_length returns the number of bytes when input is binary type, corresponding to CH length function
+        /// char_length returns the number of characters when input is string type, corresponding to CH char_length function
+        ch_function_name = SCALAR_FUNCTIONS.at(function_name);
+        if (function_signature.find("vbin") != std::string::npos)
+            ch_function_name = "length";
+    }
     else
         ch_function_name = SCALAR_FUNCTIONS.at(function_name);
 
@@ -1304,11 +1293,19 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
     ActionsDAG::NodeRawConstPtrs args;
     parseFunctionArguments(actions_dag, args, required_columns, function_name, scalar_function);
 
-    /// arrayJoin(args[0])
-    auto array_join_name = "arrayJoin(" + args[0]->result_name + ")";
-    const auto * array_join_node = &actions_dag->addArrayJoin(*args[0], array_join_name);
+    /// Remove Nullable from Nullable(Array(xx)) or Nullable(Map(xx, xx)) if needed
+    const auto * arg_not_null = args[0];
+    if (arg_not_null->result_type->isNullable())
+    {
+        auto assume_not_null_builder = FunctionFactory::instance().get("assumeNotNull", context);
+        arg_not_null = &actions_dag->addFunction(assume_not_null_builder, {args[0]}, "assumeNotNull(" + args[0]->result_name + ")");
+    }
 
-    auto arg_type = DB::removeNullable(args[0]->result_type);
+    /// arrayJoin(arg_not_null)
+    auto array_join_name = "arrayJoin(" + arg_not_null->result_name + ")";
+    const auto * array_join_node = &actions_dag->addArrayJoin(*arg_not_null, array_join_name);
+
+    auto arg_type = arg_not_null->result_type;
     WhichDataType which(arg_type.get());
     auto tuple_element_builder = FunctionFactory::instance().get("tupleElement", context);
     auto tuple_index_type = std::make_shared<DataTypeUInt32>();
@@ -1331,10 +1328,10 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
 
-            /// arrayJoin(args[0]).1
+            /// arrayJoin(arg_not_null).1
             const auto * key_node = add_tuple_element(array_join_node, 1);
 
-            /// arrayJoin(args[0]).2
+            /// arrayJoin(arg_not_null).2
             const auto * val_node = add_tuple_element(array_join_node, 2);
 
             result_names.push_back(key_node->result_name);
@@ -1365,20 +1362,35 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             /// In CH: arrayJoin(map(k, v)) output 1 column with Tuple Type.
             /// So we must wrap arrayJoin with tupleElement function for compatiability.
 
-            /// pos = arrayJoin(args[0]).1
+            /// pos = arrayJoin(arg_not_null).1
             const auto * pos_node = add_tuple_element(array_join_node, 1);
 
-            /// col = arrayJoin(args[0]).2 or (key, value) = arrayJoin(args[0]).2
+            /// col = arrayJoin(arg_not_null).2 or (key, value) = arrayJoin(arg_not_null).2
             const auto * item_node = add_tuple_element(array_join_node, 2);
 
             /// Get type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
-            auto raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
+            DataTypePtr raw_child_type;
+            if (args[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->function_base->getName() == "mapFromArrays")
+            {
+                /// Get Type of y from node: mapFromArrays(x, y)
+                raw_child_type = DB::removeNullable(args[0]->children[1]->result_type);
+            }
+            else if (args[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->function_base->getName() == "_CAST" &&
+                args[0]->children[0]->type == ActionsDAG::ActionType::FUNCTION && args[0]->children[0]->function_base->getName() == "mapFromArrays")
+            {
+                /// Get Type of y from node: cast(mapFromArrays(x, y), 'Map(K, V)')
+                raw_child_type = DB::removeNullable(args[0]->children[0]->children[1]->result_type);
+            }
+            else
+                throw Exception(ErrorCodes::BAD_ARGUMENTS, "Invalid argument type of arrayJoin: {}", actions_dag->dumpDAG());
+
+
             if (isMap(raw_child_type))
             {
-                /// key = arrayJoin(args[0]).2.1
+                /// key = arrayJoin(arg_not_null).2.1
                 const auto * item_key_node = add_tuple_element(item_node, 1);
 
-                /// value = arrayJoin(args[0]).2.2
+                /// value = arrayJoin(arg_not_null).2.2
                 const auto * item_value_node = add_tuple_element(item_node, 2);
 
                 result_names.push_back(pos_node->result_name);
@@ -1395,7 +1407,7 @@ ActionsDAG::NodeRawConstPtrs SerializedPlanParser::parseArrayJoinWithDAG(
             }
             else if (isArray(raw_child_type))
             {
-                /// col = arrayJoin(args[0]).2
+                /// col = arrayJoin(arg_not_null).2
                 result_names.push_back(pos_node->result_name);
                 result_names.push_back(item_node->result_name);
                 if (keep_result)
@@ -1704,6 +1716,34 @@ void SerializedPlanParser::parseFunctionArguments(
         function_name = "repeat";
         parsed_args.emplace_back(space_str_node);
         parsed_args.emplace_back(repeat_times_node);
+    }
+    else if (function_name == "json_tuple")
+    {
+        function_name = "JSONExtract";
+        const DB::ActionsDAG::Node * json_expr_node = parseFunctionArgument(actions_dag, required_columns, "JSONExtract", args[0]);
+        std::string extract_expr = "Tuple(";
+        for (int i = 1; i < args.size(); i++)
+        {
+            auto arg_value = args[i].value();
+            if (!arg_value.has_literal())
+            {
+                throw DB::Exception(DB::ErrorCodes::BAD_ARGUMENTS, "The arguments of function {} must be string literal", function_name);
+            }
+            DB::Field f = arg_value.literal().string();
+            std::string s;
+            if (f.tryGet(s))
+            {
+                extract_expr.append(s).append(" Nullable(String)");
+                if (i != args.size() - 1)
+                {
+                    extract_expr.append(",");
+                }
+            }
+        }
+        extract_expr.append(")");
+        const DB::ActionsDAG::Node * extract_expr_node = add_column(std::make_shared<DataTypeString>(), extract_expr);
+        parsed_args.emplace_back(json_expr_node);
+        parsed_args.emplace_back(extract_expr_node);
     }
     else
     {
