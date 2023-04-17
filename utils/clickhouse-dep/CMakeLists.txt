@@ -55,7 +55,7 @@ add_custom_command(OUTPUT copy_deps
         cp $<TARGET_FILE:ch_contrib::vectorscan> deps/ &&
         cp $<TARGET_FILE:ch_contrib::base64> deps/ &&
         cp $<TARGET_FILE:ch_contrib::consistent_hashing> deps/ &&
-        cp $<TARGET_FILE:ch_contrib::jemalloc> deps/ &&
+	# cp $<TARGET_FILE:ch_contrib::jemalloc> deps/ &&
         cp $<TARGET_FILE:ch_contrib::c-ares> deps/ &&
         cp $<TARGET_FILE:ch_contrib::hdfs> deps/ &&
         cp $<TARGET_FILE:ch_contrib::yaml_cpp> deps/ &&

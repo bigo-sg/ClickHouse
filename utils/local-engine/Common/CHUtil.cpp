@@ -409,6 +409,7 @@ std::map<std::string, std::string> BackendInitializerUtil::getBackendConfMap(con
         if (!success)
             break;
 
+        std::cout << "plan:" << plan_ptr->DebugString() << std::endl;
         if (!plan_ptr->has_advanced_extensions() || !plan_ptr->advanced_extensions().has_enhancement())
             break;
         const auto & enhancement = plan_ptr->advanced_extensions().enhancement();
@@ -530,6 +531,8 @@ void BackendInitializerUtil::initSettings()
     settings.set("input_format_parquet_case_insensitive_column_matching", true);
     settings.set("function_json_value_return_type_allow_complex", true);
     settings.set("function_json_value_return_type_allow_nullable", true);
+
+    std::cout << "settings:" << settings.toString() << std::endl;
 }
 
 void BackendInitializerUtil::initContexts()
