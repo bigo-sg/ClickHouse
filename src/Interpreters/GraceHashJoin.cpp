@@ -1,10 +1,17 @@
+#include <memory>
+#include <mutex>
 #include <Interpreters/GraceHashJoin.h>
 #include <Interpreters/HashJoin.h>
 #include <Interpreters/TableJoin.h>
 #include <Interpreters/Context.h>
 
 #include <Formats/NativeWriter.h>
+#include <Formats/NativeReader.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
+#include <IO/IReadableWriteBuffer.h>
+#include <IO/ReadBufferFromString.h>
+#include <IO/WriteBufferFromArena.h>
+#include <Compression/CompressedReadBuffer.h>
 
 #include <Compression/CompressedWriteBuffer.h>
 #include <Core/ProtocolDefines.h>
@@ -12,6 +19,9 @@
 #include <Disks/TemporaryFileOnDisk.h>
 #include <Common/logger_useful.h>
 #include <Common/thread_local_rng.h>
+#include "Aggregator.h"
+#include "Context.h"
+#include "TemporaryDataOnDisk.h"
 
 #include <base/FnTraits.h>
 #include <fmt/format.h>
@@ -32,17 +42,157 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
 }
+// For improvements
+// - move block serialization(Deserialization) and compression(decompression) out of lock scope
+// - make read/wirte interface thread safe
+class TemporaryBucketFileStream : boost::noncopyable
+{
+public:
+    explicit TemporaryBucketFileStream(const Block & header_, WriteBufferPtr file_buf_, size_t max_block_size_)
+        : header(header_)
+        , file_out_buf(file_buf_)
+        , max_block_size(max_block_size_)
+    {}
+
+    void finishWriting()
+    {
+        LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Finish writing. write rows:{}", fmt::ptr(this), write_rows);
+        flush();
+        std::lock_guard lock(mutex);
+        if (finished_writing)
+            return;
+        finished_writing = true;
+        file_out_buf->finalize();
+    }
+
+    bool isWriteFinished() const
+    {
+        return finished_writing;
+    }
+
+    bool isEof() const
+    {
+        return finished_writing && file_in_buf && file_in_buf->eof();
+    }
+
+    size_t write(const Block & block)
+    {
+        if (finished_writing || file_in_buf) [[unlikely]]
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Writing finished file");
+        bool need_flush = false;
+        write_rows += block.rows();
+        {
+            std::lock_guard pending_blocks_mutex_lock(pending_blocks_mutex);
+            pending_rows += block.rows();
+            pending_blocks.push_back(block);
+            if (pending_rows >= max_block_size)
+            {
+                need_flush = true;
+            }
+        }
+        if (need_flush)
+            return flush();
+        return 0;
+    }
+
+    Block read()
+    {
+        if (!finished_writing) [[unlikely]]
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Reading not finished file");
+        if (!file_in_buf)
+        {
+            std::lock_guard lock(mutex);
+            if (!file_in_buf)
+            {
+                file_in_buf =  dynamic_cast<IReadableWriteBuffer *>(file_out_buf.get())->tryGetReadBuffer();
+            }
+        }
+        Block res_block;
+        String in_buf;
+        {
+            std::lock_guard lock(mutex);
+            if (file_in_buf->eof())
+            {
+                LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Read finished. read rows:{}", fmt::ptr(this), read_rows);
+                return {};
+            }
+            readBinary(in_buf, *file_in_buf);
+        }
+        ReadBufferFromString bin_block_buf(in_buf);
+        CompressedReadBuffer compress_buf(bin_block_buf);
+        NativeReader native_reader(compress_buf, header, DBMS_TCP_PROTOCOL_VERSION);
+        res_block = native_reader.read();
+        read_rows += res_block.rows();
+        return res_block;
+    }
+
+private:
+    Block header;
+    WriteBufferPtr file_out_buf;
+    size_t max_block_size;
+    std::mutex pending_blocks_mutex;
+    std::vector<Block> pending_blocks;
+    std::list<std::shared_ptr<std::string>> mem_bufs;
+    size_t pending_rows = 0;
+    std::atomic<size_t> write_rows = 0;
+    std::atomic<size_t> read_rows = 0;
+    Arena arena;
+
+    // Comes from file_out_buf when finish writing.
+    std::shared_ptr<ReadBuffer> file_in_buf = nullptr;
+    bool finished_writing = false;
+
+    // For protecting read/write file buffer.
+    std::mutex mutex;
+
+    size_t flush()
+    {
+        Block merged_block;
+        Blocks tmp_blocks;
+        std::string out_buf;
+        {
+            std::lock_guard pending_blocks_lock(pending_blocks_mutex);
+            if (!pending_rows)
+                return 0;
+            tmp_blocks.swap(pending_blocks);
+            pending_rows = 0;
+        }
+        merged_block = concatenateBlocks(tmp_blocks);
+        WriteBufferFromString bin_block_buf(out_buf);
+        CompressedWriteBuffer compress_buf(bin_block_buf);
+        NativeWriter native_writer(compress_buf, DBMS_TCP_PROTOCOL_VERSION, header);
+        /*
+        size_t bin_size = 0;
+        for (const auto & block : tmp_blocks)
+        {
+            bin_size += native_writer.write(block);
+        }
+        */
+        size_t bin_size = native_writer.write(merged_block);
+        native_writer.flush();
+        compress_buf.finalize();
+        bin_block_buf.finalize();
+        {
+            std::lock_guard lock(mutex);
+            writeBinary(out_buf, *file_out_buf);
+        }
+        return bin_size;
+    }
+
+};
+
+using TemporaryFileStreamImpl = TemporaryBucketFileStream;
+using TemporaryFileStreamImplPtr = std::shared_ptr<TemporaryFileStreamImpl>;
 
 namespace
 {
+
     class AccumulatedBlockReader
     {
     public:
-        AccumulatedBlockReader(TemporaryFileStream & reader_,
-                               std::mutex & mutex_,
+        explicit AccumulatedBlockReader(TemporaryFileStreamImpl & reader_,
                                size_t result_block_size_ = 0)
             : reader(reader_)
-            , mutex(mutex_)
             , result_block_size(result_block_size_)
         {
             if (!reader.isWriteFinished())
@@ -51,7 +201,6 @@ namespace
 
         Block read()
         {
-            std::lock_guard lock(mutex);
 
             if (eof)
                 return {};
@@ -78,8 +227,7 @@ namespace
         }
 
     private:
-        TemporaryFileStream & reader;
-        std::mutex & mutex;
+        TemporaryFileStreamImpl & reader;
 
         const size_t result_block_size;
         bool eof = false;
@@ -121,7 +269,7 @@ class GraceHashJoin::FileBucket : boost::noncopyable
 public:
     using BucketLock = std::unique_lock<std::mutex>;
 
-    explicit FileBucket(size_t bucket_index_, TemporaryFileStream & left_file_, TemporaryFileStream & right_file_, Poco::Logger * log_)
+    explicit FileBucket(size_t bucket_index_, TemporaryFileStreamImplPtr left_file_, TemporaryFileStreamImplPtr right_file_, Poco::Logger * log_)
         : idx{bucket_index_}
         , left_file{left_file_}
         , right_file{right_file_}
@@ -132,32 +280,36 @@ public:
 
     void addLeftBlock(const Block & block)
     {
-        std::unique_lock<std::mutex> lock(left_file_mutex);
-        addBlockImpl(block, left_file, lock);
+        // std::unique_lock<std::mutex> lock(left_file_mutex);
+        // addBlockImpl(block, left_file, lock);
+        addBlockImpl(block, *left_file);
     }
 
     void addRightBlock(const Block & block)
     {
-        std::unique_lock<std::mutex> lock(right_file_mutex);
-        addBlockImpl(block, right_file, lock);
+        // std::unique_lock<std::mutex> lock(right_file_mutex);
+        // addBlockImpl(block, right_file, lock);
+        addBlockImpl(block, *right_file);
     }
 
     bool tryAddLeftBlock(const Block & block)
     {
-        std::unique_lock<std::mutex> lock(left_file_mutex, std::try_to_lock);
-        return addBlockImpl(block, left_file, lock);
+        // std::unique_lock<std::mutex> lock(left_file_mutex, std::try_to_lock);
+        // return addBlockImpl(block, left_file, lock);
+        return addBlockImpl(block, *left_file);
     }
 
     bool tryAddRightBlock(const Block & block)
     {
-        std::unique_lock<std::mutex> lock(right_file_mutex, std::try_to_lock);
-        return addBlockImpl(block, right_file, lock);
+        // std::unique_lock<std::mutex> lock(right_file_mutex, std::try_to_lock);
+        // return addBlockImpl(block, right_file, lock);
+        return addBlockImpl(block, *right_file);
     }
 
     bool finished() const
     {
-        std::unique_lock<std::mutex> left_lock(left_file_mutex);
-        return left_file.isEof();
+        // std::unique_lock<std::mutex> left_lock(left_file_mutex);
+        return left_file->isEof();
     }
 
     bool empty() const { return is_empty.load(); }
@@ -166,33 +318,34 @@ public:
     {
         LOG_TRACE(log, "Joining file bucket {}", idx);
         {
-            std::unique_lock<std::mutex> left_lock(left_file_mutex);
-            std::unique_lock<std::mutex> right_lock(right_file_mutex);
+            // std::unique_lock<std::mutex> left_lock(left_file_mutex);
+            // std::unique_lock<std::mutex> right_lock(right_file_mutex);
 
-            left_file.finishWriting();
-            right_file.finishWriting();
+            left_file->finishWriting();
+            right_file->finishWriting();
 
             state = State::JOINING_BLOCKS;
         }
-        return AccumulatedBlockReader(right_file, right_file_mutex);
+        return AccumulatedBlockReader(*right_file);
     }
 
     AccumulatedBlockReader getLeftTableReader()
     {
         ensureState(State::JOINING_BLOCKS);
-        return AccumulatedBlockReader(left_file, left_file_mutex);
+        return AccumulatedBlockReader(*left_file);
     }
 
     const size_t idx;
 
 private:
-    bool addBlockImpl(const Block & block, TemporaryFileStream & writer, std::unique_lock<std::mutex> & lock)
+    // bool addBlockImpl(const Block & block, TemporaryFileStreamImpl & writer, std::unique_lock<std::mutex> & lock)
+    bool addBlockImpl(const Block & block, TemporaryFileStreamImpl & writer)
     {
         ensureState(State::WRITING_BLOCKS);
-
+        #if 0
         if (!lock.owns_lock())
             return false;
-
+        #endif
         if (block.rows())
             is_empty = false;
 
@@ -214,10 +367,12 @@ private:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Invalid state transition, expected {}, got {}", expected, state.load());
     }
 
-    TemporaryFileStream & left_file;
-    TemporaryFileStream & right_file;
-    mutable std::mutex left_file_mutex;
-    mutable std::mutex right_file_mutex;
+    TemporaryFileStreamImplPtr left_file;
+    TemporaryFileStreamImplPtr right_file;
+    // TemporaryFileStreamImpl & left_file;
+    // TemporaryFileStreamImpl & right_file;
+    // mutable std::mutex left_file_mutex;
+    // mutable std::mutex right_file_mutex;
 
     std::atomic_bool is_empty = true;
 
@@ -385,8 +540,10 @@ GraceHashJoin::Buckets GraceHashJoin::rehashBuckets(size_t to_size)
 
 void GraceHashJoin::addBucket(Buckets & destination)
 {
-    auto & left_file = tmp_data->createStream(left_sample_block);
-    auto & right_file = tmp_data->createStream(prepareRightBlock(right_sample_block));
+    // auto & left_file = tmp_data->createStream(left_sample_block);
+    // auto & right_file = tmp_data->createStream(prepareRightBlock(right_sample_block));
+    auto left_file = std::make_shared<TemporaryFileStreamImpl>(left_sample_block, tmp_data->createRawStream(), max_block_size);
+    auto right_file = std::make_shared<TemporaryFileStreamImpl>(right_sample_block, tmp_data->createRawStream(), max_block_size);
 
     BucketPtr new_bucket = std::make_shared<FileBucket>(destination.size(), left_file, right_file, log);
     destination.emplace_back(std::move(new_bucket));

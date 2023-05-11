@@ -61,6 +61,9 @@
 
 #include "config_version.h"
 
+#include </usr/include/gperftools/profiler.h>
+
+
 using namespace std::literals;
 using namespace DB;
 
@@ -156,6 +159,7 @@ TCPHandler::~TCPHandler()
     }
 }
 
+size_t perf_count = 0;
 void TCPHandler::runImpl()
 {
     setThreadName("TCPHandler");
@@ -439,7 +443,12 @@ void TCPHandler::runImpl()
             }
             else if (state.io.pipeline.pulling())
             {
+                perf_count += 1;
+                std::string file_name = "pulling" + std::to_string(perf_count) + ".perf";
+                // ProfilerStart(file_name.c_str());
                 processOrdinaryQueryWithProcessors();
+                // ProfilerStop();
+                LOG_ERROR(log, "run perf on query:{}, file:{}", state.query, file_name);
                 finish_or_cancel();
             }
             else if (state.io.pipeline.completed())

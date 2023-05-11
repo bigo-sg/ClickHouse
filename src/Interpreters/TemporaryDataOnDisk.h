@@ -80,15 +80,9 @@ protected:
 class TemporaryDataOnDisk : private TemporaryDataOnDiskScope
 {
     friend class TemporaryFileStream; /// to allow it to call `deltaAllocAndCheck` to account data
+    friend class TemporayRawFileStream; /// to allow it to call `deltaAllocAndCheck` to account data
 
 public:
-    enum Mode
-    {
-        // for read/write raw data
-        RAW = 0,
-        // for read/write blocks
-        BLOCK = 1,
-    };
     using TemporaryDataOnDiskScope::StatAtomic;
 
     explicit TemporaryDataOnDisk(TemporaryDataOnDiskScopePtr parent_);
@@ -141,14 +135,12 @@ public:
     TemporaryFileStream(FileSegmentsHolderPtr segments_, const Block & header_, TemporaryDataOnDisk * parent_);
 
     size_t write(const Block & block);
-    size_t writeRaw(std::string_view data);
     void flush();
 
     Stat finishWriting();
     bool isWriteFinished() const;
 
     Block read();
-    std::string_view readRaw();
 
     String getPath() const;
 
@@ -168,15 +160,14 @@ private:
     TemporaryDataOnDisk * parent;
 
     Block header;
+    // This mutex for making read/write be thread safe.
+    std::mutex mutex;
 
     /// Data can be stored in file directly or in the cache
     TemporaryFileOnDiskHolder file;
     FileSegmentsHolderPtr segment_holder;
 
     Stat stat;
-    TemporaryDataOnDisk::Mode data_mode = TemporaryDataOnDisk::Mode::BLOCK;
-
-
     struct OutputWriter;
     std::unique_ptr<OutputWriter> out_writer;
 
