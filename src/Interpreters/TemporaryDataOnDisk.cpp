@@ -12,6 +12,7 @@
 #include <Disks/IO/WriteBufferFromTemporaryFile.h>
 
 #include <Common/logger_useful.h>
+#include "TemporaryDataOnDisk.h"
 #include <Interpreters/Cache/WriteBufferToFileSegment.h>
 
 namespace DB
@@ -255,12 +256,24 @@ TemporaryFileStream::TemporaryFileStream(FileSegmentsHolderPtr segments_, const 
 
 size_t TemporaryFileStream::write(const Block & block)
 {
+    if (data_mode != TemporaryDataOnDisk::Mode::BLOCK)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot write to stream in {} mode", toString(data_mode));
+    }
     if (!out_writer)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Writing has been finished");
 
     updateAllocAndCheck();
     size_t bytes_written = out_writer->write(block);
     return bytes_written;
+}
+size_t TemporaryFileStream::writeRaw(std::string_view /*data*/)
+{
+    if (data_mode != TemporaryDataOnDisk::Mode::RAW)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot write to stream in {} mode", toString(data_mode));
+    }
+    return 0;
 }
 
 void TemporaryFileStream::flush()
@@ -297,6 +310,10 @@ bool TemporaryFileStream::isWriteFinished() const
 
 Block TemporaryFileStream::read()
 {
+    if (data_mode != TemporaryDataOnDisk::Mode::BLOCK)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot read from stream in {} mode", toString(data_mode));
+    }
     if (!isWriteFinished())
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Writing has been not finished");
 
@@ -315,6 +332,15 @@ Block TemporaryFileStream::read()
         this->release();
     }
     return block;
+}
+
+std::string_view TemporaryFileStream::readRaw()
+{
+    if (data_mode != TemporaryDataOnDisk::Mode::RAW)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot read from stream in {} mode", toString(data_mode));
+    }
+    return {};
 }
 
 void TemporaryFileStream::updateAllocAndCheck()
