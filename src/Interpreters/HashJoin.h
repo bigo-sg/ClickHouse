@@ -146,7 +146,7 @@ public:
 class HashJoin : public IJoin
 {
 public:
-    HashJoin(std::shared_ptr<TableJoin> table_join_, const Block & right_sample_block, bool any_take_last_row_ = false);
+    HashJoin(std::shared_ptr<TableJoin> table_join_, const Block & right_sample_block, bool any_take_last_row_ = false, size_t reserve_size = 0);
 
     ~HashJoin() override;
 
@@ -227,6 +227,15 @@ public:
         M(key_string)                          \
         M(key_fixed_string)
 
+    #define APPLY_FOR_JOIN_VARIANTS_RESIZE(M) \
+        M(key32)                              \
+        M(key64)                              \
+        M(key_string)                         \
+        M(key_fixed_string)                   \
+        M(keys128)                            \
+        M(keys256)                            \
+        M(hashed)
+
     enum class Type
     {
         EMPTY,
@@ -264,6 +273,22 @@ public:
                 APPLY_FOR_JOIN_VARIANTS(M)
             #undef M
             }
+        }
+
+        void reserve(Type which, size_t n)
+        {
+            switch (which)
+            {
+                case Type::EMPTY:            break;
+                case Type::CROSS:            break;
+                case Type::key8:             break;
+                case Type::key16:            break;
+            #define M(NAME) \
+                case Type::NAME: NAME->reserve(n); break;
+                APPLY_FOR_JOIN_VARIANTS_RESIZE(M)
+            #undef M
+            }
+
         }
 
         size_t getTotalRowCount(Type which) const
@@ -409,7 +434,7 @@ private:
     /// If set HashJoin instance is not available for modification (addJoinedBlock)
     TableLockHolder storage_join_lock = nullptr;
 
-    void dataMapInit(MapsVariant &);
+    void dataMapInit(MapsVariant &, size_t);
 
     void initRightBlockStructure(Block & saved_block_sample);
 

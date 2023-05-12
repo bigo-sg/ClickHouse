@@ -755,8 +755,13 @@ IBlocksStreamPtr GraceHashJoin::getDelayedBlocks()
         return nullptr;
 
     size_t bucket_idx = current_bucket->idx;
+    size_t prev_keys_num = 0;
+    if (hash_join)
+    {
+        prev_keys_num = hash_join->getTotalRowCount();
+    }
 
-    hash_join = makeInMemoryJoin();
+    hash_join = makeInMemoryJoin(prev_keys_num);
 
     for (bucket_idx = bucket_idx + 1; bucket_idx < buckets.size(); ++bucket_idx)
     {
@@ -791,9 +796,9 @@ IBlocksStreamPtr GraceHashJoin::getDelayedBlocks()
     return nullptr;
 }
 
-GraceHashJoin::InMemoryJoinPtr GraceHashJoin::makeInMemoryJoin()
+GraceHashJoin::InMemoryJoinPtr GraceHashJoin::makeInMemoryJoin(size_t reserve_size)
 {
-    return std::make_unique<InMemoryJoin>(table_join, right_sample_block, any_take_last_row);
+    return std::make_unique<InMemoryJoin>(table_join, right_sample_block, any_take_last_row, reserve_size);
 }
 
 Block GraceHashJoin::prepareRightBlock(const Block & block)
@@ -843,6 +848,7 @@ void GraceHashJoin::addJoinedBlockImpl(Block block)
                 return;
         }
 
+        auto prev_rows = hash_join->getTotalRowCount();
         hash_join->addJoinedBlock(current_block, /* check_limits = */ false);
 
         if (!hasMemoryOverflow(hash_join))
@@ -874,8 +880,7 @@ void GraceHashJoin::addJoinedBlockImpl(Block block)
             else
                 current_block = concatenateBlocks(current_blocks);
         }
-
-        hash_join = makeInMemoryJoin();
+        hash_join = makeInMemoryJoin(prev_rows);
 
         if (current_block.rows() > 0)
             hash_join->addJoinedBlock(current_block, /* check_limits = */ false);
