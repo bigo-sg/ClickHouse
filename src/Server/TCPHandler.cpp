@@ -445,9 +445,9 @@ void TCPHandler::runImpl()
             {
                 perf_count += 1;
                 std::string file_name = "pulling" + std::to_string(perf_count) + ".perf";
-                // ProfilerStart(file_name.c_str());
+                ProfilerStart(file_name.c_str());
                 processOrdinaryQueryWithProcessors();
-                // ProfilerStop();
+                ProfilerStop();
                 LOG_ERROR(log, "run perf on query:{}, file:{}", state.query, file_name);
                 finish_or_cancel();
             }

@@ -42,6 +42,13 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
     extern const int NOT_IMPLEMENTED;
 }
+void static assignBlockBucketNum(Blocks & blocks, size_t bucket_num)
+{
+    for (auto & block : blocks)
+    {
+        block.info.bucket_num = static_cast<Int32>(bucket_num);
+    }
+}
 // For improvements
 // - move block serialization(Deserialization) and compression(decompression) out of lock scope
 // - make read/wirte interface thread safe
@@ -56,7 +63,7 @@ public:
 
     void finishWriting()
     {
-        LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Finish writing. write rows:{}", fmt::ptr(this), write_rows);
+        // LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Finish writing. write rows:{}", fmt::ptr(this), write_rows);
         flush();
         std::lock_guard lock(mutex);
         if (finished_writing)
@@ -79,6 +86,7 @@ public:
     {
         if (finished_writing || file_in_buf) [[unlikely]]
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Writing finished file");
+        // LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Write block. write rows:{}, bucket_num:{}", fmt::ptr(this), block.rows(), block.info.bucket_num);
         bool need_flush = false;
         bool block_inserted = false;
         write_rows += block.rows();
@@ -129,7 +137,7 @@ public:
             std::lock_guard lock(mutex);
             if (file_in_buf->eof())
             {
-                LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Read finished. read rows:{}", fmt::ptr(this), read_rows);
+                // LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Read finished. read rows:{}", fmt::ptr(this), read_rows);
                 return {};
             }
             readBinary(in_buf, *file_in_buf);
@@ -138,6 +146,7 @@ public:
         CompressedReadBuffer compress_buf(bin_block_buf);
         NativeReader native_reader(compress_buf, header, DBMS_TCP_PROTOCOL_VERSION);
         res_block = native_reader.read();
+        // LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Read block. read rows:{}, bucket_num:{}", fmt::ptr(this), res_block.rows(), res_block.info.bucket_num);
         read_rows += res_block.rows();
         return res_block;
     }
@@ -174,6 +183,8 @@ private:
             pending_rows = 0;
         }
         merged_block = concatenateBlocks(tmp_blocks);
+        merged_block.info.bucket_num = tmp_blocks.back().info.bucket_num;
+        // LOG_TRACE(&Poco::Logger::get("TemporaryBucketFileStream"), "xxx {} Flush block. write rows:{}, bucket_num:{}", fmt::ptr(this), merged_block.rows(), merged_block.info.bucket_num);
         WriteBufferFromString bin_block_buf(out_buf);
         CompressedWriteBuffer compress_buf(bin_block_buf);
         NativeWriter native_writer(compress_buf, DBMS_TCP_PROTOCOL_VERSION, header);
@@ -411,7 +422,7 @@ void flushBlocksToBuckets(Blocks & blocks, const GraceHashJoin::Buckets & bucket
             /// Skip empty and current bucket
             if (!blocks[i].rows() || i == except_index)
                 return true;
-
+            // LOG_TRACE(&Poco::Logger::get("flushBlocksToBuckets"), "xxx flushBlocksToBuckets. bucket[{}]. bucket_number:{}, rows:{}side:{}", i, blocks[i].info.bucket_num, blocks[i].rows(), table_side);
             bool flushed = false;
             if constexpr (table_side == JoinTableSide::Left)
                 flushed = buckets[i]->tryAddLeftBlock(blocks[i]);
@@ -594,6 +605,10 @@ void GraceHashJoin::joinBlock(Block & block, std::shared_ptr<ExtraBlock> & not_p
     /// so, no need to copy buckets here
     size_t num_buckets = getNumBuckets();
     Blocks blocks = JoinCommon::scatterBlockByHash(left_key_names, block, num_buckets);
+    for (auto & scattered_block : blocks)
+    {
+        scattered_block.info.bucket_num = static_cast<Int32>(num_buckets);
+    }
 
     block = std::move(blocks[current_bucket->idx]);
 
@@ -673,13 +688,23 @@ public:
         do
         {
             block = left_reader.read();
+            // LOG_TRACE(&Poco::Logger::get("DelayedBlocks"), "xxx DelayedBlocks::next. rows:{}, current_bucket:{}, bucket_num:{}, num_buckets:{}", block.rows(), current_bucket, block.info.bucket_num, num_buckets);
             if (!block)
             {
                 return {};
             }
-
-            Blocks blocks = JoinCommon::scatterBlockByHash(left_key_names, block, num_buckets);
-            block = std::move(blocks[current_idx]);
+            // LOG_TRACE(&Poco::Logger::get("DelayedBlocks"), "xxxx nextImpl. current_bucket:{}, block rows:{}, bucket_num:{}, num_buckets:{}", current_bucket, block.rows(), block.info.bucket_num, num_buckets);
+            Blocks blocks;
+            if (block.info.bucket_num != static_cast<Int32>(num_buckets))
+            {
+                blocks = JoinCommon::scatterBlockByHash(left_key_names, block, num_buckets);
+                assignBlockBucketNum(blocks, num_buckets);
+                block = std::move(blocks[current_idx]);
+            }
+            else
+            {
+                // LOG_TRACE(&Poco::Logger::get("GraceHashJoin"), "Block was already scattered by hash, skipping scatter step");
+            }
 
             /*
              * We need to filter out blocks that were written to the current bucket `B_{n}`
@@ -688,15 +713,18 @@ public:
              * and rows can be moved only forward (because we increase hash modulo twice on each rehash),
              * so it is safe to add blocks.
              */
-            for (size_t bucket_idx = 0; bucket_idx < num_buckets; ++bucket_idx)
+            if (!blocks.empty())
             {
-                if (blocks[bucket_idx].rows() == 0)
-                    continue;
+                for (size_t bucket_idx = 0; bucket_idx < num_buckets; ++bucket_idx)
+                {
+                    if (blocks[bucket_idx].rows() == 0)
+                        continue;
 
-                if (bucket_idx == current_idx) // Rows that are still in our bucket
-                    continue;
-
-                buckets[bucket_idx]->addLeftBlock(blocks[bucket_idx]);
+                    if (bucket_idx == current_idx) // Rows that are still in our bucket
+                        continue;
+                    // LOG_TRACE(&Poco::Logger::get("GraceHashJoin"), "xxx DelayedBlocks::next, re-scatter bucket[{}].rows:{}, bucket_num:{}", bucket_idx, blocks[bucket_idx].rows(), blocks[bucket_idx].info.bucket_num);
+                    buckets[bucket_idx]->addLeftBlock(blocks[bucket_idx]);
+                }
             }
         } while (block.rows() == 0);
 
@@ -746,6 +774,7 @@ IBlocksStreamPtr GraceHashJoin::getDelayedBlocks()
         size_t num_rows = 0; /// count rows that were written and rehashed
         while (Block block = right_reader.read())
         {
+            // LOG_TRACE(&Poco::Logger::get("GraceHashJoin"), "xxx GraceHashJoin::getDelayedBlocks. rows:{}, bucket_num:{}", block.rows(), block.info.bucket_num);
             num_rows += block.rows();
             addJoinedBlockImpl(std::move(block));
         }
@@ -777,15 +806,19 @@ void GraceHashJoin::addJoinedBlockImpl(Block block)
     Buckets buckets_snapshot = getCurrentBuckets();
     size_t bucket_index = current_bucket->idx;
     Block current_block;
-
+    // LOG_TRACE(&Poco::Logger::get("GraceHashJoin"), "xxx addJoinedBlockImpl. rows:{}, bucket_num:{}", block.rows(), block.info.bucket_num);
     {
-        Blocks blocks = JoinCommon::scatterBlockByHash(right_key_names, block, buckets_snapshot.size());
-        for (auto & scattered_block : blocks)
+        // block.info.bucket_num default value is -1. If the bucket_num is equal to buckets_snapshot.size(),
+        // there is no need to scatter it.
+        if (block.info.bucket_num != static_cast<Int32>(buckets_snapshot.size()))
         {
-            scattered_block.info.bucket_num = static_cast<Int32>(buckets_snapshot.size());
+            Blocks blocks = JoinCommon::scatterBlockByHash(right_key_names, block, buckets_snapshot.size());
+            assignBlockBucketNum(blocks, buckets_snapshot.size());
+            flushBlocksToBuckets<JoinTableSide::Right>(blocks, buckets_snapshot, bucket_index);
+            current_block = std::move(blocks[bucket_index]);
         }
-        flushBlocksToBuckets<JoinTableSide::Right>(blocks, buckets_snapshot, bucket_index);
-        current_block = std::move(blocks[bucket_index]);
+        else
+            current_block = block;
     }
 
     // Add block to the in-memory join
@@ -803,10 +836,7 @@ void GraceHashJoin::addJoinedBlockImpl(Block block)
         {
             LOG_TRACE(log, "mismatch buckets size. previous:{}, current:{}", buckets_snapshot.size(), getCurrentBuckets().size());
             Blocks blocks = JoinCommon::scatterBlockByHash(right_key_names, current_block, current_buckets.size());
-            for (auto & scattered_block : blocks)
-            {
-                scattered_block.info.bucket_num = static_cast<Int32>(buckets_snapshot.size());
-            }
+            assignBlockBucketNum(blocks, current_buckets.size());
             flushBlocksToBuckets<JoinTableSide::Right>(blocks, current_buckets, bucket_index);
             current_block = std::move(blocks[bucket_index]);
             if (!current_block.rows())
@@ -831,6 +861,10 @@ void GraceHashJoin::addJoinedBlockImpl(Block block)
             for (const auto & right_block : right_blocks)
             {
                 Blocks blocks = JoinCommon::scatterBlockByHash(right_key_names, right_block, buckets_snapshot.size());
+                for (auto & scattered_block : blocks)
+                {
+                    scattered_block.info.bucket_num = static_cast<Int32>(buckets_snapshot.size());
+                }
                 flushBlocksToBuckets<JoinTableSide::Right>(blocks, buckets_snapshot, bucket_index);
                 current_blocks.emplace_back(std::move(blocks[bucket_index]));
             }
