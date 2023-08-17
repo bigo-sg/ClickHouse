@@ -93,6 +93,7 @@ class alignas(64) HashTableGrowerWithPrecalculationAndMaxLoadFactor
     static constexpr size_t max_size_degree_quadratic = 19;
 
 public:
+    static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
     static constexpr auto initial_count = 1ULL << initial_size_degree;
 
     /// If collision resolution chains are contiguous, we can implement erase operation by moving the elements.

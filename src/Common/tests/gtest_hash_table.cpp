@@ -345,6 +345,7 @@ struct OneElementResizeGrower
 {
     /// If collision resolution chains are contiguous, we can implement erase operation by moving the elements.
     static constexpr auto performs_linear_probing_with_single_step = true;
+    static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
 
     static constexpr size_t initial_count = 1;
 

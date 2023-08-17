@@ -23,10 +23,28 @@
 #include <Common/HashTable/HashTableAllocator.h>
 #include <Common/HashTable/HashTableKeyHolder.h>
 
+#include <memory>
+
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+#include <Common/PODArray_fwd.h>
+#include <Common/PODArray.h>
+
+#include <Common/TargetSpecific.h>
+
 #ifdef DBMS_HASH_MAP_DEBUG_RESIZES
     #include <iostream>
     #include <iomanip>
     #include <Common/Stopwatch.h>
+#endif
+#include <memory>
+
+#if defined(__SSE2__)
+#    include <emmintrin.h>
+#endif
+
+#if USE_MULTITARGET_CODE
+#    include <immintrin.h>
 #endif
 
 /** NOTE HashTable could only be used for memmoveable (position independent) types.
@@ -216,6 +234,12 @@ struct HashTableCell
 
 };
 
+enum GrowerAddressMethod
+{
+    UNKNOW = 0,
+    LINEAR_PROBING = 1,
+};
+
 /** Determines the size of the hash table, and when and how much it should be resized.
   * Has very small state (one UInt8) and useful for Set-s allocated in automatic memory (see uniqExact as an example).
   */
@@ -231,6 +255,9 @@ struct HashTableGrower
     static constexpr auto performs_linear_probing_with_single_step = true;
 
     static constexpr size_t max_size_degree = 23;
+
+    // static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
+    static constexpr GrowerAddressMethod address_method = UNKNOW;
 
     /// The size of the hash table in the cells.
     size_t bufSize() const               { return 1ULL << size_degree; }
@@ -286,6 +313,8 @@ class alignas(64) HashTableGrowerWithPrecalculation
     static constexpr size_t max_size_degree = 23;
 
 public:
+    // static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
+    static constexpr GrowerAddressMethod address_method = UNKNOW;
     UInt8 sizeDegree() const { return size_degree; }
 
     void increaseSizeDegree(UInt8 delta)
@@ -347,6 +376,7 @@ struct HashTableFixedGrower
     static constexpr auto initial_count = 1ULL << key_bits;
 
     static constexpr auto performs_linear_probing_with_single_step = true;
+    static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
 
     size_t bufSize() const               { return 1ULL << key_bits; }
     size_t place(size_t x) const         { return x; }
@@ -433,6 +463,50 @@ struct AllocatorBufferDeleter<true, Allocator, Cell>
     size_t size;
 };
 
+#ifndef DBMS_HASH_MAP_COUNT_COLLISIONS
+#define DBMS_HASH_MAP_COUNT_COLLISIONS
+#endif
+namespace DB
+{
+DECLARE_AVX512BW_SPECIFIC_CODE(
+inline Int64 findMatchedOrZeroHashValue(const UInt64 * hash_values, size_t n, const UInt64 hash_value)
+{
+    auto zero_value_v = _mm512_set1_epi64(0ul);
+    auto hash_value_v = _mm512_set1_epi64(hash_value);
+    const size_t step = 8;
+    size_t i = 0;
+    const auto * hash_values_pos = hash_values;
+    for (; i + step < n; i += step)
+    {
+        // LOG_ERROR(&Poco::Logger::get("HashTable"), "xxx batch i = {}, n: {}", i, n);
+        auto hash_values_line = _mm512_load_epi64(reinterpret_cast<const UInt8 *>(hash_values_pos));
+        auto cmp_mask = _mm512_cmpeq_epi64_mask(hash_values_line, hash_value_v);
+        auto hit_pos = _tzcnt_u32(cmp_mask);
+        if (hit_pos >= 8)
+        {
+            cmp_mask = _mm512_cmpeq_epi64_mask(hash_values_line, zero_value_v);
+            hit_pos = _tzcnt_u32(cmp_mask);
+            if (hit_pos < 8)
+            {
+                return i + hit_pos;
+            }
+        }
+        else
+        {
+            return i + hit_pos;
+        }
+        hash_values_pos += step;
+    }
+    for (; i < n; ++i)
+    {
+        // LOG_ERROR(&Poco::Logger::get("HashTable"), "xxx single i = {}, n: {}", i, n);
+        if (hash_values[i] == hash_value || !hash_values[i])
+            return i;
+    }
+    return -1;
+}
+)
+}
 
 // The HashTable
 template <typename Key, typename Cell, typename Hash, typename Grower, typename Allocator>
@@ -469,23 +543,72 @@ protected:
 
     size_t m_size = 0;        /// Amount of elements
     Cell * buf;               /// A piece of memory for all elements except the element with zero key.
+    DB::PaddedPODArray<UInt64> hash_values_buf; /// recorde each buf's hash code for quickly comparition.
     Grower grower;
 
 #ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
     mutable size_t collisions = 0;
 #endif
 
-    /// Find a cell with the same key or an empty cell, starting from the specified position and further along the collision resolution chain.
-    size_t ALWAYS_INLINE findCell(const Key & x, size_t hash_value, size_t place_value) const
-    {
-        while (!buf[place_value].isZero(*this) && !buf[place_value].keyEquals(x, hash_value, *this))
-        {
-            place_value = grower.next(place_value);
-#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
-            ++collisions;
-#endif
-        }
+#define ENABLE_SIMD_LOOKUP 0
 
+    /// Find a cell with the same key or an empty cell, starting from the specified position and further along the collision resolution chain.
+    size_t findCell(const Key & x, size_t hash_value, size_t place_value) const
+    {
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+        {
+            while (!buf[place_value].isZero(*this) && !buf[place_value].keyEquals(x, hash_value, *this))
+            {
+                place_value = grower.next(place_value);
+                if (reinterpret_cast<UInt64>(place_value) & 0xF)
+                    continue;
+#if USE_MULTITARGET_CODE
+                if (DB::isArchSupported(DB::TargetArch::AVX512BW))
+                {
+                    auto n = grower.bufSize() - place_value;
+                    /*
+                    LOG_ERROR(
+                        &Poco::Logger::get("HashTable"),
+                        "xxx place_value = {}, bufSize: {}, m_size: {}, hash_values_buf.size: {}, data_ptr: {}/{}/{}",
+                        place_value,
+                        grower.bufSize(),
+                        place_value,
+                        hash_values_buf.size(),
+                        fmt::ptr(hash_values_buf.data()),
+                        reinterpret_cast<UInt64>(hash_values_buf.data()),
+                        reinterpret_cast<UInt64>(hash_values_buf.data() + place_value));
+                    */
+                    auto matched_pos
+                        = DB::TargetSpecific::AVX512BW::findMatchedOrZeroHashValue(hash_values_buf.data() + place_value, n, hash_value);
+                    // LOG_ERROR(&Poco::Logger::get("HashTable"), "xxx return matched_pos = {}", matched_pos);
+                    if (matched_pos >= 0)
+                    {
+                        place_value += matched_pos;
+#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
+                        collisions += matched_pos;
+#endif
+                    }
+                    else
+                    {
+                        place_value = 0;
+#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
+                        collisions += n;
+#endif
+                    }
+                }
+#endif
+            }
+        }
+        else
+        {
+            while (!buf[place_value].isZero(*this) && !buf[place_value].keyEquals(x, hash_value, *this))
+            {
+                place_value = grower.next(place_value);
+#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
+                ++collisions;
+#endif
+            }
+        }
         return place_value;
     }
 
@@ -519,6 +642,11 @@ protected:
     void alloc(const Grower & new_grower)
     {
         buf = reinterpret_cast<Cell *>(Allocator::alloc(allocCheckOverflow(new_grower.bufSize())));
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+        {
+            hash_values_buf.clear();
+            hash_values_buf.resize(new_grower.bufSize(), 0);
+        }
         grower = new_grower;
     }
 
@@ -528,6 +656,8 @@ protected:
         {
             Allocator::free(buf, getBufferSizeInBytes());
             buf = nullptr;
+            if constexpr (Grower::address_method == LINEAR_PROBING)
+                hash_values_buf.clear();
         }
     }
 
@@ -580,6 +710,8 @@ protected:
         }
         else
             buf = reinterpret_cast<Cell *>(Allocator::realloc(buf, old_buffer_size, allocCheckOverflow(new_grower.bufSize())));
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+            hash_values_buf.resize(new_grower.bufSize(), 0);
 
         grower = new_grower;
 
@@ -643,6 +775,11 @@ protected:
             return place_value;
 
         /// Copy to a new location and zero the old one.
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+        {
+            hash_values_buf[&x - buf] = 0;
+            hash_values_buf[place_value] = hash_value;
+        }
         x.setHash(hash_value);
         memcpy(static_cast<void*>(&buf[place_value]), &x, sizeof(x));
         x.setZero();
@@ -800,6 +937,8 @@ public:
         free();
 
         std::swap(buf, rhs.buf);
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+            std::swap(hash_values_buf, rhs.hash_values_buf);
         std::swap(m_size, rhs.m_size);
         std::swap(grower, rhs.grower);
 
@@ -979,6 +1118,8 @@ protected:
 
         new (&buf[place_value]) Cell(key, *this);
         buf[place_value].setHash(hash_value);
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+            hash_values_buf[place_value] = hash_value;
         inserted = true;
         ++m_size;
 
@@ -996,6 +1137,8 @@ protected:
                   */
                 --m_size;
                 buf[place_value].setZero();
+                if constexpr (Grower::address_method == LINEAR_PROBING)
+                    hash_values_buf[place_value] = 0;
                 inserted = false;
                 keyHolderDiscardKey(key_holder);
                 throw;
@@ -1088,8 +1231,9 @@ public:
         emplace(key_holder, it, inserted, hash(key));
     }
 
+    // void ALWAYS_INLINE emplace(KeyHolder && key_holder, LookupResult & it,
     template <typename KeyHolder>
-    void ALWAYS_INLINE emplace(KeyHolder && key_holder, LookupResult & it,
+    void emplace(KeyHolder && key_holder, LookupResult & it,
                                   bool & inserted, size_t hash_value)
     {
         const auto & key = keyHolderGetKey(key_holder);
@@ -1103,6 +1247,8 @@ public:
         size_t place_value = findEmptyCell(grower.place(hash_value));
 
         memcpy(static_cast<void*>(&buf[place_value]), cell, sizeof(*cell));
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+            hash_values_buf[place_value] = hash_value;
         ++m_size;
 
         if (unlikely(grower.overflow(m_size)))
@@ -1240,6 +1386,8 @@ public:
 
             /// Move the element to the freed place
             memcpy(static_cast<void *>(&buf[erased_key_position]), static_cast<void *>(&buf[next_position]), sizeof(Cell));
+            if constexpr (Grower::address_method == LINEAR_PROBING)
+                hash_values_buf[erased_key_position] = hash_values_buf[next_position];
 
             if constexpr (Cell::need_to_notify_cell_during_move)
                 Cell::move(&buf[next_position], &buf[erased_key_position]);
@@ -1249,6 +1397,8 @@ public:
         }
 
         buf[erased_key_position].setZero();
+        if constexpr (Grower::address_method == LINEAR_PROBING)
+            hash_values_buf[erased_key_position] = 0;
         --m_size;
 
         return true;
