@@ -97,6 +97,106 @@ std::unique_ptr<orc::InputStream> asORCInputStreamLoadIntoMemory(ReadBuffer & in
     return std::make_unique<ORCInputStreamFromString>(std::move(file_data), file_size);
 }
 
+UInt64 getORCColumnId(const orc::Type & schema, const std::string & name)
+{
+    static constexpr UInt64 INVALID_COLUMN_ID = std::numeric_limits<uint64_t>::max();
+    for (uint64_t i = 0; i != schema.getSubtypeCount(); ++i)
+    {
+        // Only STRUCT type has field names
+        if (schema.getKind() == orc::STRUCT && boost::iequals(schema.getFieldName(i), name))
+        {
+            return schema.getSubtype(i)->getColumnId();
+        }
+        else
+        {
+            uint64_t ret = getORCColumnId(*schema.getSubtype(i), name);
+            if (ret != INVALID_COLUMN_ID)
+                return ret;
+        }
+    }
+    return INVALID_COLUMN_ID;
+}
+
+static String getColumnNameFromKeyCondition(const KeyCondition & key_condition, size_t indice)
+{
+    const auto & key_columns = key_condition.getKeyColumns();
+    for (const auto & [name, i] : key_columns)
+    {
+        if (i == indice)
+            return name;
+    }
+
+    throw Exception(ErrorCodes::LOGICAL_ERROR, "Can't get column from KeyCondition with indice {}", indice);
+}
+
+std::unique_ptr<orc::SearchArgument> buildORCSearchArgument(const KeyCondition & key_condition, const orc::Type & schema)
+{
+    auto rpn_stack = key_condition.getRPN();
+    if (!rpn_stack.empty())
+        return nullptr;
+
+    auto builder = orc::SearchArgumentFactory::newBuilder();
+    buildORCSearchArgumentImpl(key_condition, schema, rpn_stack, *builder);
+    return builder->build();
+}
+
+void buildORCSearchArgumentImpl(
+    const KeyCondition & key_condition, const orc::Type & schema, KeyCondition::RPN & rpn_stack, orc::SearchArgumentBuilder & builder)
+{
+    if (rpn_stack.empty())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Empty rpn stack in buildORCSearchArgumentImpl");
+
+    const auto & curr = rpn_stack.back();
+    switch (curr.function)
+    {
+        case KeyCondition::RPNElement::FUNCTION_IN_RANGE:
+        case KeyCondition::RPNElement::FUNCTION_NOT_IN_RANGE: {
+        }
+        case KeyCondition::RPNElement::FUNCTION_IN_SET:
+        case KeyCondition::RPNElement::FUNCTION_NOT_IN_SET:
+        case KeyCondition::RPNElement::FUNCTION_IS_NULL: {
+            auto column_id = getORCColumnId(schema, getColumnNameFromKeyCondition(key_condition, curr.key_column));
+        }
+        case KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL:
+        case KeyCondition::RPNElement::FUNCTION_UNKNOWN: {
+            builder.literal(orc::TruthValue::YES_NO_NULL);
+            break;
+        }
+        case KeyCondition::RPNElement::FUNCTION_NOT: {
+            builder.startNot();
+            rpn_stack.pop_back();
+            buildORCSearchArgumentImpl(key_condition, rpn_stack, builder);
+            builder.end();
+            break;
+        }
+        case KeyCondition::RPNElement::FUNCTION_AND: {
+            builder.startAnd();
+            rpn_stack.pop_back();
+            buildORCSearchArgumentImpl(key_condition, rpn_stack, builder);
+            buildORCSearchArgumentImpl(key_condition, rpn_stack, builder);
+            builder.end();
+            break;
+        }
+        case KeyCondition::RPNElement::FUNCTION_OR: {
+            builder.startOr();
+            rpn_stack.pop_back();
+            buildORCSearchArgumentImpl(key_condition, rpn_stack, builder);
+            buildORCSearchArgumentImpl(key_condition, rpn_stack, builder);
+            builder.end();
+            break;
+        }
+        case KeyCondition::RPNElement::ALWAYS_FALSE: {
+            builder.literal(orc::TruthValue::NO);
+            break;
+        }
+        case KeyCondition::RPNElement::ALWAYS_TRUE: {
+            builder.literal(orc::TruthValue::YES);
+            break;
+        }
+    }
+}
+
+
 static DataTypePtr parseORCType(const orc::Type * orc_type, bool skip_columns_with_unsupported_types, bool & skipped)
 {
     assert(orc_type != nullptr);
@@ -234,6 +334,19 @@ static void getFileReaderAndSchema(
 NativeORCBlockInputFormat::NativeORCBlockInputFormat(ReadBuffer & in_, Block header_, const FormatSettings & format_settings_)
     : IInputFormat(std::move(header_), &in_), format_settings(format_settings_), skip_stripes(format_settings.orc.skip_stripes)
 {
+    format_settings.orc.skip_stripes = {0, 1, 2, 3, 4, 5, 9, 10, 11};
+    skip_stripes = format_settings.orc.skip_stripes;
+}
+
+
+void NativeORCBlockInputFormat::setQueryInfo(const SelectQueryInfo & query_info, ContextPtr context)
+{
+    /// When analyzer is enabled, query_info.filter_asts is missing sets and maybe some type casts,
+    /// so don't use it. I'm not sure how to support analyzer here: https://github.com/ClickHouse/ClickHouse/issues/53536
+    if (format_settings.orc.filter_push_down && !context->getSettingsRef().allow_experimental_analyzer)
+        key_condition.emplace(query_info, context, getPort().getHeader().getNames(),
+            std::make_shared<ExpressionActions>(std::make_shared<ActionsDAG>(
+                getPort().getHeader().getColumnsWithTypeAndName())));
 }
 
 void NativeORCBlockInputFormat::prepareFileReader()
@@ -261,6 +374,11 @@ void NativeORCBlockInputFormat::prepareFileReader()
         if (getPort().getHeader().has(name, ignore_case) || nested_table_names.contains(ignore_case ? boost::to_lower_copy(name) : name))
             include_indices.push_back(static_cast<int>(i));
     }
+
+    if (key_condition.has_value() && !sarg)
+    {
+        sarg = buildORCSearchArgument(*key_condition);
+    }
 }
 
 bool NativeORCBlockInputFormat::prepareStripeReader()
@@ -275,6 +393,7 @@ bool NativeORCBlockInputFormat::prepareStripeReader()
     if (current_stripe >= total_stripes)
         return false;
 
+    std::cout << "current_stripe:" << current_stripe << std::endl;
     current_stripe_info = file_reader->getStripe(current_stripe);
     if (!current_stripe_info->getNumberOfRows())
         throw Exception(ErrorCodes::INCORRECT_DATA, "ORC stripe {} has no rows", current_stripe);
@@ -282,6 +401,21 @@ bool NativeORCBlockInputFormat::prepareStripeReader()
     orc::RowReaderOptions row_reader_options;
     row_reader_options.include(include_indices);
     row_reader_options.range(current_stripe_info->getOffset(), current_stripe_info->getLength());
+    row_reader_options.searchArgument(sarg);
+
+    /*
+    if (format_settings.orc.allow_missing_columns)
+    {
+        sarg = orc::SearchArgumentFactory::newBuilder()
+                   ->between(
+                       "reporttime",
+                       orc::PredicateDataType::LONG,
+                       orc::Literal(static_cast<Int64>(1691252000L)),
+                       orc::Literal(static_cast<Int64>(1691253000L)))
+                   .build();
+        row_reader_options.searchArgument(std::move(sarg));
+    }
+    */
     stripe_reader = file_reader->createRowReader(row_reader_options);
 
     if (!batch)
@@ -346,6 +480,7 @@ void NativeORCBlockInputFormat::resetParser()
     stripe_reader.reset();
     include_indices.clear();
     batch.reset();
+    sarg.reset();
     block_missing_values.clear();
 }
 
