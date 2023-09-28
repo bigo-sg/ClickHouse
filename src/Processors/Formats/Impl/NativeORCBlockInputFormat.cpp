@@ -148,7 +148,8 @@ static String getColumnNameFromKeyCondition(const KeyCondition & key_condition, 
     throw Exception(ErrorCodes::LOGICAL_ERROR, "Can't get column from KeyCondition with indice {}", indice);
 }
 
-static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & orc_type, const FieldRef & field, DataTypePtr type_hint = nullptr)
+static std::optional<orc::Literal>
+convertFieldToORCLiteral(const orc::Type & orc_type, const FieldRef & field, DataTypePtr type_hint = nullptr)
 {
     if (!field.isExplicit())
         return std::nullopt;
@@ -160,8 +161,7 @@ static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & or
             UInt64 val;
             if (field.tryGet(val))
                 return orc::Literal(val != 0);
-            else
-                return std::nullopt;
+            break;
         }
         case orc::BYTE:
         case orc::SHORT:
@@ -170,16 +170,14 @@ static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & or
             Int64 val;
             if (field.tryGet(val))
                 return orc::Literal(val);
-            else
-                return std::nullopt;
+            break;
         }
         case orc::FLOAT:
         case orc::DOUBLE: {
             Float64 val;
             if (field.tryGet(val))
                 return orc::Literal(val);
-            else
-                return std::nullopt;
+            break;
         }
         case orc::VARCHAR:
         case orc::CHAR:
@@ -187,15 +185,13 @@ static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & or
             String str;
             if (field.tryGet(str))
                 return orc::Literal(str.data(), str.size());
-            else
-                return std::nullopt;
+            break;
         }
         case orc::DATE: {
             Int64 val;
             if (field.tryGet(val))
                 return orc::Literal(orc::PredicateDataType::DATE, val);
-            else
-                return std::nullopt;
+            break;
         }
         case orc::TIMESTAMP: {
             if (type_hint && isDateTime64(type_hint))
@@ -212,8 +208,7 @@ static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & or
                 Int32 nanos = (ts.getValue() - (ts.getValue() / ts.getScaleMultiplier()) * ts.getScaleMultiplier()).convertTo<Int32>();
                 return orc::Literal(secs, nanos);
             }
-            else
-                return std::nullopt;
+            break;
         }
         case orc::DECIMAL: {
             auto precision = orc_type.getPrecision();
@@ -226,21 +221,37 @@ static std::optional<orc::Literal> convertFieldToORCLiteral(const orc::Type & or
                 if (field.tryGet(val))
                 {
                     Int64 right = val.getValue().convertTo<Int64>();
-                    return orc::Literal(orc::Int128(right), )
+                    return orc::Literal(
+                        orc::Int128(right), static_cast<Int32>(orc_type.getPrecision()), static_cast<Int32>(orc_type.getScale()));
                 }
-                else
-                    return std::nullopt;
             }
             else if (precision <= DecimalUtils::max_precision<Decimal64>)
-            {}
+            {
+                DecimalField<Decimal64> val;
+                if (field.tryGet(val))
+                {
+                    Int64 right = val.getValue().convertTo<Int64>();
+                    return orc::Literal(
+                        orc::Int128(right), static_cast<Int32>(orc_type.getPrecision()), static_cast<Int32>(orc_type.getScale()));
+                }
+            }
             else if (precision <= DecimalUtils::max_precision<Decimal128>)
-            {}
-            else
-                return std::nullopt;
+            {
+                DecimalField<Decimal128> val;
+                if (field.tryGet(val))
+                {
+                    Int64 high = val.getValue().value.items[1];
+                    UInt64 low = static_cast<UInt64>(val.getValue().value.items[0]);
+                    return orc::Literal(
+                        orc::Int128(high, low), static_cast<Int32>(orc_type.getPrecision()), static_cast<Int32>(orc_type.getScale()));
+                }
+            }
+            break;
         }
         default:
-            return std::nullopt;
+                break;
     }
+    return std::nullopt;
 }
 
 
@@ -294,25 +305,72 @@ static void buildORCSearchArgumentImpl(
             else if (contains_in_range)
             {
                 const auto & range = curr.range;
-                if (range.left.isNegativeInfinity() && range.right.isPositiveInfinity())
+                bool has_left_bound = !range.left.isNegativeInfinity();
+                bool has_right_bound = !range.right.isPositiveInfinity();
+                if (!has_left_bound && !has_right_bound)
                 {
+                    /// Transform whole range to orc::TruthValue::YES or orc::TruthValue::YES_NULL
                     builder.literal(range.left_included && range.right_included ? orc::TruthValue::YES : orc::TruthValue::YES_NULL);
                 }
-                else if (range.left.isNegativeInfinity())
+                else if (has_left_bound && has_right_bound && range.left_included && range.right_included && range.left == range.right)
                 {
-                }
-                else if (range.right.isPositiveInfinity())
-                {
+                    /// Transform range with the same left bound and right bound to equal, which could utilize bloom filters in ORC
+                    auto literal = convertFieldToORCLiteral(*type, range.left);
+                    if (literal.has_value())
+                        builder.equals(type->getColumnId(), *predicate_type, *literal);
+                    else
+                        builder.literal(orc::TruthValue::YES_NO_NULL);
                 }
                 else
                 {
-                    if (range.left_included && range.right_included && range.left== range.right)
+                    std::optional<orc::Literal> left_literal;
+                    if (has_left_bound)
+                        left_literal = convertFieldToORCLiteral(*type, range.left);
+
+                    std::optional<orc::Literal> right_literal;
+                    if (has_right_bound)
+                        right_literal = convertFieldToORCLiteral(*type, range.right);
+
+                    if (has_left_bound && has_right_bound)
+                        builder.startAnd();
+
+                    if (has_left_bound)
                     {
+                        if (left_literal.has_value())
+                        {
+                            /// >= is transformed to not < and > is transformed to not <=
+                            builder.startNot();
+                            if (range.left_included)
+                                builder.lessThan(type->getColumnId(), *predicate_type, *left_literal);
+                            else
+                                builder.lessThanEquals(type->getColumnId(), *predicate_type, *left_literal);
+                            builder.end();
+                        }
+                        else
+                            builder.literal(orc::TruthValue::YES_NO_NULL);
                     }
+
+                    if (has_right_bound)
+                    {
+                        if (right_literal.has_value())
+                        {
+                            if (range.right_included)
+                                builder.lessThanEquals(type->getColumnId(), *predicate_type, *right_literal);
+                            else
+                                builder.lessThan(type->getColumnId(), *predicate_type, *right_literal);
+                        }
+                        else
+                            builder.literal(orc::TruthValue::YES_NO_NULL);
+                    }
+
+                    if (has_left_bound && has_right_bound)
+                        builder.end();
                 }
             }
             else if (contains_in_set)
             {
+                /// TODO
+                builder.literal(orc::TruthValue::YES_NO_NULL);
             }
 
             if (contains_not)
@@ -549,7 +607,7 @@ void NativeORCBlockInputFormat::prepareFileReader()
 
     if (key_condition.has_value() && !sarg)
     {
-        sarg = buildORCSearchArgument(*key_condition);
+        sarg = buildORCSearchArgument(*key_condition, file_reader->getType());
     }
 }
 
