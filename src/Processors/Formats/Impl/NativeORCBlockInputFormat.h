@@ -44,13 +44,7 @@ std::unique_ptr<orc::InputStream> asORCInputStream(ReadBuffer & in, const Format
 // Reads the whole file into a memory buffer, owned by the returned RandomAccessFile.
 std::unique_ptr<orc::InputStream> asORCInputStreamLoadIntoMemory(ReadBuffer & in, std::atomic<int> & is_cancelled);
 
-/// Get column id in ORC from column name
-// UInt64 getORCColumnId(const orc::Type & schema, const std::string & name);
-
 std::unique_ptr<orc::SearchArgument> buildORCSearchArgument(const KeyCondition & key_condition, const orc::Type & schema);
-
-// void buildORCSearchArgumentImpl(
-    // const KeyCondition & key_condition, const orc::Type & schema, KeyCondition::RPN & rpn_stack, orc::SearchArgumentBuilder & builder);
 
 class ORCColumnToCHColumn;
 class NativeORCBlockInputFormat : public IInputFormat

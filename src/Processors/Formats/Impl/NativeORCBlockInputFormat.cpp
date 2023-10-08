@@ -149,11 +149,8 @@ static String getColumnNameFromKeyCondition(const KeyCondition & key_condition, 
 }
 
 static std::optional<orc::Literal>
-convertFieldToORCLiteral(const orc::Type & orc_type, const FieldRef & field, DataTypePtr type_hint = nullptr)
+convertFieldToORCLiteral(const orc::Type & orc_type, const Field & field, DataTypePtr type_hint = nullptr)
 {
-    if (!field.isExplicit())
-        return std::nullopt;
-
     /// We always fallback to return null if possible CH type hint not consistent with ORC type
     switch (orc_type.getKind())
     {
@@ -254,6 +251,15 @@ convertFieldToORCLiteral(const orc::Type & orc_type, const FieldRef & field, Dat
     return std::nullopt;
 }
 
+static std::optional<orc::Literal>
+convertFieldRefToORCLiteral(const orc::Type & orc_type, const FieldRef & field, DataTypePtr type_hint = nullptr)
+{
+    if (!field.isExplicit())
+        return std::nullopt;
+
+    return convertFieldToORCLiteral(orc_type, field, type_hint);
+}
+
 
 static void buildORCSearchArgumentImpl(
     const KeyCondition & key_condition, const orc::Type & schema, KeyCondition::RPN & rpn_stack, orc::SearchArgumentBuilder & builder)
@@ -270,11 +276,33 @@ static void buildORCSearchArgumentImpl(
         case KeyCondition::RPNElement::FUNCTION_NOT_IN_SET:
         case KeyCondition::RPNElement::FUNCTION_IS_NULL:
         case KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL: {
+            const bool need_wrap_not = curr.function == KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL
+                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_RANGE
+                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_SET;
+            const bool contains_is_null = curr.function == KeyCondition::RPNElement::FUNCTION_IS_NULL
+                || curr.function == KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL;
+            const bool contains_in_set = curr.function == KeyCondition::RPNElement::FUNCTION_IN_SET
+                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_SET;
+            const bool contains_in_range = curr.function == KeyCondition::RPNElement::FUNCTION_IN_RANGE
+                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_RANGE;
+
             /// Key filter expressions like "func(col) > 100" are not supported for ORC filter push down
             if (!curr.monotonic_functions_chain.empty())
             {
                 builder.literal(orc::TruthValue::YES_NO_NULL);
                 break;
+            }
+
+            /// key filter expressions like "(a, b, c) in " or "(func(a), b) in " are not supported for ORC filter push down
+            /// Only expressions like "a in " are supported currently, maybe we can improve it later.
+            auto set_index = curr.set_index;
+            if (contains_in_range)
+            {
+                if (!set_index || set_index->size() != 1 || set_index->hasMonotonicFunctionsChain())
+                {
+                    builder.literal(orc::TruthValue::YES_NO_NULL);
+                    break;
+                }
             }
 
             const auto * type = getORCTypeByName(schema, getColumnNameFromKeyCondition(key_condition, curr.key_column));
@@ -285,23 +313,11 @@ static void buildORCSearchArgumentImpl(
                 break;
             }
 
-            const bool contains_not = curr.function == KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL
-                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_RANGE
-                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_SET;
-            const bool contains_is_null = curr.function == KeyCondition::RPNElement::FUNCTION_IS_NULL
-                || curr.function == KeyCondition::RPNElement::FUNCTION_IS_NOT_NULL;
-            const bool contains_in_set = curr.function == KeyCondition::RPNElement::FUNCTION_IN_SET
-                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_SET;
-            const bool contains_in_range = curr.function == KeyCondition::RPNElement::FUNCTION_IN_RANGE
-                || curr.function == KeyCondition::RPNElement::FUNCTION_NOT_IN_RANGE;
-
-            if (contains_not)
+            if (need_wrap_not)
                 builder.startNot();
 
             if (contains_is_null)
-            {
                 builder.isNull(type->getColumnId(), *predicate_type);
-            }
             else if (contains_in_range)
             {
                 const auto & range = curr.range;
@@ -315,7 +331,7 @@ static void buildORCSearchArgumentImpl(
                 else if (has_left_bound && has_right_bound && range.left_included && range.right_included && range.left == range.right)
                 {
                     /// Transform range with the same left bound and right bound to equal, which could utilize bloom filters in ORC
-                    auto literal = convertFieldToORCLiteral(*type, range.left);
+                    auto literal = convertFieldRefToORCLiteral(*type, range.left);
                     if (literal.has_value())
                         builder.equals(type->getColumnId(), *predicate_type, *literal);
                     else
@@ -325,11 +341,11 @@ static void buildORCSearchArgumentImpl(
                 {
                     std::optional<orc::Literal> left_literal;
                     if (has_left_bound)
-                        left_literal = convertFieldToORCLiteral(*type, range.left);
+                        left_literal = convertFieldRefToORCLiteral(*type, range.left);
 
                     std::optional<orc::Literal> right_literal;
                     if (has_right_bound)
-                        right_literal = convertFieldToORCLiteral(*type, range.right);
+                        right_literal = convertFieldRefToORCLiteral(*type, range.right);
 
                     if (has_left_bound && has_right_bound)
                         builder.startAnd();
@@ -369,11 +385,32 @@ static void buildORCSearchArgumentImpl(
             }
             else if (contains_in_set)
             {
-                /// TODO
-                builder.literal(orc::TruthValue::YES_NO_NULL);
+                /// Build literals from MergeTreeSetIndex
+                const auto & ordered_set = set_index->getOrderedSet();
+                const auto & set_column = ordered_set[0];
+
+                bool fail = false;
+                std::vector<orc::Literal> literals;
+                literals.reserve(set_column->size());
+                for (size_t i = 0; i < set_column->size(); ++i)
+                {
+                    auto literal = convertFieldToORCLiteral(*type, (*set_column)[i]);
+                    if (!literal.has_value())
+                    {
+                        fail = true;
+                        break;
+                    }
+
+                    literals.emplace_back(*literal);
+                }
+
+                if (!fail)
+                    builder.in(type->getColumnId(), *predicate_type, literals);
+                else
+                    builder.literal(orc::TruthValue::YES_NO_NULL);
             }
 
-            if (contains_not)
+            if (need_wrap_not)
                 builder.end();
 
             break;
