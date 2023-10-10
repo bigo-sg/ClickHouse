@@ -244,6 +244,11 @@ public:
 
     struct ShortCircuitSettings
     {
+        enum ShortCircuitSelectDirection
+        {
+            NORMAL = 0,
+            INVERTED= 1,
+        };
         /// Should we enable lazy execution for the first argument of short-circuit function?
         /// Example: if(cond, then, else), we don't need to execute cond lazily.
         bool enable_lazy_execution_for_first_argument;
@@ -258,6 +263,9 @@ public:
         /// Example: toTypeName(expr), even if expr contains functions that are not suitable for
         /// lazy execution (because of their simplicity), we shouldn't execute them at all.
         bool force_enable_lazy_execution;
+
+        bool support_reorder_arguments = false;
+        ShortCircuitSelectDirection select_direction = NORMAL;
     };
 
     /** Function is called "short-circuit" if it's arguments can be evaluated lazily

@@ -27,6 +27,7 @@ struct ExpressionActionsSettings
     CompileExpressions compile_expressions = CompileExpressions::no;
 
     ShortCircuitFunctionEvaluation short_circuit_function_evaluation = ShortCircuitFunctionEvaluation::DISABLE;
+    bool enable_adaptive_reorder_short_circuit_arguments = false;
 
     static ExpressionActionsSettings fromSettings(const Settings & from, CompileExpressions compile_expressions = CompileExpressions::no);
     static ExpressionActionsSettings fromContext(ContextPtr from, CompileExpressions compile_expressions = CompileExpressions::no);

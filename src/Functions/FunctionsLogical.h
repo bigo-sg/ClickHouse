@@ -167,6 +167,15 @@ public:
         settings.enable_lazy_execution_for_first_argument = false;
         settings.enable_lazy_execution_for_common_descendants_of_arguments = true;
         settings.force_enable_lazy_execution = false;
+        settings.support_reorder_arguments = true;
+        if (name == NameAnd::name)
+        {
+            settings.select_direction = ShortCircuitSettings::NORMAL;
+        }
+        else if (name == NameOr::name)
+        {
+            settings.select_direction = ShortCircuitSettings::INVERTED;
+        }
         return name == NameAnd::name || name == NameOr::name;
     }
     ColumnPtr executeShortCircuit(ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type) const;

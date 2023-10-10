@@ -1,0 +1,20 @@
+<test>
+    <create_query>DROP TABLE IF EXISTS test_adaptive_reorder_function_arguments</create_query>
+    <create_query>CREATE TABLE test_adaptive_reorder_function_arguments (s String, i UInt32) ENGINE = Memory</create_query>
+    <fill_query>
+        INSERT INTO test_adaptive_reorder_function_arguments SELECT if(number % 2 = 0, '{"a":1, "b":3}', '{"a":1, "b":3}') as s , rand() % 2000 as i  FROM numbers(10000000);
+    </fill_query>
+
+    <query>
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' and i < 100 Format Null
+    </query>
+    <query>
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 and JSON_VALUE(s, '$.a') = '1' Format Null
+    </query>
+    <query>
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' or i < 100 Format Null
+    </query>
+    <query>
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 or JSON_VALUE(s, '$.a') = '1' Format Null
+    </query>
+</test>
