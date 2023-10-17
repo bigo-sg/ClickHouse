@@ -115,8 +115,10 @@ int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node 
     if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements_sample)
         return res;
     res |= PROFILE_ECLAPSED;
-    if (short_circuit_infos[node].is_short_circuit_function_child)
+    if (short_circuit_infos[node].is_short_circuit_function_child && isNativeNumber(*node->result_type))
+    {
         res |= PROFILE_SELECTIVITY;
+    }
     return res;
 }
 
@@ -778,12 +780,17 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                     Stopwatch watch;
                     res_column.column = action.node->function->execute(arguments, res_column.type, num_rows, dry_run);
                     profile_data.eclapsed = watch.elapsedNanoseconds();
+                    profile_data.sample_rows = res_column.column->size();
                     if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_SELECTIVITY)
                     {
-                        profile_data.sample_rows = res_column.column->size();
                         IColumn::Filter mask(res_column.column->size(), 1);
-                        auto mask_info = extractMask(mask, res_column.column, nullptr);
+                        auto full_column = recursiveRemoveSparse(res_column.column);
+                        auto mask_info = extractMask(mask, full_column, nullptr);
                         profile_data.selected_rows = mask_info.ones_count;
+                    }
+                    else
+                    {
+                        profile_data.selected_rows = res_column.column->size();
                     }
                     execution_context.short_circuit_execute_controller->addNodeShortCircuitProfile(action.node, profile_data);
                 }

@@ -3,8 +3,8 @@ set convert_query_to_cnf = 0;
 
 select if(number > 0, intDiv(number + 100, number), throwIf(number)) from numbers(10);
 select multiIf(number == 0, 0, number == 1, intDiv(1, number), number == 2, intDiv(1, number - 1), number == 3, intDiv(1, number - 2), intDiv(1, number - 3)) from numbers(10);
-select number != 0 and intDiv(1, number) == 0 and number != 2 and intDiv(1, number - 2) == 0 from numbers(10);
-select number == 0 or intDiv(1, number) != 0 or number == 2 or intDiv(1, number - 2) != 0 from numbers(10);
+select number != 0 and intDiv(1, number) == 0 and number != 2 and intDiv(1, number - 2) == 0 from numbers(10) settings enable_adaptive_reorder_short_circuit_arguments = 0;
+select number == 0 or intDiv(1, number) != 0 or number == 2 or intDiv(1, number - 2) != 0 from numbers(10) settings enable_adaptive_reorder_short_circuit_arguments = 0;
 
 select count() from (select if(number >= 0, number, sleep(1)) from numbers(10000000));
 
@@ -112,15 +112,15 @@ select if(number % 5, Null, toDecimal256OrZero(toString(number), 5)) from number
 select if(number % 5 == 0, range(number), range(number + 1)) from numbers(20);
 select if(number % 5 == 0, replicate(toString(number), range(number)), replicate(toString(number), range(number + 1))) from numbers(20);
 
-select number > 0 and 5 and intDiv(100, number) from numbers(5);
-select number > 0 and Null and intDiv(100, number) from numbers(5);
-select number == 0 or 5 or intDiv(100, number) from numbers(5);
+select number > 0 and 5 and intDiv(100, number) from numbers(5) settings enable_adaptive_reorder_short_circuit_arguments = 0;
+select number > 0 and Null and intDiv(100, number) from numbers(5) settings enable_adaptive_reorder_short_circuit_arguments = 0;
+select number == 0 or 5 or intDiv(100, number) from numbers(5) settings enable_adaptive_reorder_short_circuit_arguments = 0;
 select multiIf(number % 2 != 0, intDiv(10, number % 2), 5, intDiv(10, 1 - number % 2), intDiv(10, number)) from numbers(5);
 
 select if(number != 0, 5 * (1 + intDiv(100, number)), toInt32(exp(log(throwIf(number) + 10)))) from numbers(5);
 select if(number % 2, 5 * (1 + intDiv(100, number + 1)), 3 + 10 * intDiv(100, intDiv(100, number + 1))) from numbers(10);
 
-select sum(number) FROM numbers(10) WHERE number != 0 and 3 % number and number != 1 and intDiv(1, number - 1) > 0;
+select sum(number) FROM numbers(10) WHERE number != 0 and 3 % number and number != 1 and intDiv(1, number - 1) > 0 settings enable_adaptive_reorder_short_circuit_arguments = 0;
 select multiIf(0, 1, intDiv(number % 2, 1), 2, 0, 3, 1, number + 10, 2) from numbers(10);
 
 select toTypeName(toString(number)) from numbers(5);
