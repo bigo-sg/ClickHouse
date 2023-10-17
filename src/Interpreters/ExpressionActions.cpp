@@ -25,7 +25,7 @@
 #include <Poco/Logger.h>
 #include <Common/logger_useful.h>
 #include <algorithm>
-#include <math.h>
+#include <cmath>
 
 
 #if defined(MEMORY_SANITIZER)
@@ -96,13 +96,14 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     {
         finished_adaptive_reorder_arguements_sample = true;
         if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
+        {
             markLazyExecutedNodes(lazy_executed_nodes);
+        }
     }
 }
 
 bool ExpressionShortCircuitExecuteController::couldLazyExecuted(const ActionsDAG::Node * node)
 {
-    std::shared_lock lock(mutex);
     if (enable_adaptive_reorder_arguments && !finished_adaptive_reorder_arguements_sample)
         return false;
     return short_circuit_infos[node].is_lazy_executed;
@@ -111,7 +112,6 @@ bool ExpressionShortCircuitExecuteController::couldLazyExecuted(const ActionsDAG
 int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node * node)
 {
     int res = NOT_PROFILE;
-    std::shared_lock lock(mutex);
     if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements_sample)
         return res;
     res |= PROFILE_ECLAPSED;
@@ -140,14 +140,16 @@ void ExpressionShortCircuitExecuteController::tryReorderShortCircuitFunctionsAgu
     {
         std::unique_lock lock(mutex);
         reorderShortCircuitFunctionsAguments();
-        finished_adaptive_reorder_arguements_sample = true;
         auto lazy_executed_nodes = processShortCircuitFunctions();
         markLazyExecutedNodes(lazy_executed_nodes);
+        finished_adaptive_reorder_arguements_sample = true;
     }
 }
 
 std::vector<size_t> ExpressionShortCircuitExecuteController::getReorderedArgumentsPosition(const ActionsDAG::Node * node)
 {
+    if (finished_adaptive_reorder_arguements_sample)
+        return short_circuit_infos[node].arguments_position;
     std::shared_lock lock(mutex);
     return short_circuit_infos[node].arguments_position;
 }
