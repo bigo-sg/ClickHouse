@@ -155,7 +155,6 @@ WHERE
 
     if (query.limit_length)
         rewritten_query += fmt::format(" LIMIT {}", query.limit_length);
-
     return rewritten_query;
 }
 

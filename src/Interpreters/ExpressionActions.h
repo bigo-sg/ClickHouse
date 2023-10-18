@@ -91,7 +91,7 @@ public:
         , short_circuit_function_evaluation(b.short_circuit_function_evaluation)
         , enable_adaptive_reorder_arguments(b.enable_adaptive_reorder_arguments)
         , sampled_rows(b.sampled_rows.load())
-        , finished_adaptive_reorder_arguements_sample(b.finished_adaptive_reorder_arguements_sample.load())
+        , finished_adaptive_reorder_arguements(b.finished_adaptive_reorder_arguements.load())
         , short_circuit_infos(b.short_circuit_infos)
         , has_reorderable_short_circuit_functions(b.has_reorderable_short_circuit_functions)
     {}
@@ -102,7 +102,7 @@ public:
         short_circuit_function_evaluation = b.short_circuit_function_evaluation;
         enable_adaptive_reorder_arguments = b.enable_adaptive_reorder_arguments;
         sampled_rows = b.sampled_rows.load();
-        finished_adaptive_reorder_arguements_sample = b.finished_adaptive_reorder_arguements_sample.load();
+        finished_adaptive_reorder_arguements = b.finished_adaptive_reorder_arguements.load();
         short_circuit_infos = b.short_circuit_infos;
         has_reorderable_short_circuit_functions = b.has_reorderable_short_circuit_functions;
         return *this;
@@ -134,7 +134,7 @@ private:
     bool enable_adaptive_reorder_arguments;
     static constexpr size_t max_sample_rows = 512;
     std::atomic<UInt64> sampled_rows = 0;
-    std::atomic<bool> finished_adaptive_reorder_arguements_sample = false;
+    std::atomic<bool> finished_adaptive_reorder_arguements = false;
     std::unordered_map<const ActionsDAG::Node *, ShortCircuitInfo> short_circuit_infos;
     bool has_reorderable_short_circuit_functions = false;
 

@@ -94,7 +94,7 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     if (!has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
         || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
     {
-        finished_adaptive_reorder_arguements_sample = true;
+        finished_adaptive_reorder_arguements = true;
         if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
         {
             markLazyExecutedNodes(lazy_executed_nodes);
@@ -104,7 +104,7 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
 
 bool ExpressionShortCircuitExecuteController::couldLazyExecuted(const ActionsDAG::Node * node)
 {
-    if (enable_adaptive_reorder_arguments && !finished_adaptive_reorder_arguements_sample)
+    if (enable_adaptive_reorder_arguments && !finished_adaptive_reorder_arguements)
         return false;
     return short_circuit_infos[node].is_lazy_executed;
 }
@@ -112,7 +112,7 @@ bool ExpressionShortCircuitExecuteController::couldLazyExecuted(const ActionsDAG
 int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node * node)
 {
     int res = NOT_PROFILE;
-    if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements_sample)
+    if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements)
         return res;
     res |= PROFILE_ECLAPSED;
     if (short_circuit_infos[node].is_short_circuit_function_child && isNativeNumber(*node->result_type))
@@ -133,22 +133,24 @@ void ExpressionShortCircuitExecuteController::addNodeShortCircuitProfile(const A
 
 void ExpressionShortCircuitExecuteController::tryReorderShortCircuitFunctionsAguments(size_t num_rows)
 {
-    if (finished_adaptive_reorder_arguements_sample.load() || !num_rows || sampled_rows.load() >= max_sample_rows)
+    if (finished_adaptive_reorder_arguements.load() || !num_rows || sampled_rows.load() >= max_sample_rows)
         return;
     sampled_rows += num_rows;
     if (sampled_rows >= max_sample_rows)
     {
         std::unique_lock lock(mutex);
+        if (finished_adaptive_reorder_arguements)
+            return;
         reorderShortCircuitFunctionsAguments();
         auto lazy_executed_nodes = processShortCircuitFunctions();
         markLazyExecutedNodes(lazy_executed_nodes);
-        finished_adaptive_reorder_arguements_sample = true;
+        finished_adaptive_reorder_arguements = true;
     }
 }
 
 std::vector<size_t> ExpressionShortCircuitExecuteController::getReorderedArgumentsPosition(const ActionsDAG::Node * node)
 {
-    if (finished_adaptive_reorder_arguements_sample)
+    if (finished_adaptive_reorder_arguements)
         return short_circuit_infos[node].arguments_position;
     std::shared_lock lock(mutex);
     return short_circuit_infos[node].arguments_position;
