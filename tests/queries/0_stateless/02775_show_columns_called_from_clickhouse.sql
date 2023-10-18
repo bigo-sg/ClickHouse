@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS tab;
 
 SET allow_suspicious_low_cardinality_types=1;
 SET allow_experimental_object_type=1;
+SET enable_adaptive_reorder_short_circuit_arguments=0;
 
 CREATE TABLE tab
 (
