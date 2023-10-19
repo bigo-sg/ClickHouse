@@ -116,9 +116,7 @@ int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node 
         return res;
     res |= PROFILE_ECLAPSED;
     if (short_circuit_infos[node].is_short_circuit_function_child && isNativeNumber(*node->result_type))
-    {
         res |= PROFILE_SELECTIVITY;
-    }
     return res;
 }
 
