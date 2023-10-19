@@ -61,6 +61,12 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     , short_circuit_function_evaluation(settings.short_circuit_function_evaluation)
     , enable_adaptive_reorder_arguments(settings.enable_adaptive_reorder_short_circuit_arguments)
 {
+    auto lazy_executed_nodes = processShortCircuitFunctions();
+#if USE_EMBEDDED_COMPILER
+    /// Since we will just reorder the arguments position, this will not change the behavior of compiling functions
+    if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
+        actions_dag->compileExpressions(settings.min_count_to_compile_expression, lazy_executed_nodes);
+#endif
     const auto & nodes = actions_dag->getNodes();
     for (const auto & node : nodes)
     {
@@ -84,12 +90,6 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
             }
         }
     }
-    auto lazy_executed_nodes = processShortCircuitFunctions();
-#if USE_EMBEDDED_COMPILER
-    /// Since we will just reorder the arguments position, this will not change the behavior of compiling functions
-    if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
-        actions_dag->compileExpressions(settings.min_count_to_compile_expression, lazy_executed_nodes);
-#endif
 
     if (!has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
         || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
@@ -180,6 +180,10 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
     for (auto & [node, info] : short_circuit_infos)
     {
         if (node->type != ActionsDAG::ActionType::FUNCTION && node->children.size() < 2)
+            continue;
+        /// If the function is compiled, the arguments are different from the original one.
+        /// At presesnt, is_function_compiled = false, when this function has lazy executed child.
+        if (node->is_function_compiled)
             continue;
         IFunctionBase::ShortCircuitSettings short_circuit_settings;
         if (!node->function_base->isShortCircuit(short_circuit_settings, node->children.size()))
@@ -751,7 +755,6 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 }
                 break;
             }
-
             ColumnsWithTypeAndName arguments(action.arguments.size());
             auto ordered_arguments = execution_context.short_circuit_execute_controller->getReorderedArgumentsPosition(action.node);
             for (size_t i = 0; i < arguments.size(); ++i)
@@ -764,10 +767,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 }
                 else
                     arguments[i] = columns[col_pos];
-                if (!arguments[i].column)
-                {
-                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK, "Argument {} column is empty. node: {}", i, action.node->result_name);
-                }
+                assert(arguments[i].column);
             }
 
             // Before short circuit functions reorder sampling finish, disable lazy execution.
@@ -900,7 +900,9 @@ void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run)
             auto sample_col = col.column->cut(0, need_to_sample_rows);
             to_sample_block.insert({sample_col, col.type, col.name});
         }
-        executeImpl(to_sample_block, need_to_sample_rows, dry_run);
+        // All the functions should be stateless here.
+        size_t tmp_num_rows = need_to_sample_rows;
+        executeImpl(to_sample_block, tmp_num_rows, dry_run);
         short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(need_to_sample_rows);
         executeImpl(block, num_rows, dry_run);
     }
