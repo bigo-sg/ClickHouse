@@ -766,7 +766,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                     arguments[i] = columns[col_pos];
                 if (!arguments[i].column)
                 {
-                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Argument {} column is empty. node: {}", i, action.node->result_name);
+                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK, "Argument {} column is empty. node: {}", i, action.node->result_name);
                 }
             }
 
