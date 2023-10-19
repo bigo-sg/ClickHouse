@@ -764,6 +764,10 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 }
                 else
                     arguments[i] = columns[col_pos];
+                if (!arguments[i].column)
+                {
+                    throw Exception(ErrorCodes::LOGICAL_ERROR, "Argument {} column is empty. node: {}", i, action.node->result_name);
+                }
             }
 
             // Before short circuit functions reorder sampling finish, disable lazy execution.
