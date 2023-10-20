@@ -26,6 +26,7 @@
 #include <Common/logger_useful.h>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 
 #if defined(MEMORY_SANITIZER)
@@ -765,22 +766,37 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 }
                 break;
             }
+
+            std::unordered_set<size_t> to_clear_columns;
             ColumnsWithTypeAndName arguments(action.arguments.size());
             auto ordered_arguments = execution_context.short_circuit_execute_controller->getReorderedArgumentsPosition(action.node);
             for (size_t i = 0; i < arguments.size(); ++i)
             {
                 auto arg_pos = ordered_arguments[i];
                 auto col_pos = action.arguments[arg_pos].pos;
+                arguments[i] = columns[col_pos];
+                /// Since we may reordered arguments, following case will occur,
+                /// original argument list: {arg_0, ref_col = i, needed_later=true}, {arg_1, ref_col = i, needed_later=false}
+                /// reordered argument list: {arg_1, ref_col = i, needed_later=false}, {arg_0, ref_col = i, needed_later=true}
+                /// we need to lazy clear the columns which is not need anymore.
                 if (!action.arguments[arg_pos].needed_later)
                 {
-                    arguments[i] = std::move(columns[col_pos]);
+                    to_clear_columns.insert(col_pos);
                 }
-                else
-                    arguments[i] = columns[col_pos];
                 if (!arguments[i].column)
                 {
-                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK, "Invalid argument. arg pos:{}, col pos: {}, node: {}", arg_pos, col_pos, action.node->result_name);
+                    throw Exception(
+                        ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK,
+                        "Invalid argument. i:{} arg pos:{}, col pos: {}, node: {}",
+                        i,
+                        arg_pos,
+                        col_pos,
+                        action.node->result_name);
                 }
+            }
+            for (auto col_pos : to_clear_columns)
+            {
+                columns[col_pos] = {};
             }
 
             // Before short circuit functions reorder sampling finish, disable lazy execution.
