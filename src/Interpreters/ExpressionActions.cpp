@@ -61,12 +61,6 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     , short_circuit_function_evaluation(settings.short_circuit_function_evaluation)
     , enable_adaptive_reorder_arguments(settings.enable_adaptive_reorder_short_circuit_arguments)
 {
-    auto lazy_executed_nodes = processShortCircuitFunctions();
-#if USE_EMBEDDED_COMPILER
-    /// Since we will just reorder the arguments position, this will not change the behavior of compiling functions
-    if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
-        actions_dag->compileExpressions(settings.min_count_to_compile_expression, lazy_executed_nodes);
-#endif
     const auto & nodes = actions_dag->getNodes();
     for (const auto & node : nodes)
     {
@@ -76,6 +70,24 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
             info.arguments_position.emplace_back(i);
         short_circuit_infos[&node] = info;
     }
+    auto lazy_executed_nodes = processShortCircuitFunctions();
+
+#if USE_EMBEDDED_COMPILER
+    /// Since we will just reorder the arguments position, this will not change the behavior of compiling functions
+    if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
+        actions_dag->compileExpressions(settings.min_count_to_compile_expression, lazy_executed_nodes);
+
+    /// New children may be added into the compiled functions. refresh all arguments_position.
+    const auto & compiled_nodes = actions_dag->getNodes();
+    for (const auto & node : compiled_nodes)
+    {
+        auto & info = short_circuit_infos[&node];
+        info.arguments_position.clear();
+        for (size_t i = 0; i < node.children.size(); ++i)
+            info.arguments_position.emplace_back(i);
+    }
+#endif
+
     for (const auto & node : nodes)
     {
         if (node.type == ActionsDAG::ActionType::FUNCTION)
@@ -765,7 +777,10 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 }
                 else
                     arguments[i] = columns[col_pos];
-                assert(arguments[i].column);
+                if (!arguments[i].column)
+                {
+                    throw Exception(ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK, "Invalid argument. arg pos:{}, col pos: {}, node: {}", arg_pos, col_pos, action.node->result_name);
+                }
             }
 
             // Before short circuit functions reorder sampling finish, disable lazy execution.

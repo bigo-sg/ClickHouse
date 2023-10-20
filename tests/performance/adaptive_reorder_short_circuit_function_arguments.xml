@@ -6,15 +6,15 @@
     </fill_query>
 
     <query>
-        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' and i < 100 Format Null
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' and i < 100 Format Null settings short_circuit_function_evaluation='force_enable'
     </query>
     <query>
-        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 and JSON_VALUE(s, '$.a') = '1' Format Null
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 and JSON_VALUE(s, '$.a') = '1' Format Null settings short_circuit_function_evaluation='force_enable'
     </query>
     <query>
-        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' or i < 100 Format Null
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE JSON_VALUE(s, '$.a') = '1' or i < 100 Format Null settings short_circuit_function_evaluation='force_enable'
     </query>
     <query>
-        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 or JSON_VALUE(s, '$.a') = '1' Format Null
+        SELECT * FROM test_adaptive_reorder_function_arguments WHERE i < 100 or JSON_VALUE(s, '$.a') = '1' Format Null settings short_circuit_function_evaluation='force_enable'
     </query>
 </test>
