@@ -2,7 +2,7 @@
     <create_query>DROP TABLE IF EXISTS test_adaptive_reorder_function_arguments</create_query>
     <create_query>CREATE TABLE test_adaptive_reorder_function_arguments (s String, i UInt32) ENGINE = Memory</create_query>
     <fill_query>
-        INSERT INTO test_adaptive_reorder_function_arguments SELECT if(number % 2 = 0, '{"a":1, "b":3}', '{"a":1, "b":3}') as s , rand() % 2000 as i  FROM numbers(10000000);
+        INSERT INTO test_adaptive_reorder_function_arguments SELECT if(number % 2 = 0, '{"a":1, "b":3}', '{"a":1, "b":3}') as s , rand() % 2000 as i  FROM numbers(10000000)
     </fill_query>
 
     <query>
