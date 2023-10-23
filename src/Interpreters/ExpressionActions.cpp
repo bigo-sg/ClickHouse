@@ -89,6 +89,7 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     }
 #endif
 
+    bool has_too_many_arguments = false;
     for (const auto & node : nodes)
     {
         if (node.type == ActionsDAG::ActionType::FUNCTION)
@@ -100,18 +101,20 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
                     has_reorderable_short_circuit_functions = true;
                 for (const auto * child : node.children)
                     short_circuit_infos[child].is_short_circuit_function_child = true;
+                /// If the arguments size is too large, cost of the sample process will
+                /// be every large.
+                if (node.children.size() > max_allowed_arguments)
+                   has_too_many_arguments = true;
             }
         }
     }
 
-    if (!has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
+    if (has_too_many_arguments || !has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
         || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
     {
         finished_adaptive_reorder_arguements = true;
         if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
-        {
             markLazyExecutedNodes(lazy_executed_nodes);
-        }
     }
 }
 

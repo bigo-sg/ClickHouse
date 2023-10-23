@@ -133,6 +133,7 @@ private:
     /// This will bring some cost, but it will be amortized in the future.
     bool enable_adaptive_reorder_arguments;
     static constexpr size_t max_sample_rows = 512;
+    static constexpr size_t max_allowed_arguments = 128;
     std::atomic<UInt64> sampled_rows = 0;
     std::atomic<bool> finished_adaptive_reorder_arguements = false;
     std::unordered_map<const ActionsDAG::Node *, ShortCircuitInfo> short_circuit_infos;
