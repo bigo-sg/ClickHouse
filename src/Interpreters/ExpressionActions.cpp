@@ -113,6 +113,7 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
         || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
     {
         finished_adaptive_reorder_arguements = true;
+
         if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
             markLazyExecutedNodes(lazy_executed_nodes);
     }
