@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
 
 
 #if defined(MEMORY_SANITIZER)
@@ -206,6 +207,17 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
             continue;
         if (!short_circuit_settings.support_reorder_arguments)
             continue;
+
+        /// FIXME. A special case, select and(a,b,a) from t. if we change `and(a,b,a)` to
+        /// and(b,a,a), `a` will be executed twice. This is not a stable case, so skip it.
+        std::unordered_set<const ActionsDAG::Node *> unique_children;
+        for (const auto * child : node->children)
+        {
+            unique_children.insert(child);
+        }
+        if (unique_children.size() != node->children.size())
+            continue;
+
         std::unordered_map<const ActionsDAG::Node *, UInt64> node_eclapsed;
         for (const auto * child : node->children)
         {
@@ -223,6 +235,7 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
                 selectivity = 1.0 - selectivity;
             selectivity = selectivity < 0.0000001 ? 0.0000001 : selectivity; // in case it's zero.
             double cost = static_cast<double>(child_eclapsed)/child_info.profile_data.sample_rows;
+            cost = 1.0 / (1.0 + exp(-cost));
             args_ranks.push_back({i, cost / selectivity});
             LOG_TRACE(
                 &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
