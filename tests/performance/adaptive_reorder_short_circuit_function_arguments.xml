@@ -3,7 +3,7 @@
         CREATE TABLE IF NOT EXISTS test_adaptive_reorder_function_arguments (s UInt32, i UInt32) ENGINE=Memory;
     </create_query>
     <fill_query>
-        INSERT INTO test_adaptive_reorder_function_arguments SELECT number % 100 as s , rand() % 2000 as i  FROM numbers(10000000)
+        INSERT INTO test_adaptive_reorder_function_arguments SELECT number % 10 as s , rand() % 20000 as i  FROM numbers(100000000)
     </fill_query>
 
     <query>

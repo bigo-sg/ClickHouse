@@ -139,6 +139,7 @@ int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node 
 
 void ExpressionShortCircuitExecuteController::addNodeShortCircuitProfile(const ActionsDAG::Node * node, const ProfileData & profile_data_)
 {
+    // LOG_ERROR(&Poco::Logger::get("ExpressionShortCircuitExecuteController"), "addNodeShortCircuitProfile:{}, sample_rows: {}, selected_rows: {}", node->result_name, profile_data_.sample_rows, profile_data_.selected_rows);
     auto & info = short_circuit_infos[node];
     std::unique_lock lock(mutex);
     info.profile_data.sample_rows += profile_data_.sample_rows;
@@ -206,13 +207,10 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
         if (!short_circuit_settings.support_reorder_arguments)
             continue;
         std::unordered_map<const ActionsDAG::Node *, UInt64> node_eclapsed;
-        UInt64 min_eclapsed = -1UL;
         for (const auto * child : node->children)
         {
             auto eclpased = calculateNodeEclapsed(child);
             node_eclapsed[child] = eclpased;
-            if (min_eclapsed == -1UL || min_eclapsed > eclpased)
-                min_eclapsed = eclpased;
         }
 
         std::vector<std::pair<UInt64, double>> args_ranks;
@@ -224,7 +222,7 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
             if (short_circuit_settings.select_direction == IFunction::ShortCircuitSettings::NORMAL)
                 selectivity = 1.0 - selectivity;
             selectivity = selectivity < 0.0000001 ? 0.0000001 : selectivity; // in case it's zero.
-            double cost = 1.0 / (1.0 + exp(-static_cast<Int64>(child_eclapsed - min_eclapsed))); // normalize data.
+            double cost = static_cast<double>(child_eclapsed)/child_info.profile_data.sample_rows;
             args_ranks.push_back({i, cost / selectivity});
             LOG_TRACE(
                 &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
