@@ -70,15 +70,22 @@ class ExpressionShortCircuitExecuteController
 public:
     struct ProfileData
     {
+        /// How many rows are sampled at present.
         UInt64 sample_rows = 0;
+        /// After execution, the number of rows that meet the condition
         UInt64 selected_rows = 0;
-        UInt64 eclapsed = 0;
+        /// The total execution time of this node for sample rows
+        UInt64 elapsed = 0;
     };
 
     enum ProfileType
     {
+        /// Not profile this node
         NOT_PROFILE = 0,
-        PROFILE_ECLAPSED = 1,
+        /// Profile this node's elapsed time.
+        PROFILE_ELAPSED = 1,
+        /// If this node is a argument of a short-circuit function, profile this node's selectivity.
+        /// The selectivity is the ratio of the number of rows that meet the condition to the total number of rows.
         PROFILE_SELECTIVITY = 2,
     };
 
@@ -108,6 +115,8 @@ public:
         return *this;
     }
 
+    /// Determine if this action should be executed lazily. If it should and the node type is FUNCTION, then the function
+    /// won't be executed and will be stored with it's arguments in ColumnFunction with isShortCircuitArgument() = true.
     bool couldLazyExecuted(const ActionsDAG::Node * node);
     int  needProfile(const ActionsDAG::Node * node);
     void addNodeShortCircuitProfile(const ActionsDAG::Node * node, const ProfileData & profile_data_);
@@ -115,6 +124,10 @@ public:
     std::vector<size_t> getReorderedArgumentsPosition(const ActionsDAG::Node * node);
     size_t needSampleRows() const;
     inline bool hasReorderableShortCircuitFunctions() const { return has_reorderable_short_circuit_functions; }
+
+    /// diable adaptive mode, and rollback the arguments positions.
+    void disableAdaptiveReorderArguments();
+    inline bool isEnableAdaptiveReorderArguments() const { return enable_adaptive_reorder_arguments; }
 
 private:
     struct ShortCircuitInfo
@@ -132,14 +145,17 @@ private:
     /// By enable adaptive reorder arguments of short circuit functions, we sample the first max_sample_rows rows execute cost.
     /// This will bring some cost, but it will be amortized in the future.
     bool enable_adaptive_reorder_arguments;
-    static constexpr size_t max_sample_rows = 512;
-    static constexpr size_t max_allowed_arguments = 128;
+    /// Sample enough rows to determine whether to reorder the arguments of short circuit functions.
+    size_t max_sample_rows = 512;
+    /// If a function has too many arguments, we will not reorder the arguments of this function.
+    /// Since it may cause serious performance degradation by executing all expressions at sample stage.
+    size_t max_allowed_arguments = 128;
     std::atomic<UInt64> sampled_rows = 0;
     std::atomic<bool> finished_adaptive_reorder_arguements = false;
     std::unordered_map<const ActionsDAG::Node *, ShortCircuitInfo> short_circuit_infos;
     bool has_reorderable_short_circuit_functions = false;
 
-    UInt64 calculateNodeEclapsed(const ActionsDAG::Node * node);
+    double calculateNodeElapsed(const ActionsDAG::Node * node);
     void reorderShortCircuitFunctionsAguments();
     std::unordered_set<const ActionsDAG::Node *>  processShortCircuitFunctions();
     void setLazyExecutionInfo(
@@ -181,10 +197,6 @@ public:
         const Node * node;
         Arguments arguments;
         size_t result_position;
-
-        /// Determine if this action should be executed lazily. If it should and the node type is FUNCTION, then the function
-        /// won't be executed and will be stored with it's arguments in ColumnFunction with isShortCircuitArgument() = true.
-        // bool is_lazy_executed;
 
         std::string toString() const;
         JSONBuilder::ItemPtr toTree() const;

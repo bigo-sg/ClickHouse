@@ -170,11 +170,11 @@ public:
         settings.support_reorder_arguments = true;
         if (name == NameAnd::name)
         {
-            settings.select_direction = ShortCircuitSettings::NORMAL;
+            settings.is_inverted_select = false;
         }
         else if (name == NameOr::name)
         {
-            settings.select_direction = ShortCircuitSettings::INVERTED;
+            settings.is_inverted_select = true;
         }
         return name == NameAnd::name || name == NameOr::name;
     }

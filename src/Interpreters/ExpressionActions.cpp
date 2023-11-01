@@ -62,6 +62,8 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     : actions_dag(actions_dag_)
     , short_circuit_function_evaluation(settings.short_circuit_function_evaluation)
     , enable_adaptive_reorder_arguments(settings.enable_adaptive_reorder_short_circuit_arguments)
+    , max_sample_rows(settings.adaptive_reorder_short_circuit_arguments_sample_rows)
+    , max_allowed_arguments(settings.max_arguments_for_adaptive_reorder_short_circuit_arguments)
 {
     const auto & nodes = actions_dag->getNodes();
     for (const auto & node : nodes)
@@ -132,7 +134,7 @@ int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node 
     int res = NOT_PROFILE;
     if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements)
         return res;
-    res |= PROFILE_ECLAPSED;
+    res |= PROFILE_ELAPSED;
     if (short_circuit_infos[node].is_short_circuit_function_child && isNativeNumber(*node->result_type))
         res |= PROFILE_SELECTIVITY;
     return res;
@@ -145,7 +147,7 @@ void ExpressionShortCircuitExecuteController::addNodeShortCircuitProfile(const A
     std::unique_lock lock(mutex);
     info.profile_data.sample_rows += profile_data_.sample_rows;
     info.profile_data.selected_rows += profile_data_.selected_rows;
-    info.profile_data.eclapsed += profile_data_.eclapsed;
+    info.profile_data.elapsed += profile_data_.elapsed;
 }
 
 void ExpressionShortCircuitExecuteController::tryReorderShortCircuitFunctionsAguments(size_t num_rows)
@@ -175,19 +177,19 @@ std::vector<size_t> ExpressionShortCircuitExecuteController::getReorderedArgumen
 
 size_t ExpressionShortCircuitExecuteController::needSampleRows() const
 {
-    if (!enable_adaptive_reorder_arguments)
+    if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements)
         return 0;
     size_t n = sampled_rows.load();
     return max_sample_rows > n ? max_sample_rows - n : 0;
 }
 
-UInt64 ExpressionShortCircuitExecuteController::calculateNodeEclapsed(const ActionsDAG::Node * node)
+double ExpressionShortCircuitExecuteController::calculateNodeElapsed(const ActionsDAG::Node * node)
 {
     const auto & info = short_circuit_infos[node];
-    UInt64 res = info.profile_data.eclapsed;
+    double res = info.profile_data.sample_rows ? info.profile_data.elapsed * 1.0 / info.profile_data.sample_rows : 0.0;
     for (const auto * child : node->children)
     {
-        res += calculateNodeEclapsed(child);
+        res += calculateNodeElapsed(child);
     }
     return res;
 }
@@ -218,23 +220,32 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
         if (unique_children.size() != node->children.size())
             continue;
 
-        std::unordered_map<const ActionsDAG::Node *, UInt64> node_eclapsed;
+        std::unordered_map<const ActionsDAG::Node *, double> node_elapsed;
+        double min_elapsed = std::numeric_limits<double>::max();
         for (const auto * child : node->children)
         {
-            auto eclpased = calculateNodeEclapsed(child);
-            node_eclapsed[child] = eclpased;
+            auto elpased = calculateNodeElapsed(child);
+            node_elapsed[child] = elpased;
+            const auto & child_info = short_circuit_infos[child];
+            if (child_info.profile_data.sample_rows)
+            {
+                node_elapsed[child] = elpased;
+                min_elapsed = std::min(min_elapsed, node_elapsed[child]);
+            }
+            else
+                node_elapsed[child] = 0.0;
         }
 
         std::vector<std::pair<UInt64, double>> args_ranks;
         for (size_t i = 0; i < node->children.size(); ++i)
         {
             const auto & child_info = short_circuit_infos[node->children[i]];
-            auto child_eclapsed = node_eclapsed[node->children[i]];
+            auto child_elapsed = node_elapsed[node->children[i]];
             double selectivity = child_info.profile_data.selected_rows * 1.0 / child_info.profile_data.sample_rows;
-            if (short_circuit_settings.select_direction == IFunction::ShortCircuitSettings::NORMAL)
+            if (!short_circuit_settings.is_inverted_select)
                 selectivity = 1.0 - selectivity;
             selectivity = selectivity < 0.0000001 ? 0.0000001 : selectivity; // in case it's zero.
-            double cost = static_cast<double>(child_eclapsed)/child_info.profile_data.sample_rows;
+            double cost = static_cast<double>(child_elapsed - min_elapsed);
             cost = 1.0 / (1.0 + exp(-cost));
             args_ranks.push_back({i, cost / selectivity});
             LOG_TRACE(
@@ -246,7 +257,7 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
                 child_info.profile_data.selected_rows,
                 child_info.profile_data.sample_rows,
                 cost,
-                child_eclapsed,
+                child_elapsed,
                 cost / selectivity);
         }
         std::sort(
@@ -265,6 +276,26 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
         }
     }
 }
+
+void ExpressionShortCircuitExecuteController::disableAdaptiveReorderArguments()
+{
+    std::unique_lock lock(mutex);
+    if (!enable_adaptive_reorder_arguments)
+        return;
+
+    enable_adaptive_reorder_arguments = false;
+    finished_adaptive_reorder_arguements = true;
+    for (auto & [node, info] : short_circuit_infos)
+    {
+        for (size_t i = 0, n = info.arguments_position.size(); i < n; ++i)
+        {
+            info.arguments_position[i] = i;
+        }
+    }
+    auto lazy_executed_nodes = processShortCircuitFunctions();
+    markLazyExecutedNodes(lazy_executed_nodes);
+}
+
 
 static ActionsDAGReverseInfo getActionsDAGReverseInfo(const std::list<ActionsDAG::Node> & nodes, const ActionsDAG::NodeRawConstPtrs & index);
 std::unordered_set<const ActionsDAG::Node *>  ExpressionShortCircuitExecuteController::processShortCircuitFunctions()
@@ -446,11 +477,15 @@ bool ExpressionShortCircuitExecuteController::findLazyExecutedNodes(
 
 void ExpressionShortCircuitExecuteController::markLazyExecutedNodes(const std::unordered_set<const ActionsDAG::Node *> & lazy_executed_nodes)
 {
-    for (const auto * node : lazy_executed_nodes)
+    for (auto & [node, info] : short_circuit_infos)
     {
-        LOG_TRACE(&Poco::Logger::get("ExpressionShortCircuitExecuteController"), "mark node be lazy executed:{}", node->result_name);
-        ShortCircuitInfo & info = short_circuit_infos[node];
-        info.is_lazy_executed = true;
+        if (lazy_executed_nodes.contains(node))
+        {
+            LOG_TRACE(&Poco::Logger::get("ExpressionShortCircuitExecuteController"), "mark node be lazy executed:{}", node->result_name);
+            info.is_lazy_executed = true;
+        }
+        else
+            info.is_lazy_executed = false;
     }
 }
 
@@ -826,12 +861,12 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 if (action.node->is_function_compiled)
                     ProfileEvents::increment(ProfileEvents::CompiledFunctionExecute);
                 auto profile_type = execution_context.short_circuit_execute_controller->needProfile(action.node);
-                if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_ECLAPSED)
+                if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_ELAPSED)
                 {
                     ExpressionShortCircuitExecuteController::ProfileData profile_data;
                     Stopwatch watch;
                     res_column.column = action.node->function->execute(arguments, res_column.type, num_rows, dry_run);
-                    profile_data.eclapsed = watch.elapsedNanoseconds();
+                    profile_data.elapsed = watch.elapsedNanoseconds();
                     profile_data.sample_rows = res_column.column->size();
                     if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_SELECTIVITY)
                     {
@@ -935,25 +970,59 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
 
 void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run)
 {
+    /// For safty, when exception occurs in adaptive mode, we rollback to normal mode and run again.
     size_t need_to_sample_rows = short_circuit_execute_controller.needSampleRows();
     if (short_circuit_execute_controller.hasReorderableShortCircuitFunctions() && need_to_sample_rows && num_rows > need_to_sample_rows)
     {
-        Block to_sample_block;
-        for (const auto & col : block.getColumnsWithTypeAndName())
+        try
         {
-            auto sample_col = col.column->cut(0, need_to_sample_rows);
-            to_sample_block.insert({sample_col, col.type, col.name});
+            Block to_sample_block;
+            for (const auto & col : block.getColumnsWithTypeAndName())
+            {
+                auto sample_col = col.column->cut(0, need_to_sample_rows);
+                to_sample_block.insert({sample_col, col.type, col.name});
+            }
+            // All the functions should be stateless here.
+            size_t tmp_num_rows = need_to_sample_rows;
+            executeImpl(to_sample_block, tmp_num_rows, dry_run);
+            short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(need_to_sample_rows);
         }
-        // All the functions should be stateless here.
-        size_t tmp_num_rows = need_to_sample_rows;
-        executeImpl(to_sample_block, tmp_num_rows, dry_run);
-        short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(need_to_sample_rows);
+        catch (...)
+        {
+            short_circuit_execute_controller.disableAdaptiveReorderArguments();
+        }
         executeImpl(block, num_rows, dry_run);
     }
     else
     {
-        executeImpl(block, num_rows, dry_run);
-        short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(num_rows);
+        bool rerun = false;
+        bool in_adaptive_reorder_mode = short_circuit_execute_controller.isEnableAdaptiveReorderArguments();
+        Block tmp_block = block;
+        size_t tmp_num_rows = num_rows;
+        try
+        {
+            executeImpl(tmp_block, tmp_num_rows, dry_run);
+            block.swap(tmp_block);
+            num_rows = tmp_num_rows;
+        }
+        catch (...)
+        {
+            if (in_adaptive_reorder_mode)
+            {
+                short_circuit_execute_controller.disableAdaptiveReorderArguments();
+                rerun = true;
+            }
+            else
+                throw;
+        }
+        if (rerun)
+        {
+            executeImpl(block, num_rows, dry_run);
+        }
+        else
+        {
+            short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(num_rows);
+        }
     }
 }
 

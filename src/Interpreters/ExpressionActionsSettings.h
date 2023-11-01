@@ -28,6 +28,9 @@ struct ExpressionActionsSettings
 
     ShortCircuitFunctionEvaluation short_circuit_function_evaluation = ShortCircuitFunctionEvaluation::DISABLE;
     bool enable_adaptive_reorder_short_circuit_arguments = false;
+    size_t adaptive_reorder_short_circuit_arguments_sample_rows = 0;
+    size_t max_arguments_for_adaptive_reorder_short_circuit_arguments = 0;
+
 
     static ExpressionActionsSettings fromSettings(const Settings & from, CompileExpressions compile_expressions = CompileExpressions::no);
     static ExpressionActionsSettings fromContext(ContextPtr from, CompileExpressions compile_expressions = CompileExpressions::no);
