@@ -125,7 +125,7 @@ public:
     size_t needSampleRows() const;
     inline bool hasReorderableShortCircuitFunctions() const { return has_reorderable_short_circuit_functions; }
 
-    /// diable adaptive mode, and rollback the arguments positions.
+    /// disable adaptive mode, and rollback the arguments positions.
     void disableAdaptiveReorderArguments();
     inline bool isEnableAdaptiveReorderArguments() const { return enable_adaptive_reorder_arguments; }
 

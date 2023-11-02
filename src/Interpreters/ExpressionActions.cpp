@@ -970,7 +970,7 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
 
 void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run)
 {
-    /// For safty, when exception occurs in adaptive mode, we rollback to normal mode and run again.
+    /// For safety, when exception occurs in adaptive mode, we rollback to normal mode and run again.
     size_t need_to_sample_rows = short_circuit_execute_controller.needSampleRows();
     if (short_circuit_execute_controller.hasReorderableShortCircuitFunctions() && need_to_sample_rows && num_rows > need_to_sample_rows)
     {

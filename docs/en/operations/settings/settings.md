@@ -179,7 +179,7 @@ If `enable_optimize_predicate_expression = 0`, then the execution time of the se
 
 ## enable_adaptive_reorder_short_circuit_arguments
 
-Enable runtime profiling and reorder a short-circuit functions arguments adaptively. `or` and `and` are supported at current. Default is true.
+Enable runtime profiling and reorder a short-circuit functions arguments automatically. `or` and `and` are supported at current. Default is true.
 
 For example, we have the following dataset.
 ```sql
@@ -194,11 +194,11 @@ SELECT * FROM test_adaptive_reorder_function_arguments WHERE s = 1 and i = 1
 SELECT * FROM test_adaptive_reorder_function_arguments WHERE i = 1 and s = 1
 ```
 
-`q2` should be more efficient then `q1` with short circuit execution, because `i = 1` filt more data and less `s = 1` is executed, reduce total execution cost. With `enable_adaptive_reorder_short_circuit_arguments = true`, `q2` will be changed into `q1` automatically.
+`q2` should be more efficient then `q1` with short circuit execution, because `i = 1` filter more data and less `s = 1` is executed, reduce total execution cost. With `enable_adaptive_reorder_short_circuit_arguments = true`, `q2` will be changed into `q1` automatically.
 
 ## `adaptive_reorder_short_circuit_arguments_sample_rows`
 
-It is only used when `enable_adaptive_reorder_short_circuit_arguments` is true. Default is 512. A larger value will make the runtime profiling overheader more expensive.
+It is only used when `enable_adaptive_reorder_short_circuit_arguments` is true. Default is 512. A larger value will make the runtime profiling cost more expensive.
 
 ## `max_arguments_for_adaptive_reorder_short_circuit_arguments`
 It is only used when `enable_adaptive_reorder_short_circuit_arguments` is true. Default is 128. If a short-circuit function has too many arguments, trying to execute each argument at profiling stage could be too expensive and bring performance degradation.
