@@ -221,19 +221,10 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
             continue;
 
         std::unordered_map<const ActionsDAG::Node *, double> node_elapsed;
-        double min_elapsed = std::numeric_limits<double>::max();
         for (const auto * child : node->children)
         {
             auto elpased = calculateNodeElapsed(child);
             node_elapsed[child] = elpased;
-            const auto & child_info = short_circuit_infos[child];
-            if (child_info.profile_data.sample_rows)
-            {
-                node_elapsed[child] = elpased;
-                min_elapsed = std::min(min_elapsed, node_elapsed[child]);
-            }
-            else
-                node_elapsed[child] = 0.0;
         }
 
         std::vector<std::pair<UInt64, double>> args_ranks;
@@ -242,12 +233,11 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
             const auto & child_info = short_circuit_infos[node->children[i]];
             auto child_elapsed = node_elapsed[node->children[i]];
             double selectivity = child_info.profile_data.selected_rows * 1.0 / child_info.profile_data.sample_rows;
-            if (!short_circuit_settings.is_inverted_select)
-                selectivity = 1.0 - selectivity;
             selectivity = selectivity < 0.0000001 ? 0.0000001 : selectivity; // in case it's zero.
-            double cost = static_cast<double>(child_elapsed - min_elapsed);
-            cost = 1.0 / (1.0 + exp(-cost));
-            args_ranks.push_back({i, cost / selectivity});
+            if (short_circuit_settings.is_inverted_select)
+                selectivity = 1.0 / selectivity;
+            double cost = child_elapsed * selectivity;
+            args_ranks.push_back({i, cost});
             LOG_TRACE(
                 &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
                 "calculate execute cost. node: {}, argument position:{}, selectivity:{}(by {}/{}), cost:{}(by {}), rank value:{}",
@@ -258,7 +248,7 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
                 child_info.profile_data.sample_rows,
                 cost,
                 child_elapsed,
-                cost / selectivity);
+                args_ranks.back().second);
         }
         std::sort(
             args_ranks.begin(),
@@ -268,8 +258,9 @@ void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAgumen
         {
             LOG_TRACE(
                 &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
-                "move the {} argument of {} to position {}",
+                "move the {} argument of {} to position {} on rank value {}",
                 args_ranks[i].first,
+                args_ranks[i].second,
                 node->result_name,
                 i);
             info.arguments_position[i] = args_ranks[i].first;
