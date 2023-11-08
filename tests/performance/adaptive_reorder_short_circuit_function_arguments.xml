@@ -12,7 +12,7 @@
                 <value>'{"kx": "2", "kb": 1, "kz": "hola", "kw": "see you, bye, bye"}'</value>
             </values>
         </substitution>
-    <substitutions>
+    </substitutions>
 
     <create_query>
         CREATE TABLE IF NOT EXISTS test_adaptive_reorder_function_arguments (s1 String, s2 String, i UInt32) ENGINE=Memory;
