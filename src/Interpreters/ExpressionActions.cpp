@@ -115,6 +115,7 @@ ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController
     if (has_too_many_arguments || !has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
         || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
     {
+        enable_adaptive_reorder_arguments = false;
         finished_adaptive_reorder_arguements = true;
 
         if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
