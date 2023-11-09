@@ -275,7 +275,6 @@ void ExpressionShortCircuitExecuteController::disableAdaptiveReorderArguments()
         return;
 
     enable_adaptive_reorder_arguments = false;
-    finished_adaptive_reorder_arguements = true;
     for (auto & [node, info] : short_circuit_infos)
     {
         for (size_t i = 0, n = info.arguments_position.size(); i < n; ++i)
@@ -285,6 +284,7 @@ void ExpressionShortCircuitExecuteController::disableAdaptiveReorderArguments()
     }
     auto lazy_executed_nodes = processShortCircuitFunctions();
     markLazyExecutedNodes(lazy_executed_nodes);
+    finished_adaptive_reorder_arguements = true;
 }
 
 
