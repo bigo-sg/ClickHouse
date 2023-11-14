@@ -313,8 +313,8 @@ class alignas(64) HashTableGrowerWithPrecalculation
     static constexpr size_t max_size_degree = 23;
 
 public:
-    // static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
-    static constexpr GrowerAddressMethod address_method = UNKNOW;
+    static constexpr GrowerAddressMethod address_method = LINEAR_PROBING;
+    //static constexpr GrowerAddressMethod address_method = UNKNOW;
     UInt8 sizeDegree() const { return size_degree; }
 
     void increaseSizeDegree(UInt8 delta)
@@ -560,43 +560,43 @@ protected:
             while (!buf[place_value].isZero(*this) && !buf[place_value].keyEquals(x, hash_value, *this))
             {
                 place_value = grower.next(place_value);
+                #if defined(__AVX512F__) && defined(__AVX512BW__)
                 if (reinterpret_cast<UInt64>(place_value) & 0xF)
                     continue;
-#if USE_MULTITARGET_CODE
-                if (DB::isArchSupported(DB::TargetArch::AVX512BW))
+
+                auto zero_value_v = _mm512_set1_epi64(0ul);
+                auto hash_value_v = _mm512_set1_epi64(hash_value);
+                const size_t step = 8;
+                size_t i = 0;
+                const auto * hash_values_pos = hash_values_buf.data() + place_value;
+                UInt32 hit_pos = 8;
+                auto n = grower.bufSize() - place_value;
+                for (; i + step < n; i += step)
                 {
-                    auto n = grower.bufSize() - place_value;
-                    /*
-                    LOG_ERROR(
-                        &Poco::Logger::get("HashTable"),
-                        "xxx place_value = {}, bufSize: {}, m_size: {}, hash_values_buf.size: {}, data_ptr: {}/{}/{}",
-                        place_value,
-                        grower.bufSize(),
-                        place_value,
-                        hash_values_buf.size(),
-                        fmt::ptr(hash_values_buf.data()),
-                        reinterpret_cast<UInt64>(hash_values_buf.data()),
-                        reinterpret_cast<UInt64>(hash_values_buf.data() + place_value));
-                    */
-                    auto matched_pos
-                        = DB::TargetSpecific::AVX512BW::findMatchedOrZeroHashValue(hash_values_buf.data() + place_value, n, hash_value);
-                    // LOG_ERROR(&Poco::Logger::get("HashTable"), "xxx return matched_pos = {}", matched_pos);
-                    if (matched_pos >= 0)
+                    // LOG_ERROR(&Poco::Logger::get("HashTable"), "xxx batch i = {}, n: {}", i, n);
+                    auto hash_values_line = _mm512_load_epi64(reinterpret_cast<const UInt8 *>(hash_values_pos));
+                    auto cmp_mask = _mm512_cmpeq_epi64_mask(hash_values_line, hash_value_v);
+                    hit_pos = _tzcnt_u32(cmp_mask);
+                    if (hit_pos >= 8)
                     {
-                        place_value += matched_pos;
-#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
-                        collisions += matched_pos;
-#endif
+                        cmp_mask = _mm512_cmpeq_epi64_mask(hash_values_line, zero_value_v);
+                        hit_pos = _tzcnt_u32(cmp_mask);
+                        if (hit_pos < 8)
+                        {
+                            place_value += i + hit_pos;
+                            break;
+                        }
                     }
                     else
                     {
-                        place_value = 0;
-#ifdef DBMS_HASH_MAP_COUNT_COLLISIONS
-                        collisions += n;
-#endif
+                        place_value += i + hit_pos;
+                        break;
                     }
+                    hash_values_pos += step;
                 }
-#endif
+                if (hit_pos >= 8)
+                    place_value += i;
+                #endif
             }
         }
         else
