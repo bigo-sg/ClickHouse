@@ -1209,6 +1209,12 @@ public:
 
     /// Get data structure of the result.
     Block getHeader(bool final) const;
+    
+    AggregatedDataVariantsPtr buildAggregatedDataVariants();
+    Block convertToSingleBlock(AggregatedDataVariants & data_variants, bool final) const
+    {
+        return prepareBlockAndFillSingleLevel<true>(data_variants, final);
+    }
 
 private:
 

@@ -44,6 +44,9 @@
 
 #include <Interpreters/AggregationUtils.h>
 
+#include <sys/time.h>
+#include <sys/resource.h>
+
 namespace ProfileEvents
 {
     extern const Event ExternalAggregationWritePart;
@@ -3201,6 +3204,38 @@ void Aggregator::mergeBlocks(BucketToBlocks bucket_to_blocks, AggregatedDataVari
     CurrentMemoryTracker::check();
 }
 
+AggregatedDataVariantsPtr Aggregator::buildAggregatedDataVariants()
+{
+    auto merge_method = method_chosen;
+
+#define APPLY_FOR_VARIANTS_THAT_MAY_USE_BETTER_HASH_FUNCTION(M) \
+    M(key64) \
+    M(key_string) \
+    M(key_fixed_string) \
+    M(keys128) \
+    M(keys256) \
+    M(serialized)
+
+#define M(NAME) \
+    if (merge_method == AggregatedDataVariants::Type::NAME) \
+        merge_method = AggregatedDataVariants::Type::NAME##_hash64;
+
+    APPLY_FOR_VARIANTS_THAT_MAY_USE_BETTER_HASH_FUNCTION(M)
+#undef M
+
+#undef APPLY_FOR_VARIANTS_THAT_MAY_USE_BETTER_HASH_FUNCTION
+
+    /// Temporary data for aggregation.
+    auto result = std::make_shared<AggregatedDataVariants>();
+
+    /// result will destroy the states of aggregate functions in the destructor
+    result->aggregator = this;
+
+    result->init(merge_method);
+    result->keys_size = params.keys_size;
+    result->key_sizes = key_sizes;
+    return result;
+}
 
 Block Aggregator::mergeBlocks(BlocksList & blocks, bool final)
 {
@@ -3255,6 +3290,20 @@ Block Aggregator::mergeBlocks(BlocksList & blocks, bool final)
 
     for (Block & block : blocks)
     {
+        struct rusage ru;
+        size_t mem_used = 0;
+        if (auto * memory_tracker_child = DB::CurrentThread::getMemoryTracker())
+            if (auto * memory_tracker = memory_tracker_child->getParent())
+                mem_used = memory_tracker->get();
+        getrusage(RUSAGE_SELF, &ru);
+        LOG_ERROR(
+            &Poco::Logger::get("Aggregator"),
+            "xxx mergeBlocks. block size:{}, rows: {}, mem used: {}/ {}, bucket: {}",
+            ReadableSize(block.allocatedBytes()),
+            block.rows(),
+            ReadableSize(mem_used),
+            ReadableSize(ru.ru_maxrss * 1024),
+            bucket_num);
         source_rows += block.rows();
 
         if (bucket_num >= 0 && block.info.bucket_num != bucket_num)
