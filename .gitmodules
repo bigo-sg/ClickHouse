@@ -360,3 +360,6 @@
 [submodule "contrib/sqids-cpp"]
 	path = contrib/sqids-cpp
 	url = https://github.com/sqids/sqids-cpp.git
+[submodule "contrib/libmaxminddb"]
+	path = contrib/libmaxminddb
+	url = https://github.com/maxmind/libmaxminddb.git
