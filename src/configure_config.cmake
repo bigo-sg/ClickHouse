@@ -166,5 +166,8 @@ endif()
 if (TARGET ch_contrib::libarchive)
     set(USE_LIBARCHIVE 1)
 endif()
+if (TARGET ch_contrib::maxminddb)
+    set(USE_MAXMINDDB 1)
+endif()
 
 set(SOURCE_DIR ${PROJECT_SOURCE_DIR})
