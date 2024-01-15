@@ -70,7 +70,7 @@ public:
         data.selected_rows += profile_data.selected_rows;
         data.elapsed_ns += profile_data.elapsed_ns;
     }
-  
+
     void readjustExecutionOrder(size_t rows)
     {
         current_executed_rows += rows;
@@ -98,7 +98,7 @@ public:
         adjusted_arguments_execution_order = new_adjusted_arguments_execution_order;
         in_adjusting_process_count.fetch_sub(1);
     }
-    
+
     String dumpProfileData()
     {
         WriteBufferFromOwnString out;
@@ -108,7 +108,7 @@ public:
               out << std::string(",");
             auto & profile_data = arguments_profile_data[i];
             std::lock_guard lock(profile_data.mutex);
-            out << std::string("( seen_rows:") << profile_data.seen_rows;
+            out << std::string("(seen_rows:") << profile_data.seen_rows;
             out << std::string(", selected_rows:") << profile_data.selected_rows;
             out << std::string(", elapsed_ns:") << profile_data.elapsed_ns;
             out << std::string(", rank:") << profile_data.rank << std::string(")");

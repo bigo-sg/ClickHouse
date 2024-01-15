@@ -156,7 +156,7 @@ class FunctionAnyArityLogical : public IFunction
 {
 public:
     static constexpr auto name = Name::name;
-    
+
     FunctionAnyArityLogical() = default;
     explicit FunctionAnyArityLogical(ContextPtr context_)
         : context(context_)

@@ -646,7 +646,7 @@ ColumnPtr FunctionAnyArityLogical<Impl, Name>::executeDynamicOrderShortCircuit(C
         return res;
     auto bytemap = ColumnUInt8::create();
     bytemap->getData() = std::move(*nulls);
-    return ColumnNullable::create(std::move(res), std::move(bytemap));   
+    return ColumnNullable::create(std::move(res), std::move(bytemap));
 }
 
 template <typename Impl, typename Name>
