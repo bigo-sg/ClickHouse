@@ -45,7 +45,7 @@ public:
         }
     };
 
-    DynamicShortCircuitExecutionOrder(ContextPtr context_, bool revert_rank_ = false) : context(context_), revert_rank(revert_rank_) { }
+    DynamicShortCircuitExecutionOrder(ContextPtr context_, bool inverted_rank_ = false) : context(context_), inverted_rank(inverted_rank_) { }
 
     /// Need to keep the types of all columns the same between each batch.
     ALWAYS_INLINE std::shared_ptr<std::vector<size_t>> getAdjustedExecutionOrder(const ColumnsWithTypeAndName & arguments)
@@ -117,7 +117,7 @@ public:
     }
 private:
     ContextPtr context;
-    size_t revert_rank;
+    size_t inverted_rank;
     size_t num_arguments;
     size_t last_adjust_rows = 0;
     std::atomic<size_t> current_executed_rows = 0;
@@ -163,10 +163,18 @@ private:
         has_setup = true;
     }
 
+    /**
+      * How the rank values come
+      * a.elapsed + a.selectivity * b.elapsed < b.elapsed + b.selectivity * a.elapsed =>
+      * a.elapsed * (1 - b.selectivity) < b.elapsed * (1 - a.selectivity) =>
+      * a.elapsed / (1 - a.selectivity) < b.elapsed / (1 - b.selectivity)
+      *
+      * For inverted rank, it should be a.elapsed / a.selectivity < b.elapsed / b.selectivity
+      */
     ALWAYS_INLINE double nextRank(size_t pos)
     {
         auto & data = arguments_profile_data[pos];
-        if (!revert_rank)
+        if (!inverted_rank)
         {
             std::lock_guard lock(data.mutex);
             if (!data.seen_rows)
