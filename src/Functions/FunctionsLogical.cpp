@@ -574,6 +574,7 @@ ColumnPtr FunctionAnyArityLogical<Impl, Name>::safeExecuteDynamicOrderShortCircu
     if (has_exception_in_dynamic_order_short_circuit)
         return nullptr;
     ColumnPtr result_col = nullptr;
+    auto copied_arguments = arguments;
     try
     {
         result_col = executeDynamicOrderShortCircuit(arguments, result_type);
@@ -582,6 +583,7 @@ ColumnPtr FunctionAnyArityLogical<Impl, Name>::safeExecuteDynamicOrderShortCircu
     {
         has_exception_in_dynamic_order_short_circuit = true;
         result_col = nullptr;
+        arguments = copied_arguments;
     }
     return result_col;
 }
