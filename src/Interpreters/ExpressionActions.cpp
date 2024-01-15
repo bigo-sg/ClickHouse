@@ -1,6 +1,5 @@
 #include <Interpreters/Set.h>
 #include <Common/ProfileEvents.h>
-#include <Common/Stopwatch.h>
 #include <Interpreters/ArrayJoinAction.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/TableJoin.h>
@@ -10,24 +9,16 @@
 #include <Common/typeid_cast.h>
 #include <DataTypes/DataTypeArray.h>
 #include <DataTypes/DataTypesNumber.h>
+#include <Functions/IFunction.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/Operators.h>
 #include <optional>
 #include <Columns/ColumnSet.h>
 #include <queue>
-#include <shared_mutex>
 #include <stack>
 #include <base/sort.h>
 #include <Common/JSONBuilder.h>
 #include <Core/SettingsEnums.h>
-
-#include <Columns/MaskOperations.h>
-#include <Poco/Logger.h>
-#include <Common/logger_useful.h>
-#include <algorithm>
-#include <cmath>
-#include <unordered_map>
-#include <unordered_set>
 
 
 #if defined(MEMORY_SANITIZER)
@@ -56,282 +47,106 @@ namespace ErrorCodes
     extern const int TYPE_MISMATCH;
 }
 
-ExpressionShortCircuitExecuteController::ExpressionShortCircuitExecuteController(
-    const ActionsDAGPtr & actions_dag_,
-    const ExpressionActionsSettings & settings)
-    : actions_dag(actions_dag_)
-    , short_circuit_function_evaluation(settings.short_circuit_function_evaluation)
-    , enable_adaptive_reorder_arguments(settings.enable_adaptive_reorder_short_circuit_arguments)
-    , max_sample_rows(settings.adaptive_reorder_short_circuit_arguments_sample_rows)
-    , max_allowed_arguments(settings.max_arguments_for_adaptive_reorder_short_circuit_arguments)
+static std::unordered_set<const ActionsDAG::Node *> processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation);
+
+ExpressionActions::ExpressionActions(ActionsDAGPtr actions_dag_, const ExpressionActionsSettings & settings_)
+    : settings(settings_)
 {
-    const auto & nodes = actions_dag->getNodes();
-    for (const auto & node : nodes)
-    {
-        /// For default, don't change the arguments' order.
-        ShortCircuitInfo info;
-        for (size_t i = 0; i < node.children.size(); ++i)
-            info.arguments_position.emplace_back(i);
-        short_circuit_infos[&node] = info;
-    }
-    auto lazy_executed_nodes = processShortCircuitFunctions();
+    actions_dag = actions_dag_->clone();
+
+    /// It's important to determine lazy executed nodes before compiling expressions.
+    std::unordered_set<const ActionsDAG::Node *> lazy_executed_nodes = processShortCircuitFunctions(*actions_dag, settings.short_circuit_function_evaluation);
 
 #if USE_EMBEDDED_COMPILER
-    /// Since we will just reorder the arguments position, this will not change the behavior of compiling functions
     if (settings.can_compile_expressions && settings.compile_expressions == CompileExpressions::yes)
         actions_dag->compileExpressions(settings.min_count_to_compile_expression, lazy_executed_nodes);
-
-    /// New children may be added into the compiled functions. refresh all arguments_position.
-    const auto & compiled_nodes = actions_dag->getNodes();
-    for (const auto & node : compiled_nodes)
-    {
-        auto & info = short_circuit_infos[&node];
-        info.arguments_position.clear();
-        for (size_t i = 0; i < node.children.size(); ++i)
-            info.arguments_position.emplace_back(i);
-    }
 #endif
 
-    bool has_too_many_arguments = false;
+    linearizeActions(lazy_executed_nodes);
+
+    if (settings.max_temporary_columns && num_columns > settings.max_temporary_columns)
+        throw Exception(ErrorCodes::TOO_MANY_TEMPORARY_COLUMNS,
+                        "Too many temporary columns: {}. Maximum: {}",
+                        actions_dag->dumpNames(), settings.max_temporary_columns);
+}
+
+ExpressionActionsPtr ExpressionActions::clone() const
+{
+    return std::make_shared<ExpressionActions>(*this);
+}
+
+namespace
+{
+    struct ActionsDAGReverseInfo
+    {
+        struct NodeInfo
+        {
+            std::vector<const ActionsDAG::Node *> parents;
+            bool used_in_result = false;
+        };
+
+        using ReverseIndex = std::unordered_map<const ActionsDAG::Node *, size_t>;
+        std::vector<NodeInfo> nodes_info;
+        ReverseIndex reverse_index;
+    };
+}
+
+static ActionsDAGReverseInfo getActionsDAGReverseInfo(const std::list<ActionsDAG::Node> & nodes, const ActionsDAG::NodeRawConstPtrs & index)
+{
+    ActionsDAGReverseInfo result_info;
+    result_info.nodes_info.resize(nodes.size());
+
     for (const auto & node : nodes)
     {
-        if (node.type == ActionsDAG::ActionType::FUNCTION)
-        {
-            IFunctionBase::ShortCircuitSettings short_circuit_settings;
-            if (node.function_base->isShortCircuit(short_circuit_settings, node.children.size()))
-            {
-                if (short_circuit_settings.support_reorder_arguments)
-                    has_reorderable_short_circuit_functions = true;
-                for (const auto * child : node.children)
-                    short_circuit_infos[child].is_short_circuit_function_child = true;
-                /// If the arguments size is too large, cost of the sample process will
-                /// be every large.
-                if (node.children.size() > max_allowed_arguments)
-                   has_too_many_arguments = true;
-            }
-        }
+        size_t id = result_info.reverse_index.size();
+        result_info.reverse_index[&node] = id;
     }
 
-    if (has_too_many_arguments || !has_reorderable_short_circuit_functions || !enable_adaptive_reorder_arguments
-        || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
-    {
-        enable_adaptive_reorder_arguments = false;
-        finished_adaptive_reorder_arguements = true;
+    for (const auto * node : index)
+        result_info.nodes_info[result_info.reverse_index[node]].used_in_result = true;
 
-        if (short_circuit_function_evaluation != ShortCircuitFunctionEvaluation::DISABLE)
-            markLazyExecutedNodes(lazy_executed_nodes);
-    }
-}
-
-bool ExpressionShortCircuitExecuteController::couldLazyExecuted(const ActionsDAG::Node * node)
-{
-    if (enable_adaptive_reorder_arguments && !finished_adaptive_reorder_arguements)
-        return false;
-    return short_circuit_infos[node].is_lazy_executed;
-}
-
-int ExpressionShortCircuitExecuteController::needProfile(const ActionsDAG::Node * node)
-{
-    int res = NOT_PROFILE;
-    if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements)
-        return res;
-    res |= PROFILE_ELAPSED;
-    if (short_circuit_infos[node].is_short_circuit_function_child && isNativeNumber(*node->result_type))
-        res |= PROFILE_SELECTIVITY;
-    return res;
-}
-
-void ExpressionShortCircuitExecuteController::addNodeShortCircuitProfile(const ActionsDAG::Node * node, const ProfileData & profile_data_)
-{
-    // LOG_ERROR(&Poco::Logger::get("ExpressionShortCircuitExecuteController"), "addNodeShortCircuitProfile:{}, sample_rows: {}, selected_rows: {}", node->result_name, profile_data_.sample_rows, profile_data_.selected_rows);
-    auto & info = short_circuit_infos[node];
-    std::unique_lock lock(mutex);
-    info.profile_data.sample_rows += profile_data_.sample_rows;
-    info.profile_data.selected_rows += profile_data_.selected_rows;
-    info.profile_data.elapsed += profile_data_.elapsed;
-}
-
-void ExpressionShortCircuitExecuteController::tryReorderShortCircuitFunctionsAguments(size_t num_rows)
-{
-    if (finished_adaptive_reorder_arguements.load() || !num_rows || sampled_rows.load() >= max_sample_rows)
-        return;
-    sampled_rows += num_rows;
-    if (sampled_rows >= max_sample_rows)
-    {
-        std::unique_lock lock(mutex);
-        if (finished_adaptive_reorder_arguements)
-            return;
-        reorderShortCircuitFunctionsAguments();
-        auto lazy_executed_nodes = processShortCircuitFunctions();
-        markLazyExecutedNodes(lazy_executed_nodes);
-        finished_adaptive_reorder_arguements = true;
-    }
-}
-
-std::vector<size_t> ExpressionShortCircuitExecuteController::getReorderedArgumentsPosition(const ActionsDAG::Node * node)
-{
-    if (finished_adaptive_reorder_arguements)
-        return short_circuit_infos[node].arguments_position;
-    std::shared_lock lock(mutex);
-    return short_circuit_infos[node].arguments_position;
-}
-
-size_t ExpressionShortCircuitExecuteController::needSampleRows() const
-{
-    if (!enable_adaptive_reorder_arguments || finished_adaptive_reorder_arguements)
-        return 0;
-    size_t n = sampled_rows.load();
-    return max_sample_rows > n ? max_sample_rows - n : 0;
-}
-
-double ExpressionShortCircuitExecuteController::calculateNodeElapsed(const ActionsDAG::Node * node)
-{
-    const auto & info = short_circuit_infos[node];
-    double res = info.profile_data.sample_rows ? info.profile_data.elapsed * 1.0 / info.profile_data.sample_rows : 0.0;
-    for (const auto * child : node->children)
-    {
-        res += calculateNodeElapsed(child);
-    }
-    return res;
-}
-
-void ExpressionShortCircuitExecuteController::reorderShortCircuitFunctionsAguments()
-{
-    for (auto & [node, info] : short_circuit_infos)
-    {
-        if (node->type != ActionsDAG::ActionType::FUNCTION && node->children.size() < 2)
-            continue;
-        /// If the function is compiled, the arguments are different from the original one.
-        /// At presesnt, is_function_compiled = false, when this function has lazy executed child.
-        if (node->is_function_compiled)
-            continue;
-        IFunctionBase::ShortCircuitSettings short_circuit_settings;
-        if (!node->function_base->isShortCircuit(short_circuit_settings, node->children.size()))
-            continue;
-        if (!short_circuit_settings.support_reorder_arguments)
-            continue;
-
-        /// FIXME. A special case, select and(a,b,a) from t. if we change `and(a,b,a)` to
-        /// and(b,a,a), `a` will be executed twice. This is not a stable case, so skip it.
-        std::unordered_set<const ActionsDAG::Node *> unique_children;
-        for (const auto * child : node->children)
-        {
-            unique_children.insert(child);
-        }
-        if (unique_children.size() != node->children.size())
-            continue;
-
-        std::unordered_map<const ActionsDAG::Node *, double> node_elapsed;
-        for (const auto * child : node->children)
-        {
-            auto elpased = calculateNodeElapsed(child);
-            node_elapsed[child] = elpased;
-        }
-
-        std::vector<std::pair<UInt64, double>> args_ranks;
-        for (size_t i = 0; i < node->children.size(); ++i)
-        {
-            const auto & child_info = short_circuit_infos[node->children[i]];
-            auto child_elapsed = node_elapsed[node->children[i]];
-            double selectivity = child_info.profile_data.selected_rows * 1.0 / child_info.profile_data.sample_rows;
-            selectivity = selectivity < 0.0000001 ? 0.0000001 : selectivity; // in case it's zero.
-            if (short_circuit_settings.is_inverted_select)
-                selectivity = 1.0 / selectivity;
-            double cost = child_elapsed * selectivity;
-            args_ranks.push_back({i, cost});
-            LOG_TRACE(
-                &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
-                "calculate execute cost. node: {}, argument position:{}, selectivity:{}(by {}/{}), cost:{}(by {}), rank value:{}",
-                node->result_name,
-                i,
-                selectivity,
-                child_info.profile_data.selected_rows,
-                child_info.profile_data.sample_rows,
-                cost,
-                child_elapsed,
-                args_ranks.back().second);
-        }
-        std::sort(
-            args_ranks.begin(),
-            args_ranks.end(),
-            [](const std::pair<UInt64, double> & a, const std::pair<UInt64, double> & b) { return a.second < b.second; });
-        for (size_t i = 0; i < node->children.size(); ++i)
-        {
-            LOG_TRACE(
-                &Poco::Logger::get("ExpressionShortCircuitExecuteController"),
-                "move the {} argument of {} to position {} on rank value {}",
-                args_ranks[i].first,
-                args_ranks[i].second,
-                node->result_name,
-                i);
-            info.arguments_position[i] = args_ranks[i].first;
-        }
-    }
-}
-
-void ExpressionShortCircuitExecuteController::disableAdaptiveReorderArguments()
-{
-    std::unique_lock lock(mutex);
-    if (!enable_adaptive_reorder_arguments)
-        return;
-
-    enable_adaptive_reorder_arguments = false;
-    for (auto & [node, info] : short_circuit_infos)
-    {
-        for (size_t i = 0, n = info.arguments_position.size(); i < n; ++i)
-        {
-            info.arguments_position[i] = i;
-        }
-    }
-    auto lazy_executed_nodes = processShortCircuitFunctions();
-    markLazyExecutedNodes(lazy_executed_nodes);
-    finished_adaptive_reorder_arguements = true;
-}
-
-
-static ActionsDAGReverseInfo getActionsDAGReverseInfo(const std::list<ActionsDAG::Node> & nodes, const ActionsDAG::NodeRawConstPtrs & index);
-std::unordered_set<const ActionsDAG::Node *>  ExpressionShortCircuitExecuteController::processShortCircuitFunctions()
-{
-    const auto & nodes = actions_dag->getNodes();
-    /// Firstly, find all short-circuit functions and get their settings.
-    std::unordered_map<const ActionsDAG::Node *, IFunctionBase::ShortCircuitSettings> short_circuit_nodes;
-    IFunctionBase::ShortCircuitSettings short_circuit_settings;
     for (const auto & node : nodes)
     {
-        if (node.type == ActionsDAG::ActionType::FUNCTION && node.function_base->isShortCircuit(short_circuit_settings, node.children.size()) && !node.children.empty())
-            short_circuit_nodes[&node] = short_circuit_settings;
+        for (const auto & child : node.children)
+            result_info.nodes_info[result_info.reverse_index[child]].parents.emplace_back(&node);
     }
 
-    /// If there are no short-circuit functions, no need to do anything.
-    if (short_circuit_nodes.empty())
-        return {};
-
-    auto reverse_info = getActionsDAGReverseInfo(nodes, actions_dag->getOutputs());
-
-    /// For each node we fill LazyExecutionInfo.
-    std::unordered_map<const ActionsDAG::Node *, LazyExecutionInfo> lazy_execution_infos;
-    for (const auto & node : nodes)
-        setLazyExecutionInfo(&node, reverse_info, short_circuit_nodes, lazy_execution_infos);
-
-    std::unordered_set<const ActionsDAG::Node *> lazy_executed_nodes;
-    for (const auto & [node, settings] : short_circuit_nodes)
-    {
-        /// Recursively find nodes that should be lazy executed.
-        findLazyExecutedNodes(
-            node->children,
-            lazy_execution_infos,
-            settings.force_enable_lazy_execution || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::FORCE_ENABLE,
-            lazy_executed_nodes);
-    }
-    return lazy_executed_nodes;
+    return result_info;
 }
 
+static DataTypesWithConstInfo getDataTypesWithConstInfoFromNodes(const ActionsDAG::NodeRawConstPtrs & nodes)
+{
+    DataTypesWithConstInfo types;
+    types.reserve(nodes.size());
+    for (const auto & child : nodes)
+    {
+        bool is_const = child->column && isColumnConst(*child->column);
+        types.push_back({child->result_type, is_const});
+    }
+    return types;
+}
 
-void ExpressionShortCircuitExecuteController::setLazyExecutionInfo(
-        const ActionsDAG::Node * node,
-        const ActionsDAGReverseInfo & reverse_info,
-        const std::unordered_map<const ActionsDAG::Node *, IFunctionBase::ShortCircuitSettings> & short_circuit_nodes,
-        std::unordered_map<const ActionsDAG::Node *, LazyExecutionInfo> & lazy_execution_infos)
+namespace
+{
+    /// Information about the node that helps to determine if it can be executed lazily.
+    struct LazyExecutionInfo
+    {
+        bool can_be_lazy_executed;
+        /// For each node we need to know all it's ancestors that are short-circuit functions.
+        /// Also we need to know which arguments of this short-circuit functions are ancestors for the node
+        /// (we will store the set of indexes of arguments), because for some short-circuit function we shouldn't
+        /// enable lazy execution for nodes that are common descendants of different function arguments.
+        /// Example: if(cond, expr1(..., expr, ...), expr2(..., expr, ...))).
+        std::unordered_map<const ActionsDAG::Node *, std::unordered_set<size_t>> short_circuit_ancestors_info;
+    };
+}
+
+/// Create lazy execution info for node.
+static void setLazyExecutionInfo(
+    const ActionsDAG::Node * node,
+    const ActionsDAGReverseInfo & reverse_info,
+    const std::unordered_map<const ActionsDAG::Node *, IFunctionBase::ShortCircuitSettings> & short_circuit_nodes,
+    std::unordered_map<const ActionsDAG::Node *, LazyExecutionInfo> & lazy_execution_infos)
 {
     /// If we already created info about this node, just do nothing.
     if (lazy_execution_infos.contains(node))
@@ -359,14 +174,13 @@ void ExpressionShortCircuitExecuteController::setLazyExecutionInfo(
             /// Use set, because one node can be more than one argument.
             /// Example: expr1 AND expr2 AND expr1.
             std::unordered_set<size_t> indexes;
-            auto reordered_args_pos = short_circuit_infos[parent].arguments_position;
             for (size_t i = 0; i != parent->children.size(); ++i)
             {
-                if (node == parent->children[reordered_args_pos[i]])
+                if (node == parent->children[i])
                     indexes.insert(i);
             }
 
-            if (!short_circuit_nodes.at(parent).enable_lazy_execution_for_first_argument && node == parent->children[reordered_args_pos[0]])
+            if (!short_circuit_nodes.at(parent).enable_lazy_execution_for_first_argument && node == parent->children[0])
             {
                 /// We shouldn't add 0 index in node info in this case.
                 indexes.erase(0);
@@ -407,8 +221,9 @@ void ExpressionShortCircuitExecuteController::setLazyExecutionInfo(
     }
 }
 
-static DataTypesWithConstInfo getDataTypesWithConstInfoFromNodes(const ActionsDAG::NodeRawConstPtrs & nodes);
-bool ExpressionShortCircuitExecuteController::findLazyExecutedNodes(
+
+/// Enable lazy execution for short-circuit function arguments.
+static bool findLazyExecutedNodes(
     const ActionsDAG::NodeRawConstPtrs & children,
     std::unordered_map<const ActionsDAG::Node *, LazyExecutionInfo> & lazy_execution_infos,
     bool force_enable_lazy_execution,
@@ -437,18 +252,16 @@ bool ExpressionShortCircuitExecuteController::findLazyExecutedNodes(
         /// the offset that is differ from what we would get without filtering.
         switch (child->type)
         {
-            case ActionsDAG::ActionType::FUNCTION: {
+            case ActionsDAG::ActionType::FUNCTION:
+            {
                 /// Propagate lazy execution through function arguments.
-                bool has_lazy_child
-                    = findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
+                bool has_lazy_child = findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
 
                 /// Use lazy execution when:
                 ///  - It's force enabled.
                 ///  - Function is suitable for lazy execution.
                 ///  - Function has lazy executed arguments.
-                if (force_enable_lazy_execution || has_lazy_child
-                    || child->function_base->isSuitableForShortCircuitArgumentsExecution(
-                        getDataTypesWithConstInfoFromNodes(child->children)))
+                if (force_enable_lazy_execution || has_lazy_child || child->function_base->isSuitableForShortCircuitArgumentsExecution(getDataTypesWithConstInfoFromNodes(child->children)))
                 {
                     has_lazy_node = true;
                     lazy_executed_nodes_out.insert(child);
@@ -457,8 +270,7 @@ bool ExpressionShortCircuitExecuteController::findLazyExecutedNodes(
             }
             case ActionsDAG::ActionType::ALIAS:
                 /// Propagate lazy execution through alias.
-                has_lazy_node
-                    |= findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
+                has_lazy_node |= findLazyExecutedNodes(child->children, lazy_execution_infos, force_enable_lazy_execution, lazy_executed_nodes_out);
                 break;
             default:
                 break;
@@ -467,75 +279,47 @@ bool ExpressionShortCircuitExecuteController::findLazyExecutedNodes(
     return has_lazy_node;
 }
 
-void ExpressionShortCircuitExecuteController::markLazyExecutedNodes(const std::unordered_set<const ActionsDAG::Node *> & lazy_executed_nodes)
+static std::unordered_set<const ActionsDAG::Node *> processShortCircuitFunctions(const ActionsDAG & actions_dag, ShortCircuitFunctionEvaluation short_circuit_function_evaluation)
 {
-    for (auto & [node, info] : short_circuit_infos)
-    {
-        if (lazy_executed_nodes.contains(node))
-        {
-            LOG_TRACE(&Poco::Logger::get("ExpressionShortCircuitExecuteController"), "mark node be lazy executed:{}", node->result_name);
-            info.is_lazy_executed = true;
-        }
-        else
-            info.is_lazy_executed = false;
-    }
-}
+    if (short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::DISABLE)
+        return {};
 
+    const auto & nodes = actions_dag.getNodes();
 
-ExpressionActions::ExpressionActions(ActionsDAGPtr actions_dag_, const ExpressionActionsSettings & settings_)
-    : actions_dag(actions_dag_->clone())
-    , settings(settings_)
-    , short_circuit_execute_controller(actions_dag, settings_)
-{
-    linearizeActions();
-
-    if (settings.max_temporary_columns && num_columns > settings.max_temporary_columns)
-        throw Exception(ErrorCodes::TOO_MANY_TEMPORARY_COLUMNS,
-                        "Too many temporary columns: {}. Maximum: {}",
-                        actions_dag->dumpNames(), settings.max_temporary_columns);
-}
-
-ExpressionActionsPtr ExpressionActions::clone() const
-{
-    return std::make_shared<ExpressionActions>(*this);
-}
-
-static ActionsDAGReverseInfo getActionsDAGReverseInfo(const std::list<ActionsDAG::Node> & nodes, const ActionsDAG::NodeRawConstPtrs & index)
-{
-    ActionsDAGReverseInfo result_info;
-    result_info.nodes_info.resize(nodes.size());
-
+    /// Firstly, find all short-circuit functions and get their settings.
+    std::unordered_map<const ActionsDAG::Node *, IFunctionBase::ShortCircuitSettings> short_circuit_nodes;
+    IFunctionBase::ShortCircuitSettings short_circuit_settings;
     for (const auto & node : nodes)
     {
-        size_t id = result_info.reverse_index.size();
-        result_info.reverse_index[&node] = id;
+        if (node.type == ActionsDAG::ActionType::FUNCTION && node.function_base->isShortCircuit(short_circuit_settings, node.children.size()) && !node.children.empty())
+            short_circuit_nodes[&node] = short_circuit_settings;
     }
 
-    for (const auto * node : index)
-        result_info.nodes_info[result_info.reverse_index[node]].used_in_result = true;
+    /// If there are no short-circuit functions, no need to do anything.
+    if (short_circuit_nodes.empty())
+        return {};
 
+    auto reverse_info = getActionsDAGReverseInfo(nodes, actions_dag.getOutputs());
+
+    /// For each node we fill LazyExecutionInfo.
+    std::unordered_map<const ActionsDAG::Node *, LazyExecutionInfo> lazy_execution_infos;
     for (const auto & node : nodes)
-    {
-        for (const auto & child : node.children)
-            result_info.nodes_info[result_info.reverse_index[child]].parents.emplace_back(&node);
-    }
+        setLazyExecutionInfo(&node, reverse_info, short_circuit_nodes, lazy_execution_infos);
 
-    return result_info;
+    std::unordered_set<const ActionsDAG::Node *> lazy_executed_nodes;
+    for (const auto & [node, settings] : short_circuit_nodes)
+    {
+        /// Recursively find nodes that should be lazy executed.
+        findLazyExecutedNodes(
+            node->children,
+            lazy_execution_infos,
+            settings.force_enable_lazy_execution || short_circuit_function_evaluation == ShortCircuitFunctionEvaluation::FORCE_ENABLE,
+            lazy_executed_nodes);
+    }
+    return lazy_executed_nodes;
 }
 
-static DataTypesWithConstInfo getDataTypesWithConstInfoFromNodes(const ActionsDAG::NodeRawConstPtrs & nodes)
-{
-    DataTypesWithConstInfo types;
-    types.reserve(nodes.size());
-    for (const auto & child : nodes)
-    {
-        bool is_const = child->column && isColumnConst(*child->column);
-        types.push_back({child->result_type, is_const});
-    }
-    return types;
-}
-
-void ExpressionActions::linearizeActions()
+void ExpressionActions::linearizeActions(const std::unordered_set<const ActionsDAG::Node *> & lazy_executed_nodes)
 {
     /// This function does the topological sort on DAG and fills all the fields of ExpressionActions.
     /// Algorithm traverses DAG starting from nodes without children.
@@ -626,7 +410,8 @@ void ExpressionActions::linearizeActions()
 
             //required_columns.push_back({node->result_name, node->result_type});
         }
-        actions.push_back({.node = node, .arguments = arguments, .result_position = free_position});
+
+        actions.push_back({node, arguments, free_position, lazy_executed_nodes.contains(node)});
 
         for (const auto & parent : cur_info.parents)
         {
@@ -775,7 +560,6 @@ namespace
         ColumnsWithTypeAndName columns = {};
         std::vector<ssize_t> inputs_pos = {};
         size_t num_rows = 0;
-        ExpressionShortCircuitExecuteController * short_circuit_execute_controller;
     };
 }
 
@@ -809,74 +593,24 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
                 break;
             }
 
-            std::unordered_set<size_t> to_clear_columns;
             ColumnsWithTypeAndName arguments(action.arguments.size());
-            auto ordered_arguments = execution_context.short_circuit_execute_controller->getReorderedArgumentsPosition(action.node);
             for (size_t i = 0; i < arguments.size(); ++i)
             {
-                auto arg_pos = ordered_arguments[i];
-                auto col_pos = action.arguments[arg_pos].pos;
-                arguments[i] = columns[col_pos];
-                /// Since we may reordered arguments, following case will occur,
-                /// original argument list: {arg_0, ref_col = i, needed_later=true}, {arg_1, ref_col = i, needed_later=false}
-                /// reordered argument list: {arg_1, ref_col = i, needed_later=false}, {arg_0, ref_col = i, needed_later=true}
-                /// we need to lazy clear the columns which is not need anymore.
-                if (!action.arguments[arg_pos].needed_later)
-                {
-                    to_clear_columns.insert(col_pos);
-                }
-                if (!arguments[i].column)
-                {
-                    throw Exception(
-                        ErrorCodes::NOT_FOUND_COLUMN_IN_BLOCK,
-                        "Invalid argument. i:{} arg pos:{}, col pos: {}, node: {}",
-                        i,
-                        arg_pos,
-                        col_pos,
-                        action.node->result_name);
-                }
-            }
-            for (auto col_pos : to_clear_columns)
-            {
-                columns[col_pos] = {};
+                if (!action.arguments[i].needed_later)
+                    arguments[i] = std::move(columns[action.arguments[i].pos]);
+                else
+                    arguments[i] = columns[action.arguments[i].pos];
             }
 
-            // Before short circuit functions reorder sampling finish, disable lazy execution.
-            if (execution_context.short_circuit_execute_controller->couldLazyExecuted(action.node))
-            {
-                res_column.column = ColumnFunction::create(
-                    num_rows, action.node->function_base, std::move(arguments), true, action.node->is_function_compiled);
-            }
+            if (action.is_lazy_executed)
+                res_column.column = ColumnFunction::create(num_rows, action.node->function_base, std::move(arguments), true, action.node->is_function_compiled);
             else
             {
                 ProfileEvents::increment(ProfileEvents::FunctionExecute);
                 if (action.node->is_function_compiled)
                     ProfileEvents::increment(ProfileEvents::CompiledFunctionExecute);
-                auto profile_type = execution_context.short_circuit_execute_controller->needProfile(action.node);
-                if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_ELAPSED)
-                {
-                    ExpressionShortCircuitExecuteController::ProfileData profile_data;
-                    Stopwatch watch;
-                    res_column.column = action.node->function->execute(arguments, res_column.type, num_rows, dry_run);
-                    profile_data.elapsed = watch.elapsedNanoseconds();
-                    profile_data.sample_rows = res_column.column->size();
-                    if (profile_type & ExpressionShortCircuitExecuteController::PROFILE_SELECTIVITY)
-                    {
-                        IColumn::Filter mask(res_column.column->size(), 1);
-                        auto full_column = recursiveRemoveSparse(res_column.column);
-                        auto mask_info = extractMask(mask, full_column, nullptr);
-                        profile_data.selected_rows = mask_info.ones_count;
-                    }
-                    else
-                    {
-                        profile_data.selected_rows = res_column.column->size();
-                    }
-                    execution_context.short_circuit_execute_controller->addNodeShortCircuitProfile(action.node, profile_data);
-                }
-                else
-                {
-                    res_column.column = action.node->function->execute(arguments, res_column.type, num_rows, dry_run);
-                }
+
+                res_column.column = action.node->function->execute(arguments, res_column.type, num_rows, dry_run);
             }
             break;
         }
@@ -960,71 +694,12 @@ static void executeAction(const ExpressionActions::Action & action, ExecutionCon
     }
 }
 
-void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run)
-{
-    /// For safety, when exception occurs in adaptive mode, we rollback to normal mode and run again.
-    size_t need_to_sample_rows = short_circuit_execute_controller.needSampleRows();
-    if (short_circuit_execute_controller.hasReorderableShortCircuitFunctions() && need_to_sample_rows && num_rows > need_to_sample_rows)
-    {
-        try
-        {
-            Block to_sample_block;
-            for (const auto & col : block.getColumnsWithTypeAndName())
-            {
-                auto sample_col = col.column->cut(0, need_to_sample_rows);
-                to_sample_block.insert({sample_col, col.type, col.name});
-            }
-            // All the functions should be stateless here.
-            size_t tmp_num_rows = need_to_sample_rows;
-            executeImpl(to_sample_block, tmp_num_rows, dry_run);
-            short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(need_to_sample_rows);
-        }
-        catch (...)
-        {
-            short_circuit_execute_controller.disableAdaptiveReorderArguments();
-        }
-        executeImpl(block, num_rows, dry_run);
-    }
-    else
-    {
-        bool rerun = false;
-        bool in_adaptive_reorder_mode = short_circuit_execute_controller.isEnableAdaptiveReorderArguments();
-        Block tmp_block = block;
-        size_t tmp_num_rows = num_rows;
-        try
-        {
-            executeImpl(tmp_block, tmp_num_rows, dry_run);
-            block.swap(tmp_block);
-            num_rows = tmp_num_rows;
-        }
-        catch (...)
-        {
-            if (in_adaptive_reorder_mode)
-            {
-                short_circuit_execute_controller.disableAdaptiveReorderArguments();
-                rerun = true;
-            }
-            else
-                throw;
-        }
-        if (rerun)
-        {
-            executeImpl(block, num_rows, dry_run);
-        }
-        else
-        {
-            short_circuit_execute_controller.tryReorderShortCircuitFunctionsAguments(num_rows);
-        }
-    }
-}
-
-void ExpressionActions::executeImpl(Block & block, size_t & num_rows, bool dry_run)
+void ExpressionActions::execute(Block & block, size_t & num_rows, bool dry_run) const
 {
     ExecutionContext execution_context
     {
         .inputs = block.data,
         .num_rows = num_rows,
-        .short_circuit_execute_controller = &short_circuit_execute_controller,
     };
 
     execution_context.inputs_pos.assign(required_columns.size(), -1);
@@ -1048,25 +723,24 @@ void ExpressionActions::executeImpl(Block & block, size_t & num_rows, bool dry_r
 
     execution_context.columns.resize(num_columns);
 
+    for (const auto & action : actions)
     {
-        for (const auto & action : actions)
+        try
         {
-            try
-            {
-                executeAction(action, execution_context, dry_run);
-                checkLimits(execution_context.columns);
+            executeAction(action, execution_context, dry_run);
+            checkLimits(execution_context.columns);
 
-                //std::cerr << "Action: " << action.toString() << std::endl;
-                //for (const auto & col : execution_context.columns)
-                //    std::cerr << col.dumpStructure() << std::endl;
-            }
-            catch (Exception & e)
-            {
-                e.addMessage(fmt::format("while executing '{}'", action.toString()));
-                throw;
-            }
+            //std::cerr << "Action: " << action.toString() << std::endl;
+            //for (const auto & col : execution_context.columns)
+            //    std::cerr << col.dumpStructure() << std::endl;
+        }
+        catch (Exception & e)
+        {
+            e.addMessage(fmt::format("while executing '{}'", action.toString()));
+            throw;
         }
     }
+
     if (actions_dag->isInputProjected())
     {
         block.clear();
@@ -1093,7 +767,7 @@ void ExpressionActions::executeImpl(Block & block, size_t & num_rows, bool dry_r
     num_rows = execution_context.num_rows;
 }
 
-void ExpressionActions::execute(Block & block, bool dry_run)
+void ExpressionActions::execute(Block & block, bool dry_run) const
 {
     size_t num_rows = block.rows();
 
@@ -1177,6 +851,7 @@ std::string ExpressionActions::dumpActions() const
 void ExpressionActions::describeActions(WriteBuffer & out, std::string_view prefix) const
 {
     bool first = true;
+
     for (const auto & action : actions)
     {
         out << prefix << (first ? "Actions: " : "         ");
@@ -1217,10 +892,8 @@ JSONBuilder::ItemPtr ExpressionActions::toTree() const
     }
 
     auto actions_array = std::make_unique<JSONBuilder::JSONArray>();
-    {
-        for (const auto & action : actions)
-            actions_array->add(action.toTree());
-    }
+    for (const auto & action : actions)
+        actions_array->add(action.toTree());
 
     auto positions_array = std::make_unique<JSONBuilder::JSONArray>();
     for (auto pos : result_positions)
