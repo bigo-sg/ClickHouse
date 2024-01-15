@@ -58,9 +58,9 @@ public:
         assert(arguments.size() == num_arguments);
         if (!could_adjust)
           return nullptr;
+        std::shared_lock lock(mutex);
         return adjusted_arguments_execution_order;
     }
-    std::shared_ptr<std::vector<size_t>> getAdjustedExecutionOrder1(const ColumnsWithTypeAndName &) { return {}; }
 
     ALWAYS_INLINE void addProfileData(size_t pos, const ProfileData & profile_data)
     {
