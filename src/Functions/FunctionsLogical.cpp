@@ -569,7 +569,7 @@ static void applyTernaryLogic(const IColumn::Filter & mask, IColumn::Filter & nu
         applyTernaryLogicImpl<false>(mask, null_bytemap);
 }
 
-// Change the execution orders of arguments may cause some exceptions, since some invalid rows which are filtered out in the format_regexp
+// Change the execution orders of arguments may cause some exceptions, since some invalid rows which are filtered out in the former
 // execution order may be used in the new execution order. In this case we give up to adjust the execution order and return nullptr.
 template <typename Impl, typename Name>
 ColumnPtr FunctionAnyArityLogical<Impl, Name>::safeExecuteDynamicOrderShortCircuit(ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type) const
