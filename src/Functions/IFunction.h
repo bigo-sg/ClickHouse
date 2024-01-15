@@ -258,10 +258,6 @@ public:
         /// Example: toTypeName(expr), even if expr contains functions that are not suitable for
         /// lazy execution (because of their simplicity), we shouldn't execute them at all.
         bool force_enable_lazy_execution;
-
-        bool support_reorder_arguments = false;
-        /// define the selectivity. OR is true, AND is false.
-        bool is_inverted_select = false;
     };
 
     /** Function is called "short-circuit" if it's arguments can be evaluated lazily
