@@ -122,7 +122,7 @@ private:
     size_t last_adjust_rows = 0;
     std::atomic<size_t> current_executed_rows = 0;
     bool could_adjust = true;
-    bool has_setup = false;
+    std::atomic<bool> has_setup = false;
     std::atomic<size_t> in_adjusting_process_count = 0;
     Poco::Logger * logger = &Poco::Logger::get("DynamicShortCircuitExecutionOrder");
 
