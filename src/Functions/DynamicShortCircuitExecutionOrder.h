@@ -20,6 +20,10 @@
 
 namespace DB
 {
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
 /** For functions that support short-circuit calculations, if the execution order of the function's
   * arguments can be adjusted, then by calculating the execution cost of each argument, the
   * execution order of the argument can be adjusted to minimize the overall execution cost.
@@ -55,7 +59,17 @@ public:
             return nullptr;
 
         trySetup(arguments);
-        chassert(arguments.size() == num_arguments.load());
+        if (arguments.size() == num_arguments.load())
+        {
+            auto block = Block(arguments).cloneEmpty();
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Mismatch arguments size. arguments size: {}, num_arguments: {}. headers: {}; {}",
+                arguments.size(),
+                num_arguments.load(),
+                header.dumpStructure(),
+                block.dumpStructure());
+        }
         if (!could_adjust)
           return nullptr;
         std::shared_lock lock(mutex);
@@ -118,12 +132,13 @@ public:
 private:
     ContextPtr context;
     size_t inverted_rank;
-    std::atomic<size_t> num_arguments;
+    std::atomic<size_t> num_arguments = 0;
     size_t last_adjust_rows = 0;
     std::atomic<size_t> current_executed_rows = 0;
     bool could_adjust = true;
     std::atomic<bool> has_setup = false;
     std::atomic<size_t> in_adjusting_process_count = 0;
+    Block header;
     Poco::Logger * logger = &Poco::Logger::get("DynamicShortCircuitExecutionOrder");
 
     std::shared_mutex mutex;
@@ -137,6 +152,7 @@ private:
         std::unique_lock lock(mutex);
         if (has_setup)
           return;
+        header = Block(arguments).cloneEmpty();
         num_arguments = arguments.size();
         adjusted_arguments_execution_order = std::make_shared<std::vector<size_t>>();
         for (size_t i = 0; i < num_arguments; ++i)
