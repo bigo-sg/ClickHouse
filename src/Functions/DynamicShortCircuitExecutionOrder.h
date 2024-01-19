@@ -55,7 +55,7 @@ public:
             return nullptr;
 
         trySetup(arguments);
-        assert(arguments.size() == num_arguments);
+        chassert(arguments.size() == num_arguments.load());
         if (!could_adjust)
           return nullptr;
         std::shared_lock lock(mutex);
@@ -76,15 +76,15 @@ public:
         current_executed_rows += rows;
         if (current_executed_rows.load() < last_adjust_rows + 65536)
             return;
-        auto n = in_adjusting_process_count.fetch_add(1);
-        if (n)
+        auto flag = in_adjusting_process_count.fetch_add(1);
+        if (flag)
         {
             in_adjusting_process_count.fetch_sub(1);
             return;
         }
         last_adjust_rows = current_executed_rows.load();
         std::vector<std::pair<size_t, double>> arguments_rank;
-        for (size_t i = 0; i < num_arguments; ++i)
+        for (size_t i = 0, args_size = num_arguments.load(); i < args_size; ++i)
             arguments_rank.emplace_back(i, nextRank(i));
         std::sort(arguments_rank.begin(), arguments_rank.end(), [](const auto & a, const auto & b) { return a.second < b.second; });
         auto new_adjusted_arguments_execution_order = std::make_shared<std::vector<size_t>>();
@@ -118,7 +118,7 @@ public:
 private:
     ContextPtr context;
     size_t inverted_rank;
-    size_t num_arguments;
+    std::atomic<size_t> num_arguments;
     size_t last_adjust_rows = 0;
     std::atomic<size_t> current_executed_rows = 0;
     bool could_adjust = true;
