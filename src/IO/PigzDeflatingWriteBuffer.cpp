@@ -12,20 +12,6 @@ namespace ErrorCodes
     extern const int ZLIB_DEFLATE_FAILED;
 }
 
-const size_t BUFFER_SIZE = 1024 * 1024 * 1024;
-const size_t MAXP2 = UINT_MAX - (UINT_MAX >> 1);
-
-PigzDeflatingWriteBuffer::PigzDeflatingWriteBuffer(
-    std::unique_ptr<WriteBuffer> out_,
-    int compression_level_,
-    std::string filename_)
-    : WriteBufferWithOwnMemoryDecorator(std::move(out_), BUFFER_SIZE)
-    , compression_level(compression_level_)
-    , filename(filename_)
-    , pool()
-{
-    writeHeader();
-}
 
 void PigzDeflatingWriteBuffer::nextImpl()
 {
@@ -54,7 +40,7 @@ void PigzDeflatingWriteBuffer::finalizeAfter()
 void PigzDeflatingWriteBuffer::writeHeader()
 {
     out->write(31);
-    out->write(139);
+    out->write(static_cast<char>(139));
     out->write(8);
 
     char with_name_byte = 0;
@@ -108,7 +94,7 @@ void PigzDeflatingWriteBuffer::deflateEngine(z_stream & strm, WriteBuffer & out_
     {
         out_buf.nextIfAtEnd();
         strm.next_out = reinterpret_cast<unsigned char *>(out_buf.position());
-        strm.avail_out = out_buf.buffer().end() - out_buf.position();
+        strm.avail_out = static_cast<uint32_t>(out_buf.buffer().end() - out_buf.position());
         deflate(&strm, flush);
         out_buf.position() = out_buf.buffer().end() - strm.avail_out;
     } while (strm.avail_in > 0 || strm.avail_out == 0);
@@ -128,13 +114,13 @@ PigzDeflatingWriteBuffer::CompressedBuf PigzDeflatingWriteBuffer::compressBlock(
 
     int rc = deflateInit2(&strm, compression_level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
     if (rc != Z_OK)
-        throw Exception(std::string("deflate failed: ") + zError(rc), ErrorCodes::ZLIB_DEFLATE_FAILED);
+        throw Exception(ErrorCodes::ZLIB_DEFLATE_FAILED, "deflate failed: {}", zError(rc));
 
     deflateReset(&strm);
     deflateParams(&strm, compression_level, strategy);
 
     strm.next_in = in_buf;
-    strm.avail_in = in_len;
+    strm.avail_in = static_cast<uint32_t>(in_len);
 
     if (!last_block_flag)
     {

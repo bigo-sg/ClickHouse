@@ -9,13 +9,8 @@ namespace ErrorCodes
     extern const int ZLIB_INFLATE_FAILED;
 }
 
-PigzInflatingReadBuffer::PigzInflatingReadBuffer(
-    std::unique_ptr<ReadBuffer> in_,
-    size_t buf_size,
-    char * existing_memory,
-    size_t alignment)
-    : CompressedReadBufferWrapper(std::move(in_), buf_size, existing_memory, alignment)
-    , pool()
+PigzInflatingReadBuffer::PigzInflatingReadBuffer(std::unique_ptr<ReadBuffer> in_, size_t buf_size, char * existing_memory, size_t alignment)
+    : CompressedReadBufferWrapper(std::move(in_), buf_size, existing_memory, alignment), pool(getIOThreadPool().get())
 {
     curr_result_it = results.end();
 }
@@ -25,14 +20,14 @@ PigzInflatingReadBuffer::~PigzInflatingReadBuffer()
 }
 
 
-bool PigzInflatingReadBuffer::nextImpl() 
+bool PigzInflatingReadBuffer::nextImpl()
 {
     if (!writeToInternal()) {
         return true;
     }
 
     if (eof_flag) {
-        return false; 
+        return false;
     }
 
     if (in->eof()) {
@@ -53,14 +48,14 @@ bool PigzInflatingReadBuffer::nextImpl()
 
     in->nextIfAtEnd();
     auto *in_buf = reinterpret_cast<unsigned char *>(in->position());
-    uint32_t in_len = in->buffer().end() - in->position();
-    
+    size_t in_len = in->buffer().end() - in->position();
+
     if (!skipped_header_flag) {
         in_buf += 10;
         in_len -= 10;
         skipped_header_flag = true;
     }
-    
+
     size_t prev_sep = 0;
     bool prev_sep_flag = false;
     size_t last_sep = 0;
@@ -78,7 +73,7 @@ bool PigzInflatingReadBuffer::nextImpl()
 
             size_t curr_sep = j;
             last_sep = curr_sep;
-            
+
             if (!prev_sep_flag) {
                 prev_sep_flag = true;
                 prev_last_slice.append(reinterpret_cast<char*>(in_buf), curr_sep);
@@ -90,9 +85,9 @@ bool PigzInflatingReadBuffer::nextImpl()
             prev_sep = curr_sep;
         }
     }
-    if (!prev_sep_flag) {
-        std::cout << "!prev_sep_flag" << std::endl;
-        throw "!prev_sep_flag";
+    if (!prev_sep_flag)
+    {
+        throw std::runtime_error("!prev_sep_flag");
     }
     in->position() = in->buffer().end();
 
@@ -106,8 +101,8 @@ bool PigzInflatingReadBuffer::nextImpl()
 }
 
 PigzInflatingReadBuffer::CompressedBuf PigzInflatingReadBuffer::decompressBlock(unsigned char * in_buf, size_t in_len) {
-    size_t mem_size = BLOCK_SIZE * 2;
-    
+    size_t mem_size = PigzDeflatingWriteBuffer::BLOCK_SIZE * 2;
+
     auto mem = std::make_shared<Memory<>>(mem_size);
 
     z_stream infstream;
@@ -115,15 +110,15 @@ PigzInflatingReadBuffer::CompressedBuf PigzInflatingReadBuffer::decompressBlock(
     infstream.zfree = Z_NULL;
     infstream.opaque = Z_NULL;
 
-    infstream.next_in = in_buf; 
-    infstream.avail_in = in_len;
+    infstream.next_in = in_buf;
+    infstream.avail_in = static_cast<uint32_t>(in_len);
     infstream.next_out = reinterpret_cast<unsigned char *>(mem->data());
-    infstream.avail_out = mem_size;
+    infstream.avail_out = static_cast<uint32_t>(mem_size);
 
     int rc = inflateInit2(&infstream, -15);
     if (rc != 0)
         throw Exception(ErrorCodes::ZLIB_INFLATE_FAILED, "inflateInit2 failed: {}", zError(rc));
-    
+
     int inflate_rc = inflate(&infstream, Z_NO_FLUSH);
     if (inflate_rc != 0 && inflate_rc != 1)
         throw Exception(ErrorCodes::ZLIB_INFLATE_FAILED, "inflate failed: {}", zError(inflate_rc));
@@ -131,7 +126,7 @@ PigzInflatingReadBuffer::CompressedBuf PigzInflatingReadBuffer::decompressBlock(
     rc = inflateReset(&infstream);
     if (rc != 0)
         throw Exception(ErrorCodes::ZLIB_INFLATE_FAILED, "inflateReset failed: {}", zError(rc));
-    
+
     rc = inflateEnd(&infstream);
     if (rc != 0)
         throw Exception(ErrorCodes::ZLIB_INFLATE_FAILED, "inflateEnd failed: {}", zError(rc));
@@ -147,7 +142,7 @@ bool PigzInflatingReadBuffer::writeToInternal() {
         CompressedBuf curr_result = **curr_result_it;
         working_memory = curr_result.mem;
         BufferBase::set(curr_result.mem->data(), curr_result.len, 0);
-        
+
         curr_result_it++;
         results.pop_front();
     }

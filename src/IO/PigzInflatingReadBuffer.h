@@ -43,7 +43,7 @@ private:
 
     bool skipped_header_flag = false;
     bool eof_flag = false;
-    ThreadPool pool;
+    ThreadPool & pool;
 
     std::list<std::shared_ptr<CompressedBuf>> results;
     std::list<std::shared_ptr<CompressedBuf>>::iterator curr_result_it;

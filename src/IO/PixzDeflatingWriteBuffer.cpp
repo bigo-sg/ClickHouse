@@ -1,4 +1,5 @@
 #include <IO/PixzDeflatingWriteBuffer.h>
+#include <IO/SharedThreadPools.h>
 
 namespace DB
 {
@@ -7,21 +8,23 @@ namespace ErrorCodes
     extern const int LZMA_STREAM_ENCODER_FAILED;
 }
 
+template <typename WriteBufferT>
 PixzDeflatingWriteBuffer::PixzDeflatingWriteBuffer(
-    std::unique_ptr<WriteBuffer> out_, int compression_level, size_t buf_size, char * existing_memory, size_t alignment)
+    WriteBufferT && out_, int compression_level, size_t buf_size, char * existing_memory, size_t alignment)
     : WriteBufferWithOwnMemoryDecorator(std::move(out_), buf_size, existing_memory, alignment)
-    , pool()
+    , pool(getIOThreadPool().get())
 {
     if (lzma_lzma_preset(&lzma_opts, compression_level))
         throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma preset failed: lzma version: {}", LZMA_VERSION_STRING);
-    gFilters[0] = (lzma_filter) {.id = LZMA_FILTER_LZMA2, .options = &lzma_opts};
-    gFilters[1] = (lzma_filter) {.id = LZMA_VLI_UNKNOWN, .options = nullptr};
-    gBlockInSize = lzma_opts.dict_size * gBlockFraction;
+
+    gFilters[0] = {.id = LZMA_FILTER_LZMA2, .options = &lzma_opts};
+    gFilters[1] = {.id = LZMA_VLI_UNKNOWN, .options = nullptr};
+    gBlockInSize = static_cast<size_t>(lzma_opts.dict_size * gBlockFraction);
     gBlockOutSize = lzma_block_buffer_bound(gBlockInSize);
 
     if (!(gIndex = lzma_index_init(nullptr)))
         throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma index init failed: lzma version: {}", LZMA_VERSION_STRING);
-    
+
     writeHeader();
 }
 
@@ -124,7 +127,7 @@ void PixzDeflatingWriteBuffer::writeTrailer(lzma_vli backward_size) {
         gStream.avail_out = CHUNKSIZE;
         ret = lzma_code(&gStream, LZMA_RUN);
         if (ret != LZMA_OK && ret != LZMA_STREAM_END)
-            throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma code failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+            throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma code failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
         if (gStream.avail_out != CHUNKSIZE)
             out->write(reinterpret_cast<char *>(obuf), CHUNKSIZE - gStream.avail_out);
     }
@@ -138,7 +141,7 @@ void PixzDeflatingWriteBuffer::writeTrailer(lzma_vli backward_size) {
 
     ret = lzma_stream_footer_encode(&flags, buf);
     if (ret != LZMA_OK)
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma stream footer encode failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma stream footer encode failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
 
     out->write(reinterpret_cast<char *>(buf), LZMA_STREAM_HEADER_SIZE);
 }
@@ -146,7 +149,7 @@ void PixzDeflatingWriteBuffer::writeTrailer(lzma_vli backward_size) {
 PixzDeflatingWriteBuffer::CompressedBuf PixzDeflatingWriteBuffer::compressBlock(uint8_t *block_buf, size_t block_len) {
     lzma_stream stream = LZMA_STREAM_INIT;
     lzma_block block = createBlock(block_len);
-    
+
     size_t header_size = block.header_size;
     size_t compressed_len = calcCompressedSize(block_len) + lzma_check_size(block.check);
 
@@ -155,7 +158,7 @@ PixzDeflatingWriteBuffer::CompressedBuf PixzDeflatingWriteBuffer::compressBlock(
 
     lzma_ret ret = lzma_block_encoder(&stream, &block);
     if (ret != LZMA_OK)
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block encoder failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block encoder failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
 
     stream.next_in = block_buf;
     stream.avail_in = block_len;
@@ -174,12 +177,12 @@ PixzDeflatingWriteBuffer::CompressedBuf PixzDeflatingWriteBuffer::compressBlock(
     } else if (encode_ret == LZMA_STREAM_END) {
         out_size = stream.next_out - out_data;
     } else {
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma code failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma code failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
     }
 
     ret = lzma_block_header_encode(&block, reinterpret_cast<uint8_t *>(out_data));
     if (ret != LZMA_OK)
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block header encode failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block header encode failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
 
     lzma_end(&stream);
 
@@ -197,7 +200,7 @@ lzma_block PixzDeflatingWriteBuffer::createBlock(size_t block_len) {
 
     lzma_ret ret = lzma_block_header_size(&block);
     if (ret != LZMA_OK)
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block header size failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "lzma block header size failed: error code: {}; lzma version: {}", ret, LZMA_VERSION_STRING);
 
     return block;
 }
@@ -247,7 +250,7 @@ void PixzDeflatingWriteBuffer::encodeUncompressible(lzma_block *block, uint8_t* 
         *output++ = 0;
 
     if (block->check != LZMA_CHECK_CRC32)
-        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "pixz only supports CRC-32 checksums: lzma version: {}", LZMA_VERSION_STRING);        
+        throw Exception(ErrorCodes::LZMA_STREAM_ENCODER_FAILED, "pixz only supports CRC-32 checksums: lzma version: {}", LZMA_VERSION_STRING);
     uint32_t check = lzma_crc32(in_data, in_size, 0);
     *output++ = check & 0xFF;
     *output++ = (check >> 8) & 0xFF;

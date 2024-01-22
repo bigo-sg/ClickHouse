@@ -15,8 +15,9 @@ namespace DB
 class PixzDeflatingWriteBuffer : public WriteBufferWithOwnMemoryDecorator
 {
 public:
+    template <typename WriteBufferT>
     PixzDeflatingWriteBuffer(
-        std::unique_ptr<WriteBuffer> out_,
+        WriteBufferT && out_,
         int compression_level_,
         size_t buf_size = DBMS_DEFAULT_BUFFER_SIZE,
         char * existing_memory = nullptr,
@@ -30,11 +31,11 @@ private:
         size_t len;
         lzma_block block;
     };
-    
+
     size_t LZMA_CHUNK_MAX = 1024;
     size_t CHUNKSIZE = 4 * 1024;
     size_t BLOCK_SIZE = 32 * 1024 * 1024;
-    
+
     void nextImpl() override;
 
     void finalizeBefore() override;
@@ -48,8 +49,8 @@ private:
     lzma_options_lzma lzma_opts;
     lzma_filter gFilters[LZMA_FILTERS_MAX + 1];
 
-    ThreadPool pool;
-    
+    ThreadPool & pool;
+
     void writeHeader();
     CompressedBuf compressBlock(uint8_t * block_buf, size_t block_len);
     lzma_block createBlock(size_t block_len);

@@ -5,6 +5,7 @@
 #include <IO/WriteBuffer.h>
 #include <IO/WriteBufferDecorator.h>
 #include <Common/ThreadPool.h>
+#include <IO/SharedThreadPools.h>
 
 #include <zlib.h>
 
@@ -12,16 +13,24 @@
 namespace DB
 {
 
-const size_t BLOCK_SIZE = 256 * 1024;
 
 /// Performs compression using zlib library, compress data in parallel and writes it to out_ WriteBuffer.
 class PigzDeflatingWriteBuffer : public WriteBufferWithOwnMemoryDecorator
 {
 public:
-    PigzDeflatingWriteBuffer(
-        std::unique_ptr<WriteBuffer> out_,
-        int compression_level_,
-        std::string filename_ = "");
+    static constexpr size_t BLOCK_SIZE = 256 * 1024;
+    static constexpr size_t BUFFER_SIZE = 1024 * 1024 * 1024;
+    static constexpr size_t MAXP2 = UINT_MAX - (UINT_MAX >> 1);
+
+    template <typename WriteBufferT>
+    PigzDeflatingWriteBuffer(WriteBufferT && out_, int compression_level_, std::string filename_ = "")
+        : WriteBufferWithOwnMemoryDecorator(std::move(out_), BUFFER_SIZE)
+        , compression_level(compression_level_)
+        , filename(filename_)
+        , pool(getIOThreadPool().get())
+    {
+        writeHeader();
+    }
 
     ~PigzDeflatingWriteBuffer() override;
 
@@ -47,7 +56,7 @@ private:
     std::string filename;
     uint64_t check = crc32_z(0L, Z_NULL, 0);
     uintmax_t ulen = 0;
-    ThreadPool pool;
+    ThreadPool & pool;
 };
 
 }
