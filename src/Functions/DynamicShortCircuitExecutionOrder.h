@@ -59,7 +59,7 @@ public:
             return nullptr;
 
         trySetup(arguments);
-        if (arguments.size() == num_arguments.load())
+        if (arguments.size() != num_arguments.load())
         {
             auto block = Block(arguments).cloneEmpty();
             throw Exception(
