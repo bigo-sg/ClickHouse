@@ -20,10 +20,6 @@
 
 namespace DB
 {
-namespace ErrorCodes
-{
-    extern const int LOGICAL_ERROR;
-}
 /** For functions that support short-circuit calculations, if the execution order of the function's
   * arguments can be adjusted, then by calculating the execution cost of each argument, the
   * execution order of the argument can be adjusted to minimize the overall execution cost.
@@ -62,13 +58,14 @@ public:
         if (arguments.size() != num_arguments.load())
         {
             auto block = Block(arguments).cloneEmpty();
-            throw Exception(
-                ErrorCodes::LOGICAL_ERROR,
+            LOG_ERROR(
+                &Poco::Logger::get("DynamicShortCircuitExecutionOrder"),
                 "Mismatch arguments size. arguments size: {}, num_arguments: {}. headers: {}; {}",
                 arguments.size(),
                 num_arguments.load(),
                 header.dumpStructure(),
                 block.dumpStructure());
+            return nullptr;
         }
         if (!could_adjust)
           return nullptr;
