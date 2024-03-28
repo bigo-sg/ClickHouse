@@ -1,0 +1,26 @@
+<test>
+    <settings>
+        <max_threads>1</max_threads>
+    </settings>
+    <create_query>
+        CREATE TABLE json_table_1 (
+            uid String,
+            latency UInt32,
+            _region String,
+            shard UInt32,
+            reqId UInt64,
+            rtime UInt64,
+            hour String,
+            day String
+        ) ENGINE = File(JSONEachRow)
+    </create_query>
+    <fill_query>
+        insert into json_table_1
+        select '3014660362662815' as uid, 135 as latency, 'imo-ap-sgp' as _region, 0 as shard,
+            240321215532916041 as reqId, 1711036533457 as rtime, '23' as hour, '2024-03-21' as day 
+        from numbers(1000000);
+    <fill_query>
+    <query>
+        SELECT count(uid) from json_table_1;
+    </query>
+</test>

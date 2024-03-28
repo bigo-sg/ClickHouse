@@ -6,6 +6,10 @@
 #include <Formats/FormatSettings.h>
 #include <Formats/SchemaInferenceUtils.h>
 #include <Common/HashTable/HashMap.h>
+#include "config.h"
+#if USE_SIMDJSON
+#include <simdjson.h>
+#endif
 
 
 namespace DB
@@ -95,6 +99,54 @@ protected:
 
     bool allow_new_rows = true;
 };
+
+#if USE_SIMDJSON
+/// Use simdjson ondemanp api could bring some performance improvements.
+class SIMDJSONValueToCHValue
+{
+public:
+    SIMDJSONValueToCHValue(const FormatSettings & format_settings_, bool insert_default_as_missing_ = true)
+        : format_settings(format_settings_), insert_default_as_missing(insert_default_as_missing_)
+    {
+    }
+    bool readField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value);
+private:
+    const FormatSettings & format_settings;
+    bool insert_default_as_missing;
+    bool readArrayField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value);
+    bool readTupleField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value);
+    bool readGeneralField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value);
+};
+
+class SIMDJSONEachRowRowInputFormat : public IRowInputFormat
+{
+public:
+    SIMDJSONEachRowRowInputFormat(
+        ReadBuffer & in_, const Block & header_, Params params_, const FormatSettings & format_settings_, bool yield_strings_);
+    ~SIMDJSONEachRowRowInputFormat() override = default;
+    String getName() const override { return "SIMDJSONEachRowRowInputFormat"; }
+    void resetParser() override;
+private:
+    String current_raw_line;
+    bool readRow(MutableColumns & columns, RowReadExtension & ext) override;
+    void nextLine();
+
+    bool allowSyncAfterError() const override { return true; }
+    void syncAfterError() override;
+
+    size_t countRows(size_t max_block_size) override;
+    bool supportsCountRows() const override { return true; }
+
+protected:
+    const FormatSettings format_settings;
+    bool allow_new_rows = true;
+    bool data_in_square_brackets = false;
+
+    void readPrefix() override;
+    void readSuffix() override;
+    bool checkEndOfData(bool is_first_row);
+};
+#endif
 
 class JSONEachRowSchemaReader : public IRowWithNamesSchemaReader
 {

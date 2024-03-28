@@ -10,6 +10,15 @@
 #include <DataTypes/Serializations/SerializationNullable.h>
 #include <DataTypes/getLeastSupertype.h>
 
+#include <Poco/Logger.h>
+#include <Common/logger_useful.h>
+#include "JSONEachRowRowInputFormat.h"
+#include <simdjson.h>
+#include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeTuple.h>
+#include <Columns/ColumnNullable.h>
+
 namespace DB
 {
 
@@ -157,6 +166,7 @@ inline bool JSONEachRowRowInputFormat::advanceToNextKey(size_t key_index)
 void JSONEachRowRowInputFormat::readJSONObject(MutableColumns & columns)
 {
     assertChar('{', *in);
+    // const auto & header = getPort().getHeader();
 
     for (size_t key_index = 0; advanceToNextKey(key_index); ++key_index)
     {
@@ -322,6 +332,305 @@ size_t JSONEachRowRowInputFormat::countRows(size_t max_block_size)
     return num_rows;
 }
 
+#if USE_SIMDJSON
+SIMDJSONEachRowRowInputFormat::SIMDJSONEachRowRowInputFormat(
+    ReadBuffer & in_, const Block & header_, Params params_, const FormatSettings & format_settings_,  bool yield_strings_ [[maybe_unused]])
+    : IRowInputFormat(header_, in_, std::move(params_))
+    , format_settings(format_settings_)
+{
+}
+
+bool SIMDJSONEachRowRowInputFormat::readRow(MutableColumns & columns, RowReadExtension & ext)
+{
+    if (!allow_new_rows)
+        return false;
+    skipWhitespaceIfAny(*in);
+    bool is_first_row = getRowNum() == 0;
+    if (checkEndOfData(is_first_row))
+        return false;
+    nextLine();
+    const auto & header = getPort().getHeader();
+    simdjson::ondemand::parser parser;
+    auto document = parser.iterate(current_raw_line);
+    size_t column_index = 0;
+    std::vector<UInt8> read_columns(header.columns(), false);
+    SIMDJSONValueToCHValue value_parser(format_settings);
+    for (const auto & col : header.getColumnsWithTypeAndName())
+    {
+        auto result = document[col.name];
+        auto & dst_col = columns[column_index];
+        read_columns[column_index] = value_parser.readField(dst_col, col.type, result);
+        column_index += 1;
+    }
+    /// Return info about defaults set.
+    /// If defaults_for_omitted_fields is set to 0, we should just leave already inserted defaults.
+    if (format_settings.defaults_for_omitted_fields)
+        ext.read_columns = read_columns;
+    else
+        ext.read_columns.assign(read_columns.size(), true);
+
+    return true;
+}
+
+void SIMDJSONEachRowRowInputFormat::nextLine()
+{
+    current_raw_line.clear();
+    while (!in->eof())
+    {
+        char * prev_pos = in->position();
+        char * next_pos = find_first_symbols<'\n'>(in->position(), in->buffer().end());
+        in->position() = next_pos;
+
+        if (!in->hasPendingData())
+        {
+            current_raw_line.append(prev_pos, in->buffer().end() - prev_pos);
+            continue;
+        }
+
+        if (*in->position() == '\n')
+        {
+            current_raw_line.append(prev_pos, next_pos - prev_pos);
+            ++in->position();
+            break;
+        }
+    }
+}
+
+bool SIMDJSONEachRowRowInputFormat::checkEndOfData(bool is_first_row)
+{
+    if (!in->eof())
+    {
+        if (!is_first_row && *in->position() == ',')
+            ++in->position();
+        else if (!data_in_square_brackets && *in->position() == ';')
+        {
+            /// ';' means the end of query (but it cannot be before ']')
+            allow_new_rows = false;
+            return true;
+        }
+        else if (data_in_square_brackets && *in->position() == ']')
+        {
+            /// ']' means the end of query
+            allow_new_rows = false;
+            return true;
+        }
+    }
+    skipWhitespaceIfAny(*in);
+    return in->eof();
+}
+
+void SIMDJSONEachRowRowInputFormat::resetParser()
+{
+    current_raw_line = "";
+    allow_new_rows = true;
+    data_in_square_brackets = false;
+}
+
+void SIMDJSONEachRowRowInputFormat::readPrefix()
+{
+    skipBOMIfExists(*in);
+    data_in_square_brackets = JSONUtils::checkAndSkipArrayStart(*in);
+}
+
+void SIMDJSONEachRowRowInputFormat::readSuffix()
+{
+    skipWhitespaceIfAny(*in);
+    if (data_in_square_brackets)
+        JSONUtils::skipArrayEnd(*in);
+
+    if (!in->eof() && *in->position() == ';')
+    {
+        ++in->position();
+        skipWhitespaceIfAny(*in);
+    }
+    assertEOF(*in);
+}
+
+void SIMDJSONEachRowRowInputFormat::syncAfterError()
+{
+    skipToUnescapedNextLineOrEOF(*in);
+}
+
+size_t SIMDJSONEachRowRowInputFormat::countRows(size_t max_block_size)
+{
+    if (unlikely(!allow_new_rows))
+        return 0;
+
+    size_t num_rows = 0;
+    bool is_first_row = getRowNum() == 0;
+    skipWhitespaceIfAny(*in);
+    while (num_rows < max_block_size && !checkEndOfData(is_first_row))
+    {
+        JSONUtils::skipRowForJSONEachRow(*in);
+        ++num_rows;
+        is_first_row = false;
+        skipWhitespaceIfAny(*in);
+    }
+
+    return num_rows;
+}
+
+bool SIMDJSONValueToCHValue::readField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value)
+{
+    /// hanndle null or missing value.
+    auto error_code = value.error();
+    if (error_code == simdjson::error_code::NO_SUCH_FIELD || value.is_null())
+    {
+        if (insert_default_as_missing)
+        {
+            col->insertDefault();
+            return true;
+        }
+        else
+            return false;
+    }
+    bool res = false;
+    auto nested_type = type;
+    if (const DataTypeNullable * type_nullable = typeid_cast<const DataTypeNullable *>(type.get()))
+    {
+        nested_type = type_nullable->getNestedType();
+    }
+    WhichDataType which(nested_type);
+
+    auto json_type = value.type().value();
+    if (which.isUInt8() && isBool(nested_type))
+    {
+        if (json_type == simdjson::ondemand::json_type::boolean)
+        {
+            auto bool_val = value.get_bool();
+            col->insert(bool_val.value());
+            res = true;
+        }
+        else if (json_type == simdjson::ondemand::json_type::number)
+        {
+            auto int64_val = value.get_uint64().value();
+            if (int64_val > 1)
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected value {} for boolean field", int64_val);
+            bool is_true = int64_val != 0;
+            col->insert(is_true);
+            res = true;
+        }
+        else
+        {
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected JSON type {} for boolean field", json_type);
+        }
+    }
+    else if (which.isNativeUInt())
+    {
+        if (json_type == simdjson::ondemand::json_type::number)
+        {
+            auto uint64_val = value.get_uint64().value();
+            col->insert(uint64_val);
+        }
+        else if (json_type == simdjson::ondemand::json_type::string)
+        {
+            auto uint64_val = value.get_uint64_in_string();
+            col->insert(uint64_val.value());
+        }
+        else if (json_type == simdjson::ondemand::json_type::boolean)
+        {
+            auto bool_val = value.get_bool().value();
+            col->insert(bool_val);
+        }
+        else
+        {
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected JSON type {} for number field", json_type);
+        }
+        res = true;
+    }
+    else if (which.isNativeInt())
+    {
+        if (json_type == simdjson::ondemand::json_type::number)
+        {
+            auto int64_val = value.get_int64();
+            col->insert(int64_val.value());
+        }
+        else if (json_type == simdjson::ondemand::json_type::string)
+        {
+            auto int64_val = value.get_int64_in_string();
+            col->insert(int64_val.value());
+        }
+        else if (json_type == simdjson::ondemand::json_type::boolean)
+        {
+            auto bool_val = value.get_bool().value();
+            col->insert(bool_val);
+        }
+        else
+        {
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Unexpected JSON type {} for number field", json_type);
+        }
+        res = true;
+
+    }
+    else if (which.isString())
+    {
+        col->insert(value.raw_json().value());
+        res = true;
+    }
+    else if (which.isArray())
+    {
+        res = readArrayField(col, nested_type, value);
+    }
+    else if (which.isTuple())
+    {
+        res = readTupleField(col, nested_type, value);
+    }
+    else
+    {
+        res = readGeneralField(col, nested_type, value);
+    }
+    return res;
+}
+
+bool SIMDJSONValueToCHValue::readArrayField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value)
+{
+    auto json_array = value.get_array();
+    auto & array_col = typeid_cast<ColumnArray &>(*col);
+    auto & offsets = array_col.getOffsets();
+    offsets.push_back(offsets.back() + json_array.count_elements());
+    auto nested_col = array_col.getData().assumeMutable();
+    auto & array_ty = typeid_cast<const DataTypeArray &>(*type);
+    auto nested_ty = array_ty.getNestedType();
+    for (auto element : json_array)
+    {
+        readField(nested_col, nested_ty, element);
+    }
+    return true;
+}
+
+bool SIMDJSONValueToCHValue::readTupleField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value)
+{
+    auto & tuple_col = typeid_cast<ColumnTuple &>(*col);
+    auto tuple_size = tuple_col.tupleSize();
+    auto & tuple_type = typeid_cast<const DataTypeTuple &>(*type);
+    const auto & names = tuple_type.getElementNames();
+    if (names.empty())
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Tuple must have named fields");
+    }
+    const auto & types = tuple_type.getElements();
+    auto object = value.get_object();
+    for (size_t i = 0; i < tuple_size; ++i)
+    {
+        auto nested_col = tuple_col.getColumn(i).assumeMutable();
+        auto & nested_type = types[i];
+        auto result = object.find_field(names[i]);
+        readField(nested_col, nested_type, result);
+    }
+
+    return true;
+}
+
+bool SIMDJSONValueToCHValue::readGeneralField(MutableColumnPtr & col, DataTypePtr type, simdjson::simdjson_result<simdjson::ondemand::value> value)
+{
+    auto raw_str = value.raw_json().value();
+    ReadBufferFromString buf(raw_str);
+    auto serialization = type->getDefaultSerialization();
+    serialization->deserializeTextJSON(*col, buf, format_settings);
+    return true;
+}
+#endif
+
 JSONEachRowSchemaReader::JSONEachRowSchemaReader(ReadBuffer & in_, const FormatSettings & format_settings_)
     : IRowWithNamesSchemaReader(in_, format_settings_)
 {
@@ -389,9 +698,26 @@ void registerInputFormatJSONEachRow(FormatFactory & factory)
         });
     };
 
+    #if USE_SIMDJSON
+    auto register_format_simd = [&](const String & format_name, bool json_strings)
+    {
+        factory.registerInputFormat(format_name, [json_strings](
+            ReadBuffer & buf,
+            const Block & sample,
+            IRowInputFormat::Params params,
+            const FormatSettings & settings)
+        {
+            return std::make_shared<SIMDJSONEachRowRowInputFormat>(buf, sample, std::move(params), settings, json_strings);
+        });
+    };
+    register_format_simd("JSONEachRow", false);
+    register_format_simd("JSONLines", false);
+    register_format_simd("NDJSON", false);
+    #else
     register_format("JSONEachRow", false);
     register_format("JSONLines", false);
     register_format("NDJSON", false);
+    #endif
 
     factory.registerFileExtension("ndjson", "JSONEachRow");
     factory.registerFileExtension("jsonl", "JSONEachRow");
