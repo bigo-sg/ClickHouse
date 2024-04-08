@@ -173,7 +173,7 @@ public:
             a->rng.seed(seed.value_or(thread_local_rng()));
     }
 
-    void add(AggregateDataPtr __restrict place, const IColumn ** columns, size_t row_num, Arena * arena) const override
+    void NO_SANITIZE_UNDEFINED ALWAYS_INLINE add(AggregateDataPtr __restrict place, const IColumn ** columns, size_t row_num, Arena * arena) const override
     {
         const auto & row_value = assert_cast<const ColumnVector<T> &>(*columns[0]).getData()[row_num];
         auto & cur_elems = this->data(place);
@@ -529,7 +529,7 @@ public:
             a->rng.seed(seed.value_or(thread_local_rng()));
     }
 
-    void add(AggregateDataPtr __restrict place, const IColumn ** columns, size_t row_num, Arena * arena) const override
+    void NO_SANITIZE_UNDEFINED ALWAYS_INLINE add(AggregateDataPtr __restrict place, const IColumn ** columns, size_t row_num, Arena * arena) const override
     {
         auto & cur_elems = data(place);
 
