@@ -213,9 +213,11 @@ arrow::Result<int64_t> RandomAccessFileFromRandomAccessReadBuffer::ReadAt(int64_
 
 arrow::Result<std::shared_ptr<arrow::Buffer>> RandomAccessFileFromRandomAccessReadBuffer::ReadAt(int64_t position, int64_t nbytes)
 {
+    Stopwatch time;
     ARROW_ASSIGN_OR_RAISE(auto buffer, arrow::AllocateResizableBuffer(nbytes, ArrowMemoryPool::instance()))
     ARROW_ASSIGN_OR_RAISE(int64_t bytes_read, ReadAt(position, nbytes, buffer->mutable_data()))
 
+    LOG_ERROR(getLogger("TestPrefetch"), "read {} bytes at position {} in {} ms", bytes_read, position, time.elapsedMilliseconds());
     if (bytes_read < nbytes)
         RETURN_NOT_OK(buffer->Resize(bytes_read));
 
