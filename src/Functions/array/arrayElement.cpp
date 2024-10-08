@@ -20,6 +20,7 @@
 #include <Interpreters/Context.h>
 #include <Common/assert_cast.h>
 #include <Common/typeid_cast.h>
+#include <iostream>
 
 namespace DB
 {
@@ -150,11 +151,13 @@ private:
 
     /** For a tuple array, the function is evaluated component-wise for each element of the tuple.
       */
-    ColumnPtr executeTuple(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
+    ColumnPtr
+    executeTuple(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
 
     /** For a map array, the function is evaluated component-wise for its keys and values
       */
-    ColumnPtr executeMap2(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
+    ColumnPtr
+    executeMap2(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
 
     /** For a map the function finds the matched value for a key.
      *  Currently implemented just as linear search in array.
@@ -211,6 +214,15 @@ public:
         if (sink_null_map)
         {
             sink_null_map[index] = src_null_map && src_null_map[from];
+            ++index;
+        }
+    }
+
+    void update(size_t from, bool out_of_range)
+    {
+        if (sink_null_map)
+        {
+            sink_null_map[index] = (src_null_map && src_null_map[from]) || out_of_range;
             ++index;
         }
     }
@@ -1575,7 +1587,7 @@ ColumnPtr FunctionArrayElement<mode>::executeMap2(const ColumnsWithTypeAndName &
 
         auto type = getReturnTypeImpl({temporary_results[0].type, temporary_results[1].type});
         auto col = executeImpl(temporary_results, type, input_rows_count);
-        result_key_column = removeNullableIfNeeded(col, key_type);
+        result_key_column = removeNullableIfNeeded(col, std::make_shared<DataTypeArray>(key_type));
     }
 
     /// Calculate the function for the values of the map
@@ -1589,7 +1601,7 @@ ColumnPtr FunctionArrayElement<mode>::executeMap2(const ColumnsWithTypeAndName &
 
         auto type = getReturnTypeImpl({temporary_results[0].type, temporary_results[1].type});
         auto col = executeImpl(temporary_results, type, input_rows_count);
-        result_value_column = removeNullableIfNeeded(col, value_type);
+        result_value_column = removeNullableIfNeeded(col, std::make_shared<DataTypeArray>(value_type));
     }
 
     const auto & data_keys = typeid_cast<const ColumnArray &>(*result_key_column).getDataPtr();
@@ -1646,6 +1658,7 @@ ColumnPtr FunctionArrayElement<mode>::executeTuple(const ColumnsWithTypeAndName 
         auto col = executeImpl(temporary_results, type, input_rows_count);
         result_tuple_columns[i] = removeNullableIfNeeded(col, tuple_types[i]);
     }
+
 
     return ColumnTuple::create(result_tuple_columns);
 }
@@ -2112,24 +2125,26 @@ ColumnPtr FunctionArrayElement<mode>::perform(
     size_t input_rows_count) const
 {
     ColumnPtr res;
-    if ((res = executeTuple(arguments, input_rows_count)))
+    if ((res = executeTuple(arguments, input_rows_count)) || (res = executeMap2(arguments, input_rows_count)))
     {
         if (builder)
         {
+            /// Initialize builders for Array(Map) or Array(Tuple)
+            const ColumnArray * col_array = assert_cast<const ColumnArray *>(arguments[0].column.get());
+            const auto & array_offsets = col_array->getOffsets();
+            const auto & index_column = arguments[1].column;
+
             builder.initSink(input_rows_count);
             for (size_t i = 0; i < input_rows_count; ++i)
-                builder.update(i);
+            {
+                size_t array_size = array_offsets[i] - array_offsets[i - 1];
+                Int64 index = index_column->getInt(i);
+                bool in_range
+                    = (index > 0 && static_cast<size_t>(index) <= array_size) || (index < 0 && -static_cast<size_t>(index) <= array_size);
+                builder.update(i, !in_range);
+            }
         }
-        return res;
-    }
-    if ((res = executeMap2(arguments, input_rows_count)))
-    {
-        if (builder)
-        {
-            builder.initSink(input_rows_count);
-            for (size_t i = 0; i < input_rows_count; ++i)
-                builder.update(i);
-        }
+
         return res;
     }
     if (!isColumnConst(*arguments[1].column))
