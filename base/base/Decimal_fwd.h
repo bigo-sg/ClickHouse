@@ -11,10 +11,19 @@ class integer;
 
 }
 
-using Int128 = wide::integer<128, signed>;
-using UInt128 = wide::integer<128, unsigned>;
-using Int256 = wide::integer<256, signed>;
-using UInt256 = wide::integer<256, unsigned>;
+// using Int128 = wide::integer<128, signed>;
+// using UInt128 = wide::integer<128, unsigned>;
+// using Int256 = wide::integer<256, signed>;
+// using UInt256 = wide::integer<256, unsigned>;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wbit-int-extension"
+using Int128 = signed _BitInt(128);
+using UInt128 = unsigned _BitInt(128);
+using Int256 = signed _BitInt(256);
+using UInt256 = unsigned _BitInt(256);
+#pragma clang diagnostic pop
+
 
 namespace DB
 {
