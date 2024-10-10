@@ -2122,7 +2122,8 @@ ColumnPtr FunctionArrayElement<mode>::perform(
     size_t input_rows_count) const
 {
     ColumnPtr res;
-    if ((res = executeTuple(arguments, input_rows_count)) || (res = executeMap2(arguments, input_rows_count)))
+
+    auto update_builder = [&]()
     {
         if (builder)
         {
@@ -2141,7 +2142,16 @@ ColumnPtr FunctionArrayElement<mode>::perform(
                 builder.update(i, !in_range);
             }
         }
+    };
 
+    if ((res = executeTuple(arguments, input_rows_count)))
+    {
+        update_builder();
+        return res;
+    }
+    if ((res = executeMap2(arguments, input_rows_count)))
+    {
+        update_builder();
         return res;
     }
     if (!isColumnConst(*arguments[1].column))
