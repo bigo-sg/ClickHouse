@@ -20,7 +20,6 @@
 #include <Interpreters/Context.h>
 #include <Common/assert_cast.h>
 #include <Common/typeid_cast.h>
-#include <iostream>
 
 namespace DB
 {
@@ -151,13 +150,11 @@ private:
 
     /** For a tuple array, the function is evaluated component-wise for each element of the tuple.
       */
-    ColumnPtr
-    executeTuple(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
+    ColumnPtr executeTuple(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
 
     /** For a map array, the function is evaluated component-wise for its keys and values
       */
-    ColumnPtr
-    executeMap2(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
+    ColumnPtr executeMap2(const ColumnsWithTypeAndName & arguments, size_t input_rows_count) const;
 
     /** For a map the function finds the matched value for a key.
      *  Currently implemented just as linear search in array.
