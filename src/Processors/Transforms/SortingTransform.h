@@ -61,11 +61,10 @@ private:
 class TemporaryFileStreamSource : public ISource
 {
 public:
-    TemporaryFileStreamSource(const Block& header, TemporaryFileStream& stream_)
+    TemporaryFileStreamSource(const Block& header, TemporaryBlockStreamReaderHolder&& stream_)
         : ISource(header),
-          stream(stream_)
+          stream(std::move(stream_))
     {
-        chassert(stream.isWriteFinished());
     }
 
     String getName() const override { return "TemporaryFileStreamSource"; }
@@ -73,7 +72,7 @@ public:
 protected:
     Chunk generate() override
     {
-        Block block = stream.read();
+        Block block = stream->read();
         if (!block)
             return {};
 
@@ -81,7 +80,7 @@ protected:
         return Chunk(block.getColumns(), num_rows);
     }
 private:
-    TemporaryFileStream& stream;
+    TemporaryBlockStreamReaderHolder stream;
 };
 
 
@@ -138,7 +137,7 @@ protected:
     Chunks chunks;
 
     std::unique_ptr<MergeSorter> merge_sorter;
-    TemporaryFileStream* temporary_file_stream = nullptr;
+    std::optional<TemporaryBlockStreamReaderHolder> temporary_file_reader;
     Processors processors;
 
 private:
