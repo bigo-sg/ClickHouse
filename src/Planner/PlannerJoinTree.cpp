@@ -110,6 +110,7 @@ namespace Setting
     extern const SettingsBool use_concurrency_control;
     extern const SettingsBoolAuto query_plan_join_swap_table;
     extern const SettingsUInt64 min_joined_block_size_bytes;
+    extern const SettingsBool enable_adaptive_short_circuit;
 }
 
 namespace ErrorCodes
@@ -643,7 +644,9 @@ UInt64 mainQueryNodeBlockSizeByLimit(const SelectQueryInfo & select_query_info)
 }
 
 std::unique_ptr<ExpressionStep> createComputeAliasColumnsStep(
-    std::unordered_map<std::string, ActionsDAG> & alias_column_expressions, const Header & current_header)
+    PlannerContextPtr & planner_context,
+    std::unordered_map<std::string, ActionsDAG> & alias_column_expressions,
+    const Header & current_header)
 {
     ActionsDAG merged_alias_columns_actions_dag(current_header.getColumnsWithTypeAndName());
     ActionsDAG::NodeRawConstPtrs action_dag_outputs = merged_alias_columns_actions_dag.getInputs();
@@ -659,7 +662,9 @@ std::unique_ptr<ExpressionStep> createComputeAliasColumnsStep(
         merged_alias_columns_actions_dag.addOrReplaceInOutputs(*output_node);
     merged_alias_columns_actions_dag.removeUnusedActions(false);
 
-    auto alias_column_step = std::make_unique<ExpressionStep>(current_header, std::move(merged_alias_columns_actions_dag));
+    auto query_context = planner_context->getQueryContext();
+    bool enable_adaptive_short_circuit = query_context->getSettingsRef()[Setting::enable_adaptive_short_circuit];
+    auto alias_column_step = std::make_unique<ExpressionStep>(current_header, std::move(merged_alias_columns_actions_dag), enable_adaptive_short_circuit);
     alias_column_step->setStepDescription("Compute alias columns");
     return alias_column_step;
 }
@@ -674,6 +679,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
 {
     const auto & query_context = planner_context->getQueryContext();
     const auto & settings = query_context->getSettingsRef();
+    bool enable_adaptive_short_circuit = settings[Setting::enable_adaptive_short_circuit];
 
     auto & table_expression_data = planner_context->getTableExpressionDataOrThrow(table_expression);
 
@@ -1101,7 +1107,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
                 auto & alias_column_expressions = table_expression_data.getAliasColumnExpressions();
                 if (!alias_column_expressions.empty() && query_plan.isInitialized() && from_stage == QueryProcessingStage::FetchColumns)
                 {
-                    auto alias_column_step = createComputeAliasColumnsStep(alias_column_expressions, query_plan.getCurrentHeader());
+                    auto alias_column_step = createComputeAliasColumnsStep(planner_context, alias_column_expressions, query_plan.getCurrentHeader());
                     query_plan.addStep(std::move(alias_column_step));
                 }
 
@@ -1190,7 +1196,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
         auto & alias_column_expressions = table_expression_data.getAliasColumnExpressions();
         if (!alias_column_expressions.empty() && query_plan.isInitialized() && from_stage == QueryProcessingStage::FetchColumns)
         {
-            auto alias_column_step = createComputeAliasColumnsStep(alias_column_expressions, query_plan.getCurrentHeader());
+            auto alias_column_step = createComputeAliasColumnsStep(planner_context, alias_column_expressions, query_plan.getCurrentHeader());
             query_plan.addStep(std::move(alias_column_step));
         }
     }
@@ -1216,7 +1222,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
 
         rename_actions_dag.getOutputs() = std::move(updated_actions_dag_outputs);
 
-        auto rename_step = std::make_unique<ExpressionStep>(query_plan.getCurrentHeader(), std::move(rename_actions_dag));
+        auto rename_step = std::make_unique<ExpressionStep>(query_plan.getCurrentHeader(), std::move(rename_actions_dag), enable_adaptive_short_circuit);
         rename_step->setStepDescription("Change column names to column identifiers");
         query_plan.addStep(std::move(rename_step));
     }
@@ -1239,7 +1245,7 @@ JoinTreeQueryPlan buildQueryPlanForTableExpression(QueryTreeNodePtr table_expres
                 expected_header.getColumnsWithTypeAndName(),
                 ActionsDAG::MatchColumnsMode::Position,
                 true /*ignore_constant_values*/);
-            auto rename_step = std::make_unique<ExpressionStep>(query_plan.getCurrentHeader(), std::move(rename_actions_dag));
+            auto rename_step = std::make_unique<ExpressionStep>(query_plan.getCurrentHeader(), std::move(rename_actions_dag), enable_adaptive_short_circuit);
             std::string step_description = table_expression_data.isRemote() ? "Change remote column names to local column names" : "Change column names";
             rename_step->setStepDescription(std::move(step_description));
             query_plan.addStep(std::move(rename_step));
@@ -1272,7 +1278,9 @@ void joinCastPlanColumnsToNullable(QueryPlan & plan_to_add_cast, PlannerContextP
     }
 
     cast_actions_dag.appendInputsForUnusedColumns(plan_to_add_cast.getCurrentHeader());
-    auto cast_join_columns_step = std::make_unique<ExpressionStep>(plan_to_add_cast.getCurrentHeader(), std::move(cast_actions_dag));
+    const auto & settings = planner_context->getQueryContext()->getSettingsRef();
+    auto enable_adaptive_short_circuit = settings[Setting::enable_adaptive_short_circuit];
+    auto cast_join_columns_step = std::make_unique<ExpressionStep>(plan_to_add_cast.getCurrentHeader(), std::move(cast_actions_dag), enable_adaptive_short_circuit);
     cast_join_columns_step->setStepDescription("Cast JOIN columns to Nullable");
     plan_to_add_cast.addStep(std::move(cast_join_columns_step));
 }
@@ -1363,6 +1371,8 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
 
 
     bool can_move_out_residuals = false;
+    const auto & query_context = planner_context->getQueryContext();
+    bool enable_adaptive_short_circuit = query_context->getSettingsRef()[Setting::enable_adaptive_short_circuit];
 
     if (!join_constant && join_node.isOnJoinExpression())
     {
@@ -1388,7 +1398,7 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
             && (right_pre_filters.empty() || FilterStep::canUseType(right_pre_filters[0]->result_type))
             && (left_pre_filters.empty() || FilterStep::canUseType(left_pre_filters[0]->result_type));
 
-        auto add_pre_filter = [can_move_out_residuals](ActionsDAG & join_expressions_actions, QueryPlan & plan, UsefulSets & useful_sets, const auto & pre_filters)
+        auto add_pre_filter = [can_move_out_residuals, enable_adaptive_short_circuit](ActionsDAG & join_expressions_actions, QueryPlan & plan, UsefulSets & useful_sets, const auto & pre_filters)
         {
             join_expressions_actions.appendInputsForUnusedColumns(plan.getCurrentHeader());
             appendSetsFromActionsDAG(join_expressions_actions, useful_sets);
@@ -1397,7 +1407,7 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
             if (can_move_out_residuals && !pre_filters.empty())
                 join_expressions_actions_step = std::make_unique<FilterStep>(plan.getCurrentHeader(), std::move(join_expressions_actions), pre_filters[0]->result_name, false);
             else
-                join_expressions_actions_step = std::make_unique<ExpressionStep>(plan.getCurrentHeader(), std::move(join_expressions_actions));
+                join_expressions_actions_step = std::make_unique<ExpressionStep>(plan.getCurrentHeader(), std::move(join_expressions_actions), enable_adaptive_short_circuit);
 
             join_expressions_actions_step->setStepDescription("JOIN actions");
             plan.addStep(std::move(join_expressions_actions_step));
@@ -1454,7 +1464,7 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
 
         cast_actions_dag.appendInputsForUnusedColumns(plan_to_add_cast.getCurrentHeader());
         auto cast_join_columns_step
-            = std::make_unique<ExpressionStep>(plan_to_add_cast.getCurrentHeader(), std::move(cast_actions_dag));
+            = std::make_unique<ExpressionStep>(plan_to_add_cast.getCurrentHeader(), std::move(cast_actions_dag), enable_adaptive_short_circuit);
         cast_join_columns_step->setStepDescription("Cast JOIN USING columns");
         plan_to_add_cast.addStep(std::move(cast_join_columns_step));
     };
@@ -1465,7 +1475,6 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
     if (!right_plan_column_name_to_cast_type.empty())
         join_cast_plan_output_nodes(right_plan, right_plan_column_name_to_cast_type);
 
-    const auto & query_context = planner_context->getQueryContext();
     const auto & settings = query_context->getSettingsRef();
 
     if (settings[Setting::join_use_nulls])
@@ -1842,7 +1851,7 @@ JoinTreeQueryPlan buildQueryPlanForJoinNode(
         auto drop_unused_columns_after_join_actions_dag = createStepToDropColumns(header_after_join, outer_scope_columns, planner_context);
         if (drop_unused_columns_after_join_actions_dag)
         {
-            auto drop_unused_columns_after_join_transform_step = std::make_unique<ExpressionStep>(result_plan.getCurrentHeader(), std::move(*drop_unused_columns_after_join_actions_dag));
+            auto drop_unused_columns_after_join_transform_step = std::make_unique<ExpressionStep>(result_plan.getCurrentHeader(), std::move(*drop_unused_columns_after_join_actions_dag), enable_adaptive_short_circuit);
             drop_unused_columns_after_join_transform_step->setStepDescription("Drop unused columns after JOIN");
             result_plan.addStep(std::move(drop_unused_columns_after_join_transform_step));
         }
@@ -1908,7 +1917,9 @@ JoinTreeQueryPlan buildQueryPlanForArrayJoinNode(const QueryTreeNodePtr & array_
 
     array_join_action_dag.appendInputsForUnusedColumns(plan.getCurrentHeader());
 
-    auto array_join_actions = std::make_unique<ExpressionStep>(plan.getCurrentHeader(), std::move(array_join_action_dag));
+    const auto & settings = planner_context->getQueryContext()->getSettingsRef();
+    auto enable_adaptive_short_circuit = settings[Setting::enable_adaptive_short_circuit];
+    auto array_join_actions = std::make_unique<ExpressionStep>(plan.getCurrentHeader(), std::move(array_join_action_dag), enable_adaptive_short_circuit);
     array_join_actions->setStepDescription("ARRAY JOIN actions");
     appendSetsFromActionsDAG(array_join_actions->getExpression(), join_tree_query_plan.useful_sets);
     plan.addStep(std::move(array_join_actions));
@@ -1938,11 +1949,11 @@ JoinTreeQueryPlan buildQueryPlanForArrayJoinNode(const QueryTreeNodePtr & array_
     drop_unused_columns_before_array_join_actions_dag_outputs = std::move(drop_unused_columns_before_array_join_actions_dag_updated_outputs);
 
     auto drop_unused_columns_before_array_join_transform_step = std::make_unique<ExpressionStep>(plan.getCurrentHeader(),
-        std::move(drop_unused_columns_before_array_join_actions_dag));
+        std::move(drop_unused_columns_before_array_join_actions_dag),
+        enable_adaptive_short_circuit);
     drop_unused_columns_before_array_join_transform_step->setStepDescription("DROP unused columns before ARRAY JOIN");
     plan.addStep(std::move(drop_unused_columns_before_array_join_transform_step));
 
-    const auto & settings = planner_context->getQueryContext()->getSettingsRef();
     auto array_join_step = std::make_unique<ArrayJoinStep>(
         plan.getCurrentHeader(),
         ArrayJoin{std::move(array_join_column_names), array_join_node.isLeft()},
