@@ -549,6 +549,14 @@ std::string KafkaConsumer::getMemberId() const
     return consumer->get_member_id();
 }
 
+void KafkaConsumer::subscribe(String topic, int partition, long offset) const
+{
+    cppkafka::TopicPartitionList partitions;
+    partitions.push_back(cppkafka::TopicPartition(topic, partition, offset));
+    consumer->assign(partitions);
+    LOG_DEBUG(log, "Assign to topic: {}, partition: {}, offset: {}", topic, partition, offset);
+}
+
 KafkaConsumer::Stat KafkaConsumer::getStat() const
 {
     KafkaConsumer::Stat::Assignments assignments;

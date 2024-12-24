@@ -130,6 +130,7 @@ public:
     UInt64 getLastUsedUsec() const { return last_used_usec; }
 
     std::string getMemberId() const;
+    void subscribe(String topic, int partition, long offset) const;
 
 private:
     using Messages = std::vector<cppkafka::Message>;
