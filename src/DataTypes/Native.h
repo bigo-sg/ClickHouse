@@ -35,9 +35,9 @@ static constexpr bool canBeNativeType()
 {
     if constexpr (std::is_same_v<Type, Float32> || std::is_same_v<Type, Float64>)
         return true;
-    else if constexpr (is_integer<Type> && sizeof(Type) <= 16)
+    else if constexpr (is_integer<Type>)
         return true;
-    else if constexpr (is_decimal<Type> && sizeof(Type) <= 16)
+    else if constexpr (is_decimal<Type>)
         return true;
     else
         return false;

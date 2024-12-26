@@ -119,20 +119,31 @@ static BitInt128 divideInt128(BitInt128 left, BitInt128 right)
     return left / right;
 }
 
-static BitInt128 moduloInt128(BitInt128 left, BitInt128 right)
-{
-    return left % right;
-}
+// static BitInt128 moduloInt128(BitInt128 left, BitInt128 right)
+// {
+//     return left % right;
+// }
 
-static BitInt128 castDoubleToInt128(double from)
-{
-    return static_cast<BitInt128>(from);
-}
+// static BitInt256 divideInt256(BitInt256 left, BitInt256 right)
+// {
+//     return left / right;
+// }
 
-static double castInt128ToDouble(BitInt128 from)
-{
-    return static_cast<double>(from);
-}
+// static BitInt256 moduloInt256(BitInt256 left, BitInt256 right)
+// {
+//     return left % right;
+// }
+
+
+// static BitInt128 castDoubleToInt128(double from)
+// {
+//     return static_cast<BitInt128>(from);
+// }
+
+// static double castInt128ToDouble(BitInt128 from)
+// {
+//     return static_cast<double>(from);
+// }
 
 /** Simple module to object file compiler.
   * Result object cannot be used as machine code directly, it should be passed to linker.
@@ -467,10 +478,11 @@ CHJIT::CHJIT()
     symbol_resolver->registerSymbol("fmod", reinterpret_cast<void *>(fmod_ptr));
     // symbol_resolver->registerSymbol("__divei4", reinterpret_cast<void *>(&divideInt256));
     // symbol_resolver->registerSymbol("__modei4", reinterpret_cast<void *>(&moduloInt256));
+
     symbol_resolver->registerSymbol("__divti3", reinterpret_cast<void *>(&divideInt128));
-    symbol_resolver->registerSymbol("__modti3", reinterpret_cast<void *>(&moduloInt128));
-    symbol_resolver->registerSymbol("__fixdfti", reinterpret_cast<void *>(&castDoubleToInt128));
-    symbol_resolver->registerSymbol("__floattidf", reinterpret_cast<void *>(&castInt128ToDouble));
+    // symbol_resolver->registerSymbol("__modti3", reinterpret_cast<void *>(&moduloInt128));
+    // symbol_resolver->registerSymbol("__fixdfti", reinterpret_cast<void *>(&castDoubleToInt128));
+    // symbol_resolver->registerSymbol("__floattidf", reinterpret_cast<void *>(&castInt128ToDouble));
 }
 
 CHJIT::~CHJIT() = default;

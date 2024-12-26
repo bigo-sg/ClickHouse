@@ -39,7 +39,7 @@ bool canBeNativeType(const IDataType & type)
         return canBeNativeType(*data_type_nullable.getNestedType());
     }
 
-    return data_type.isInt() || data_type.isNativeUInt() || data_type.isNativeFloat() || data_type.isDate() || data_type.isDate32()
+    return data_type.isInt() || data_type.isUInt() || data_type.isNativeFloat() || data_type.isDate() || data_type.isDate32()
         || data_type.isDateTime() || data_type.isEnum() || data_type.isDecimal() || data_type.isDateTime64();
 }
 
