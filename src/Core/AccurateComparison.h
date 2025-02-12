@@ -21,16 +21,18 @@ using namespace DB;
 template <typename A, typename B>
 bool lessOp(A a, B b)
 {
+    /// anything vs NaN
+    bool a_nan = isNaN(a);
+    bool b_nan = isNaN(b);
+    if (a_nan || b_nan)
+        return !a_nan && b_nan;
+
     if constexpr (std::is_same_v<A, B>)
         return a < b;
 
     /// float vs float
     if constexpr (is_floating_point<A> && is_floating_point<B>)
         return a < b;
-
-    /// anything vs NaN
-    if (isNaN(a) || isNaN(b))
-        return false;
 
     /// int vs int
     if constexpr (is_integer<A> && is_integer<B>)
@@ -97,16 +99,18 @@ bool lessOrEqualsOp(A a, B b)
 template <typename A, typename B>
 bool equalsOp(A a, B b)
 {
+    /// anything vs NaN
+    bool a_nan = isNaN(a);
+    bool b_nan = isNaN(b);
+    if (a_nan || b_nan)
+        return a_nan && b_nan;
+
     if constexpr (std::is_same_v<A, B>)
         return a == b;
 
     /// float vs float
     if constexpr (is_floating_point<A> && is_floating_point<B>)
         return a == b;
-
-    /// anything vs NaN
-    if (isNaN(a) || isNaN(b))
-        return false;
 
     /// int vs int
     if constexpr (is_integer<A> && is_integer<B>)
