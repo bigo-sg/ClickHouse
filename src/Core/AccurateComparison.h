@@ -21,16 +21,25 @@ using namespace DB;
 template <typename A, typename B>
 bool lessOp(A a, B b)
 {
+    /// Process NaN, https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics
+    if constexpr (is_floating_point<A>)
+    {
+        if (isNaN(a))
+            return false;
+        if constexpr (is_floating_point<B>)
+            if (isNaN(b))
+                return true;
+    }
+    if constexpr (is_floating_point<B>)
+        if (isNaN(b))
+            return true;
+
     if constexpr (std::is_same_v<A, B>)
         return a < b;
 
     /// float vs float
     if constexpr (is_floating_point<A> && is_floating_point<B>)
         return a < b;
-
-    /// anything vs NaN
-    if (isNaN(a) || isNaN(b))
-        return false;
 
     /// int vs int
     if constexpr (is_integer<A> && is_integer<B>)
@@ -97,16 +106,12 @@ bool lessOrEqualsOp(A a, B b)
 template <typename A, typename B>
 bool equalsOp(A a, B b)
 {
+    /// Process NaN, https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics
+    if constexpr (is_floating_point<A> && is_floating_point<B>)
+       return (isNaN(a) && isNaN(b)) || a == b;
+
     if constexpr (std::is_same_v<A, B>)
         return a == b;
-
-    /// float vs float
-    if constexpr (is_floating_point<A> && is_floating_point<B>)
-        return a == b;
-
-    /// anything vs NaN
-    if (isNaN(a) || isNaN(b))
-        return false;
 
     /// int vs int
     if constexpr (is_integer<A> && is_integer<B>)
