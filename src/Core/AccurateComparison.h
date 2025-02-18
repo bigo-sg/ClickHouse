@@ -21,7 +21,7 @@ using namespace DB;
 template <typename A, typename B>
 bool lessOp(A a, B b)
 {
-    /// Process NaN, https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics
+    /// Process NaN same with Spark(https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics)
     if constexpr (is_floating_point<A>)
     {
         if (isNaN(a))
@@ -88,7 +88,10 @@ bool greaterOp(A a, B b)
 template <typename A, typename B>
 bool greaterOrEqualsOp(A a, B b)
 {
-    if (isNaN(a) || isNaN(b))
+    /// Process NaN same with Spark(https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics)
+    if (isNaN(a))
+        return true;
+    if (isNaN(b))
         return false;
 
     return !lessOp(a, b);
@@ -97,7 +100,10 @@ bool greaterOrEqualsOp(A a, B b)
 template <typename A, typename B>
 bool lessOrEqualsOp(A a, B b)
 {
-    if (isNaN(a) || isNaN(b))
+    /// Process NaN same with Spark(https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics)
+    if (isNaN(b))
+        return true;
+    if (isNaN(a))
         return false;
 
     return !lessOp(b, a);
@@ -106,9 +112,11 @@ bool lessOrEqualsOp(A a, B b)
 template <typename A, typename B>
 bool equalsOp(A a, B b)
 {
-    /// Process NaN, https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics
-    if constexpr (is_floating_point<A> && is_floating_point<B>)
-       return (isNaN(a) && isNaN(b)) || a == b;
+    /// Process NaN same with Spark(https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics)
+    bool a_nan = isNaN(a);
+    bool b_nan = isNaN(b);
+    if (a_nan || b_nan)
+        return a_nan && b_nan;
 
     if constexpr (std::is_same_v<A, B>)
         return a == b;
