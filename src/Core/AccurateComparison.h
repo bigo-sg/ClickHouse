@@ -23,13 +23,8 @@ bool lessOp(A a, B b)
 {
     /// Process NaN same with Spark(https://spark.apache.org/docs/3.5.3/sql-ref-datatypes.html#nan-semantics)
     if constexpr (is_floating_point<A>)
-    {
         if (isNaN(a))
             return false;
-        if constexpr (is_floating_point<B>)
-            if (isNaN(b))
-                return true;
-    }
     if constexpr (is_floating_point<B>)
         if (isNaN(b))
             return true;
