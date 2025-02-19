@@ -121,6 +121,10 @@ bool equalsOp(A a, B b)
     if constexpr (std::is_same_v<A, B>)
         return a == b;
 
+    /// float vs float
+    if constexpr (is_floating_point<A> && is_floating_point<B>)
+        return a == b;
+
     /// int vs int
     if constexpr (is_integer<A> && is_integer<B>)
     {
