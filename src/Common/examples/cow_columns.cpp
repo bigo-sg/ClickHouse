@@ -45,6 +45,15 @@ void print(const ColumnPtr & x, const ColPtr & y)
 
 int main(int, char **)
 {
+    const IColumn * y = nullptr;
+    {
+        ColumnPtr x = ConcreteColumn::create(1);
+        y = x.get();
+    }
+
+    std::cerr << y->get() << "\n";
+    std::cerr << y->use_count() << "\n";
+    /*
     ColumnPtr x = ConcreteColumn::create(1);
     ColumnPtr y = x;
     print(x, y);
@@ -87,6 +96,7 @@ int main(int, char **)
     chassert(x->get() == 0 && y->get() == 3);
     chassert(x->use_count() == 1 && y->use_count() == 1);
     chassert(x.get() != y.get());
+    */
 
     return 0;
 }

@@ -1,6 +1,12 @@
 #include <Columns/IColumn.h>
 #include <Core/Block.h>
 #include <Processors/Merges/Algorithms/MergedData.h>
+#include "Columns/ColumnArray.h"
+#include "Columns/ColumnFixedString.h"
+#include "Columns/ColumnNullable.h"
+#include "Columns/ColumnString.h"
+#include "Columns/ColumnsNumber.h"
+#include <iostream>
 
 namespace DB
 {
@@ -36,8 +42,15 @@ void MergedData::insertRow(const ColumnRawPtrs & raw_columns, size_t row, size_t
 {
     size_t num_columns = raw_columns.size();
     chassert(columns.size() == num_columns);
-    for (size_t i = 0; i < num_columns; ++i)
-        columns[i]->insertFrom(*raw_columns[i], row);
+    // for (size_t i = 0; i < num_columns; ++i)
+    //     columns[i]->insertFrom(*raw_columns[i], row);
+
+    // Columns columns_to_merge(raw_columns.size());
+    // for (size_t i = 0; i < num_columns; ++i)
+    //     columns_to_merge[i] = raw_columns[i]->getPtr();
+
+    RowSlice row_slice{raw_columns, row, 1};
+    row_slices.emplace_back(std::move(row_slice));
 
     ++total_merged_rows;
     ++merged_rows;
@@ -48,13 +61,21 @@ void MergedData::insertRows(const ColumnRawPtrs & raw_columns, size_t start_inde
 {
     size_t num_columns = raw_columns.size();
     chassert(columns.size() == num_columns);
-    for (size_t i = 0; i < num_columns; ++i)
-    {
-        if (length == 1)
-            columns[i]->insertFrom(*raw_columns[i], start_index);
-        else
-            columns[i]->insertRangeFrom(*raw_columns[i], start_index, length);
-    }
+
+    // for (size_t i = 0; i < num_columns; ++i)
+    // {
+    //     if (length == 1)
+    //         columns[i]->insertFrom(*raw_columns[i], start_index);
+    //     else
+    //         columns[i]->insertRangeFrom(*raw_columns[i], start_index, length);
+    // }
+
+    // Columns columns_to_merge(raw_columns.size());
+    // for (size_t i = 0; i < num_columns; ++i)
+    //     columns_to_merge[i] = raw_columns[i]->getPtr();
+
+    RowSlice row_slice{raw_columns, start_index, length};
+    row_slices.emplace_back(std::move(row_slice));
 
     total_merged_rows += length;
     merged_rows += length;
@@ -106,8 +127,63 @@ void MergedData::insertChunk(Chunk && chunk, size_t rows_size)
     merged_rows = rows_size;
 }
 
+template <typename ColumnType>
+void MergedData::fillTypedColumnByIndex(size_t index)
+{
+    auto & dst = assert_cast<ColumnType &>(*columns[index]);
+    for (const auto & row_slice : row_slices)
+    {
+        if (row_slice.length == 1)
+            dst.insertFrom(*(row_slice.columns[index]), row_slice.start_index);
+        else
+            dst.insertRangeFrom(*(row_slice.columns[index]), row_slice.start_index, row_slice.length);
+    }
+}
+
+void MergedData::fillColumnByIndex(size_t index)
+{
+    auto * dst = columns[index].get();
+
+#define FILL_TYPED_COLUMN_BY_INDEX(COLUMN_TYPE) \
+    if (typeid_cast<COLUMN_TYPE *>(dst))  \
+    { \
+        fillTypedColumnByIndex<COLUMN_TYPE>(index); \
+        return; \
+    }
+
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt8)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt16)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt8)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt16)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFloat32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFloat64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnString)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFixedString)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnNullable)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnArray)
+#undef FILL_TYPED_COLUMN_BY_INDEX
+
+    for (const auto & row_slice : row_slices)
+    {
+        if (row_slice.length == 1)
+            dst->insertFrom(*(row_slice.columns[index]), row_slice.start_index);
+        else
+            dst->insertRangeFrom(*(row_slice.columns[index]), row_slice.start_index, row_slice.length);
+    }
+}
+
 Chunk MergedData::pull()
 {
+    /// Fill columns from columns_to_merge
+    for (size_t i = 0; i < columns.size(); ++i)
+        fillColumnByIndex(i);
+
+    row_slices.clear();
+
     MutableColumns empty_columns;
     empty_columns.reserve(columns.size());
 

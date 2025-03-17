@@ -16,6 +16,7 @@ public:
     explicit MergedData(bool use_average_block_size_, UInt64 max_block_size_, UInt64 max_block_size_bytes_)
         : max_block_size(max_block_size_), max_block_size_bytes(max_block_size_bytes_), use_average_block_size(use_average_block_size_)
     {
+        row_slices.reserve(max_block_size);
     }
 
     virtual void initialize(const Block & header, const IMergingAlgorithm::Inputs & inputs);
@@ -44,6 +45,20 @@ public:
     virtual ~MergedData() = default;
 
 protected:
+    template <typename ColumnType>
+    void fillTypedColumnByIndex(size_t index);
+
+    void fillColumnByIndex(size_t index);
+
+    struct RowSlice
+    {
+        // Columns columns;
+        ColumnRawPtrs columns;
+        size_t start_index;
+        size_t length;
+    };
+    std::vector<RowSlice> row_slices;
+
     MutableColumns columns;
 
     UInt64 sum_blocks_granularity = 0;

@@ -5,6 +5,11 @@
 
 #include <Common/formatReadable.h>
 #include <Common/ProfileEvents.h>
+#include "Columns/ColumnArray.h"
+#include "Columns/ColumnNullable.h"
+#include "Columns/ColumnsNumber.h"
+#include "Columns/ColumnString.h"
+#include "Columns/ColumnFixedString.h"
 
 #include <IO/WriteBufferFromFile.h>
 #include <Compression/CompressedWriteBuffer.h>
@@ -55,6 +60,8 @@ MergeSorter::MergeSorter(const Block & header, Chunks chunks_, SortDescription &
         using QueueType = std::decay_t<decltype(queue)>;
         queue = QueueType(cursors);
     });
+
+    row_slices.reserve(max_merged_block_size);
 }
 
 
@@ -78,6 +85,54 @@ Chunk MergeSorter::read()
     return result;
 }
 
+template <typename ColumnType>
+void MergeSorter::fillTypedColumnByIndex(MutableColumns & merged_columns, size_t index)
+{
+    auto * dst = assert_cast<ColumnType *>(merged_columns[index].get());
+    for (const auto & row_slice: row_slices)
+    {
+        if (row_slice.length == 1)
+            dst->insertFrom(*(row_slice.columns[index]), row_slice.start_index);
+        else
+            dst->insertRangeFrom(*(row_slice.columns[index]), row_slice.start_index, row_slice.length);
+    }
+}
+
+void MergeSorter::fillColumnByIndex(MutableColumns & merged_columns, size_t index)
+{
+    auto * dst = merged_columns[index].get();
+
+#define FILL_TYPED_COLUMN_BY_INDEX(COLUMN_TYPE) \
+    if (typeid_cast<COLUMN_TYPE *>(dst))  \
+    { \
+        fillTypedColumnByIndex<COLUMN_TYPE>(merged_columns, index); \
+        return; \
+    }
+
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt8)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt16)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnUInt64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt8)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt16)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnInt64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFloat32)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFloat64)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnString)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnFixedString)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnNullable)
+    FILL_TYPED_COLUMN_BY_INDEX(ColumnArray)
+#undef FILL_TYPED_COLUMN_BY_INDEX
+
+    for (const auto & row_slice : row_slices)
+    {
+        if (row_slice.length == 1)
+            dst->insertFrom(*(row_slice.columns[index]), row_slice.start_index);
+        else
+            dst->insertRangeFrom(*(row_slice.columns[index]), row_slice.start_index, row_slice.length);
+    }
+}
 
 template <typename TSortingQueue>
 Chunk MergeSorter::mergeBatchImpl(TSortingQueue & queue)
@@ -112,14 +167,21 @@ Chunk MergeSorter::mergeBatchImpl(TSortingQueue & queue)
             limit_reached = true;
         }
 
+        // Columns columns_to_merge(current->all_columns.size());
+        // for (size_t i = 0; i < num_columns; ++i)
+        //     columns_to_merge[i] = current->all_columns[i]->getPtr();
+
+        RowSlice row_slice{current->all_columns, current->getRow(), batch_size};
+        row_slices.emplace_back(std::move(row_slice));
+
         /// Append rows from queue.
-        for (size_t i = 0; i < num_columns; ++i)
-        {
-            if (batch_size == 1)
-                merged_columns[i]->insertFrom(*current->all_columns[i], current->getRow());
-            else
-                merged_columns[i]->insertRangeFrom(*current->all_columns[i], current->getRow(), batch_size);
-        }
+        // for (size_t i = 0; i < num_columns; ++i)
+        // {
+        //     if (batch_size == 1)
+        //         merged_columns[i]->insertFrom(*current->all_columns[i], current->getRow());
+        //     else
+        //         merged_columns[i]->insertRangeFrom(*current->all_columns[i], current->getRow(), batch_size);
+        // }
 
         total_merged_rows += batch_size;
         merged_rows += batch_size;
@@ -143,6 +205,10 @@ Chunk MergeSorter::mergeBatchImpl(TSortingQueue & queue)
 
     if (merged_rows == 0)
         return {};
+
+    for (size_t i = 0; i < num_columns; ++i)
+        fillColumnByIndex(merged_columns, i);
+    row_slices.clear();
 
     return Chunk(std::move(merged_columns), merged_rows);
 }

@@ -20,6 +20,14 @@ public:
     Chunk read();
 
 private:
+    struct RowSlice
+    {
+        ColumnRawPtrs columns;
+        size_t start_index;
+        size_t length;
+    };
+    std::vector<RowSlice> row_slices;
+
     Chunks chunks;
     SortDescription description;
     size_t max_merged_block_size;
@@ -37,6 +45,10 @@ private:
     template <typename TSortingQueue>
     Chunk mergeBatchImpl(TSortingQueue & queue);
 
+    template <typename ColumnType>
+    void fillTypedColumnByIndex(MutableColumns & merged_columns, size_t index);
+
+    void fillColumnByIndex(MutableColumns & merged_columns, size_t index);
 };
 
 
