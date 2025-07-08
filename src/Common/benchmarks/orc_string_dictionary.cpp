@@ -1,11 +1,7 @@
 #include <base/defines.h>
-
 #include <cstdlib>
-#include <unordered_map>
-
 #include <benchmark/benchmark.h>
-
-#include <unordered_map>
+#include <sparsehash/dense_hash_map>
 
 class OldSortedStringDictionary
 {
@@ -151,7 +147,11 @@ public:
         size_t index;
     };
 
-    NewSortedStringDictionary() : totalLength_(0) { }
+    NewSortedStringDictionary()
+        : totalLength_(0)
+    {
+        keyToIndex.set_empty_key("___DENSE_HASH_MAP_EMPTY_KEY___");
+    }
 
     // insert a new string into dictionary, return its insertion order
     size_t insert(const char * str, size_t len);
@@ -190,7 +190,9 @@ private:
     };
 
     mutable std::vector<DictEntryWithIndex> flatDict_;
-    std::unordered_map<std::string, size_t> keyToIndex;
+    // std::unordered_map<std::string, size_t> keyToIndex;
+    ::google::dense_hash_map<std::string, size_t> keyToIndex;
+
     uint64_t totalLength_;
 };
 
@@ -287,7 +289,7 @@ static NO_INLINE std::unique_ptr<DictionaryImpl> createAndWriteStringDictionary(
         auto index = dict->insert(str.data(), str.size());
         dict->idxInDictBuffer.push_back(index);
     }
-    dict->reorder(dict->idxInDictBuffer);
+    // dict->reorder(dict->idxInDictBuffer);
 
     return dict;
 }
