@@ -269,6 +269,101 @@ void NewSortedStringDictionary::clear()
     flatDict_.clear();
 }
 
+class SortedStringDictionary
+{
+public:
+    struct DictEntry
+    {
+        DictEntry(const char * str, size_t len)
+            : data(std::make_unique<std::string>(str, len))
+        {
+        }
+
+        std::unique_ptr<std::string> data;
+    };
+
+    SortedStringDictionary()
+        : totalLength_(0)
+    {
+        /// Need to set empty key otherwise dense_hash_map will not work correctly
+        keyToIndex_.set_empty_key(std::string_view{});
+    }
+
+    // insert a new string into dictionary, return its insertion order
+    size_t insert(const char * str, size_t len);
+
+    // reorder input index buffer from insertion order to dictionary order
+    void reorder(std::vector<int64_t> &) const { }
+
+    // get dict entries in insertion order
+    void getEntriesInInsertionOrder(std::vector<const DictEntry *> &) const {}
+
+    // return count of entries
+    size_t size() const;
+
+    // return total length of strings in the dictioanry
+    uint64_t length() const;
+
+    void clear();
+
+    // store indexes of insertion order in the dictionary for not-null rows
+    std::vector<int64_t> idxInDictBuffer;
+
+private:
+    // store dictionary entries in insertion order
+    mutable std::vector<DictEntry> flatDict_;
+
+    // map from string to its insertion order index
+    google::dense_hash_map<std::string_view, size_t> keyToIndex_;
+    uint64_t totalLength_;
+
+    // use friend class here to avoid being bothered by const function calls
+    friend class StringColumnWriter;
+    friend class CharColumnWriter;
+    friend class VarCharColumnWriter;
+};
+
+// insert a new string into dictionary, return its insertion order
+size_t SortedStringDictionary::insert(const char * str, size_t len)
+{
+    size_t index = flatDict_.size();
+
+    auto it = keyToIndex_.find(std::string_view{str, len});
+    if (it != keyToIndex_.end())
+    {
+        return it->second;
+    }
+    else
+    {
+        flatDict_.emplace_back(str, len);
+        totalLength_ += len;
+
+        const auto & lastEntry = flatDict_.back();
+        keyToIndex_.emplace(std::string_view{lastEntry.data->data(), lastEntry.data->size()}, index);
+        return index;
+    }
+}
+
+// return count of entries
+size_t SortedStringDictionary::size() const
+{
+    return flatDict_.size();
+}
+
+// return total length of strings in the dictioanry
+uint64_t SortedStringDictionary::length() const
+{
+    return totalLength_;
+}
+
+void SortedStringDictionary::clear()
+{
+    totalLength_ = 0;
+    keyToIndex_.clear();
+    keyToIndex_.set_empty_key(std::string_view{});
+    flatDict_.clear();
+}
+
 template <size_t cardinality>
 static std::vector<std::string> mockStrings()
 {
@@ -289,7 +384,7 @@ static NO_INLINE std::unique_ptr<DictionaryImpl> createAndWriteStringDictionary(
         auto index = dict->insert(str.data(), str.size());
         dict->idxInDictBuffer.push_back(index);
     }
-    // dict->reorder(dict->idxInDictBuffer);
+    dict->reorder(dict->idxInDictBuffer);
 
     return dict;
 }
@@ -307,12 +402,16 @@ static void BM_writeStringDictionary(benchmark::State & state)
 
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, OldSortedStringDictionary, 10);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, NewSortedStringDictionary, 10);
+BENCHMARK_TEMPLATE(BM_writeStringDictionary, SortedStringDictionary, 10);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, OldSortedStringDictionary, 100);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, NewSortedStringDictionary, 100);
+BENCHMARK_TEMPLATE(BM_writeStringDictionary, SortedStringDictionary, 100);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, OldSortedStringDictionary, 1000);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, NewSortedStringDictionary, 1000);
+BENCHMARK_TEMPLATE(BM_writeStringDictionary, SortedStringDictionary, 1000);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, OldSortedStringDictionary, 10000);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, NewSortedStringDictionary, 10000);
+BENCHMARK_TEMPLATE(BM_writeStringDictionary, SortedStringDictionary, 10000);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, OldSortedStringDictionary, 100000);
 BENCHMARK_TEMPLATE(BM_writeStringDictionary, NewSortedStringDictionary, 100000);
-
+BENCHMARK_TEMPLATE(BM_writeStringDictionary, SortedStringDictionary, 100000);
