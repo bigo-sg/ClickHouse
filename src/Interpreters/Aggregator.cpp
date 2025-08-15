@@ -1339,7 +1339,10 @@ void Aggregator::executeAggregateInstructions(
         for (size_t i = 0; i < aggregate_functions.size(); ++i)
         {
             if (!is_aggregate_function_compiled[i])
+            {
+                // LOG_ERROR(getLogger("Aggregator"), "xxx function {} is not compiled", i);
                 continue;
+            }
 
             AggregateFunctionInstruction * inst = aggregate_instructions + i;
             size_t arguments_size = inst->that->getArgumentTypes().size(); // NOLINT
@@ -1380,6 +1383,7 @@ void Aggregator::executeAggregateInstructions(
         }
         else
         {
+            // LOG_ERROR(getLogger("Aggregator"), "xxx function {} run normally", i);
             addBatch(row_begin, row_end, inst, places.get(), aggregates_pool);
         }
     }

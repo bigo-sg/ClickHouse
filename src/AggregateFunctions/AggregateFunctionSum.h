@@ -15,6 +15,7 @@
 
 #include "config.h"
 #include <Common/TargetSpecific.h>
+#include <Common/logger_useful.h>
 
 #if USE_EMBEDDED_COMPILER
 #    include <llvm/IR/IRBuilder.h>
@@ -487,6 +488,7 @@ public:
 
     void add(AggregateDataPtr __restrict place, const IColumn ** columns, size_t row_num, Arena *) const override
     {
+        // LOG_ERROR(getLogger("SUM"), "xxx call sum add");
         const auto & column = assert_cast<const ColVecType &>(*columns[0]);
         this->data(place).add(static_cast<TResult>(column.getData()[row_num]));
     }
@@ -586,6 +588,7 @@ public:
     }
 
 #if USE_EMBEDDED_COMPILER
+// #if 0
 
     bool isCompilable() const override
     {

@@ -98,6 +98,8 @@ void registerAggregateFunctionLast2Samples(AggregateFunctionFactory & factory);
 void registerAggregateFunctionTimeseries(AggregateFunctionFactory & factory);
 void registerAggregateFunctionTimeseriesGroupArray(AggregateFunctionFactory & factory);
 
+void registerAggregateFunctionMultiSum(AggregateFunctionFactory & factory);
+
 class AggregateFunctionCombinatorFactory;
 void registerAggregateFunctionCombinatorIf(AggregateFunctionCombinatorFactory &);
 void registerAggregateFunctionCombinatorArray(AggregateFunctionCombinatorFactory &);
@@ -208,6 +210,8 @@ void registerAggregateFunctions()
         registerAggregateFunctionTimeseriesGroupArray(factory);
 
         registerWindowFunctions(factory);
+
+        registerAggregateFunctionMultiSum(factory);
     }
 
     {
