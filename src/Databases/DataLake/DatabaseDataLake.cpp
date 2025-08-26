@@ -148,12 +148,18 @@ std::shared_ptr<DataLake::ICatalog> DatabaseDataLake::getCatalog() const
 
         case DB::DatabaseDataLakeCatalogType::GLUE:
         {
+#if USE_AWS_S3 && USE_AVRO
             catalog_impl = std::make_shared<DataLake::GlueCatalog>(
                 url,
                 Context::getGlobalContextInstance(),
                 catalog_parameters,
                 table_engine_definition);
             break;
+#else
+            throw Exception(
+                ErrorCodes::SUPPORT_IS_DISABLED,
+                "Cannot use 'glue' database engine: ClickHouse was compiled without USE_AWS_S3 and USE_AVRO built options");
+#endif
         }
         case DB::DatabaseDataLakeCatalogType::ICEBERG_HIVE:
         {
