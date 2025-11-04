@@ -1655,10 +1655,6 @@ bool HashJoin::needUsedFlagsForPerRightTableRow(std::shared_ptr<TableJoin> table
     if (table_join_->kind() == JoinKind::Cross)
         return false;
 
-    // Gluten patch: For join without any on condiition, we do not need to maintain used flags.
-    if (table_join_->getClauses().empty())
-        return false;
-
     if (!table_join_->oneDisjunct())
         return true;
     /// If it'a a all right join with inequal conditions, we need to mark each row
