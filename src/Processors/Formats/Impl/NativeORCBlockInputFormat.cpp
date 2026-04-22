@@ -62,9 +62,12 @@ extern const int ARGUMENT_OUT_OF_BOUND;
 
 
 ORCInputStream::ORCInputStream(SeekableReadBuffer & in_, size_t file_size_, bool use_prefetch)
-    : in(in_), file_size(file_size_), supports_read_at(use_prefetch && in_.supportsReadAt())
+    : in(in_)
+    , file_size(file_size_)
+    , use_offset_based_read(in_.supportsReadAt())
+    , use_async_prefetch(use_prefetch && use_offset_based_read)
 {
-    if (supports_read_at)
+    if (use_async_prefetch)
         async_runner = threadPoolCallbackRunnerUnsafe<void>(getIOThreadPool().get(), ThreadName::ORC_FILE);
 }
 
@@ -80,7 +83,7 @@ UInt64 ORCInputStream::getNaturalReadSize() const
 
 void ORCInputStream::read(void * buf, UInt64 length, UInt64 offset)
 {
-    if (supports_read_at)
+    if (use_offset_based_read)
     {
         size_t bytes_read = 0;
         while (bytes_read < length)
@@ -100,7 +103,7 @@ void ORCInputStream::read(void * buf, UInt64 length, UInt64 offset)
 
 std::future<void> ORCInputStream::readAsync(void * buf, uint64_t length, uint64_t offset)
 {
-    if (supports_read_at)
+    if (use_async_prefetch)
     {
         return async_runner(
             [this, buf, length, offset]
