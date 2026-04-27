@@ -38,7 +38,7 @@ protected:
     bool use_offset_based_read;
     /// Async wrapper only when caller enabled prefetch and the buffer supports read-at.
     bool use_async_prefetch;
-   ThreadPoolCallbackRunnerUnsafe<void> async_runner;
+    ThreadPoolCallbackRunnerUnsafe<void> async_runner;
 
     std::string name = "ORCInputStream";
 };
