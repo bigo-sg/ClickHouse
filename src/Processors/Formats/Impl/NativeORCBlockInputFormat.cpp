@@ -90,6 +90,14 @@ void ORCInputStream::read(void * buf, UInt64 length, UInt64 offset)
         {
             size_t bytes_to_read = length - bytes_read;
             size_t n = in.readBigAt(reinterpret_cast<char *>(buf) + bytes_read, bytes_to_read, offset + bytes_read, nullptr);
+            if (n == 0)
+                throw Exception(
+                    ErrorCodes::INCORRECT_DATA,
+                    "Truncated or corrupted ORC input: readBigAt returned 0 bytes at offset {} ({} bytes remaining of {} requested from base offset {})",
+                    offset + bytes_read,
+                    bytes_to_read,
+                    length,
+                    offset);
             bytes_read += n;
         }
     }
