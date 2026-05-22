@@ -1,0 +1,24 @@
+tests/queries/0_stateless/04237_nullable_array_drop_column.reference
+  s_241311734ac355::t_a49b987931deb6 1
+src/Functions/FunctionsJSON.cpp
+  s_241311734ac355::t_54358da97ff1bb 1310-1321
+tests/queries/0_stateless/04237_nullable_array_drop_column_streams.reference
+  s_241311734ac355::t_75e1fe5a0990b0 1-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.12",
+  "base_commit_sha": "451cba67b0330d40f3f49b46f97740f28435c90f",
+  "prompts": {},
+  "logical_commit_id": "451cba67b0330d40f3f49b46f97740f28435c90f",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
