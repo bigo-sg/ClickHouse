@@ -1,0 +1,22 @@
+src/Functions/transform.cpp
+  s_241311734ac355::t_274b3cd955bd9f 88-91,93
+tests/queries/0_stateless/04277_transform_non_const_array_argument.sql
+  s_241311734ac355::t_59033d4f5d02a3 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.12",
+  "base_commit_sha": "3a1f5cb46031033abedea79710be272b0ac3947e",
+  "prompts": {},
+  "logical_commit_id": "3a1f5cb46031033abedea79710be272b0ac3947e",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
