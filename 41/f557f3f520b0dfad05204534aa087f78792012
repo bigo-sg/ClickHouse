@@ -1,0 +1,26 @@
+src/Columns/ColumnNullable.cpp
+  s_241311734ac355::t_76c5165f67cb97 42-43
+src/Columns/tests/gtest_nullable_array_column_nullable.cpp
+  s_241311734ac355::t_34dd9d38ff1584 16-18,20-21,23,30,34-37,42-46
+  s_241311734ac355::t_1d4f516caa4ea1 1-15,19,22,24-29,38-41,47-49
+  s_241311734ac355::t_0fcc06de5a03af 31-33
+tests/queries/0_stateless/04267_nullable_array_column_nullable_constructor.sql
+  s_241311734ac355::t_051d6331decec9 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.12",
+  "base_commit_sha": "41f557f3f520b0dfad05204534aa087f78792012",
+  "prompts": {},
+  "logical_commit_id": "41f557f3f520b0dfad05204534aa087f78792012",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
