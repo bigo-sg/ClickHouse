@@ -1,0 +1,20 @@
+src/Functions/array/FunctionArrayMapped.h
+  s_241311734ac355::t_325578273d5b2c 175-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.12",
+  "base_commit_sha": "21777d9074100441f45c0d3062785297fbd01f2b",
+  "prompts": {},
+  "logical_commit_id": "21777d9074100441f45c0d3062785297fbd01f2b",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
