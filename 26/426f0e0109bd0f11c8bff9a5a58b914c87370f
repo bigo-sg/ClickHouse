@@ -1,0 +1,21 @@
+tests/queries/0_stateless/04276_divide_or_null_nullable_scalar_and_array.sql
+  s_241311734ac355::t_ce9a3da0a2cb67 1-3,6,22,35
+  s_241311734ac355::t_e4494aa3ebc5a1 4-5,7-21,23-34,36-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.12",
+  "base_commit_sha": "26426f0e0109bd0f11c8bff9a5a58b914c87370f",
+  "prompts": {},
+  "logical_commit_id": "26426f0e0109bd0f11c8bff9a5a58b914c87370f",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
