@@ -1,0 +1,88 @@
+src/Functions/array/arrayEnumerateRanked.h
+  s_080152623bf7dd::t_81b61bbbf40f6a 121
+src/Processors/Formats/Impl/Parquet/SchemaConverter.cpp
+  s_080152623bf7dd::t_14babb57340358 290
+src/DataTypes/getLeastSupertype.cpp
+  s_080152623bf7dd::t_c3544e2f140e38 466
+src/Functions/castOrDefault.cpp
+  s_080152623bf7dd::t_5f2b0cf8736e71 217
+  s_080152623bf7dd::t_1195f572628ddf 4,31,51-55,88-92,95-102
+src/DataTypes/DataTypeNullable.cpp
+  s_080152623bf7dd::t_711294dba4f685 31-35,38,147,162-168
+src/DataTypes/NullableUtils.cpp
+  s_080152623bf7dd::t_30c997fc144e15 34-60
+src/Functions/array/FunctionArrayMapped.h
+  s_080152623bf7dd::t_ec4b0fb68624cc 162
+src/Functions/array/arrayResize.cpp
+  s_080152623bf7dd::t_294acc0cb02c62 76
+src/Interpreters/InterpreterCreateQuery.cpp
+  s_080152623bf7dd::t_8fe417bfadc62f 606,612,627,720
+src/Processors/Formats/Impl/NativeORCBlockInputFormat.cpp
+  s_080152623bf7dd::t_4f58cb4c86be13 1744
+src/Functions/FunctionBinaryArithmetic.h
+  s_080152623bf7dd::t_090733cb439aa2 2351,2442,2446,2460,2464
+src/DataTypes/NullableUtils.h
+  s_080152623bf7dd::t_d6c3845ab4bc6c 27-29
+src/Functions/array/arrayEnumerateExtended.h
+  s_080152623bf7dd::t_313a2016f22127 65
+src/Functions/array/arrayReduce.cpp
+  s_080152623bf7dd::t_93e3e541b62535 75,347
+src/Functions/defaultValueOfTypeName.cpp
+  s_080152623bf7dd::t_0be930282e38c9 3,7,9,15-19,23,34-40,69-76,84-86
+src/Functions/dynamicElement.cpp
+  s_080152623bf7dd::t_3cb05db3f43a6c 4,14,22-26,44-45,47-51,137-142,156-157
+src/Functions/array/arrayFold.cpp
+  s_080152623bf7dd::t_105e3e776e612a 159
+src/Functions/array/arrayConcat.cpp
+  s_080152623bf7dd::t_698f0a4526cead 55
+src/Functions/CastOverloadResolver.cpp
+  s_080152623bf7dd::t_18d81f1254f587 249
+src/Formats/SchemaInferenceUtils.cpp
+  s_080152623bf7dd::t_03db6af71dc84a 483
+  s_080152623bf7dd::t_0c26033b29fccb 1469
+  s_080152623bf7dd::t_6b6197840ce41a 1693
+src/Functions/array/arrayReduceInRanges.cpp
+  s_080152623bf7dd::t_d406624b382300 71,428
+src/Functions/toNullable.cpp
+  s_080152623bf7dd::t_bfc560dfa98987 67-71,76
+src/Functions/array/arrayPush.h
+  s_080152623bf7dd::t_44f30c80fd2ecd 55
+src/Functions/array/arrayEnumerate.cpp
+  s_080152623bf7dd::t_ebe7efcb75d75f 52
+src/Processors/Formats/Impl/ArrowColumnToCHColumn.cpp
+  s_080152623bf7dd::t_1c6d7250a72645 1812
+src/Functions/array/arrayZip.cpp
+  s_080152623bf7dd::t_fe397d3e9ff5bf 73
+src/Functions/FunctionsJSON.cpp
+  s_080152623bf7dd::t_d41ef1daee1bed 32,53,712,731-736,745-752,766
+tests/queries/0_stateless/04323_nullable_array_function_gate.sql
+  s_080152623bf7dd::t_ffe306b27fc5b3 8,11,20,23
+  s_080152623bf7dd::t_f46eb40757377a 7,9-10,12,19,21-22,24
+  s_080152623bf7dd::t_3cb05db3f43a6c 13,25
+tests/queries/0_stateless/04323_nullable_array_function_gate.reference
+  s_080152623bf7dd::t_3cb05db3f43a6c 3
+  s_080152623bf7dd::t_6ba9d41eb0e27b 5,8-9
+  s_080152623bf7dd::t_38cadd055d7b8a 6-7
+  s_080152623bf7dd::t_ffe306b27fc5b3 4
+src/DataTypes/DataTypeNullable.h
+  s_080152623bf7dd::t_82f48c3090f594 59-60,64-65,70
+src/Functions/nullIf.cpp
+  s_080152623bf7dd::t_9fdfcb6b3508f0 61-65,70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "580aae23d2f4ee4486c0c0a477fb537a3765fd77",
+  "prompts": {},
+  "logical_commit_id": "580aae23d2f4ee4486c0c0a477fb537a3765fd77",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
