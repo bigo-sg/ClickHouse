@@ -1,0 +1,94 @@
+tests/queries/0_stateless/04320_json_nullable_index_arity_validation.sql
+  s_080152623bf7dd::t_91d9b5bb0616fe 1-2
+  s_080152623bf7dd::t_39d4d6bd8c3476 3
+src/Functions/array/NullableArrayOffsets.h
+  s_080152623bf7dd::t_18a8b2fb272157 7-8
+  s_080152623bf7dd::t_8cfa5247946afa 1-6,9-77
+src/Functions/array/arrayReduceInRanges.cpp
+  s_080152623bf7dd::t_e6fb6bb673f826 21,25,27,107-108,111-112,118-120,132-138,164,171,175-202
+src/Functions/array/arrayEnumerateRanked.h
+  s_080152623bf7dd::t_18b7963c196da5 11,16,18,175,196-198,200-205,209-216
+src/Functions/array/arrayFold.cpp
+  s_080152623bf7dd::t_184b9c96ead753 14,17-18,184-192,241-258,263,268-269,273,275-276,279-282
+tests/queries/0_stateless/04322_nullable_array_array_element_null_map.sql
+  s_080152623bf7dd::t_1a53cdc53071a3 1-33
+src/Processors/Formats/Impl/NativeORCBlockInputFormat.cpp
+  s_080152623bf7dd::t_a42fa790ee7d18 982-983,1200-1201,1207,1732-1735,1896
+src/Interpreters/InterpreterCreateQuery.cpp
+  s_080152623bf7dd::t_13d505e03dc7aa 718-719,721
+tests/queries/0_stateless/04318_nullable_array_null_row_size_checks.sql
+  s_080152623bf7dd::t_88b51a65daf8ad 1-40,46-49
+  s_080152623bf7dd::t_8f8e433a3b913b 41-45
+tests/queries/0_stateless/04255_nullable_array_parquet_hint.sh
+  s_080152623bf7dd::t_0e5e4ef57f291b 44-59,61,64-65
+  s_080152623bf7dd::t_a2b40fb50a33f8 15,18,21,24-25,27-30,66,74
+  s_080152623bf7dd::t_bd15283d97e43e 73,97,109
+  s_080152623bf7dd::t_233e210bdb2026 16,33-42,78-80,82-85,89-96,100-105
+  s_080152623bf7dd::t_ff8058d0904831 43,67-71,75-77,86-88
+src/AggregateFunctions/Combinators/AggregateFunctionNull.cpp
+  s_080152623bf7dd::t_157f77b9668f81 11
+  s_080152623bf7dd::t_ac9d2194499934 25,27-33,144-153
+src/DataTypes/Serializations/tests/gtest_nullable_array_serialization.cpp
+  s_080152623bf7dd::t_6d616a9f838d2d 156-161
+  s_080152623bf7dd::t_23c320799a58ab 14,113-142,144-145,154-155
+  s_080152623bf7dd::t_1c38408bd092c5 73
+  s_080152623bf7dd::t_fe7eafc830ca54 146-153
+  s_080152623bf7dd::t_60cb98c8046af0 163-180,182-201
+  s_080152623bf7dd::t_df1d9ad4bdb7ba 143
+  s_080152623bf7dd::t_9a04bcf538dd21 181
+src/Functions/array/FunctionArrayMapped.h
+  s_080152623bf7dd::t_c307170deadb8a 503-508,510-513,542,544-561,565,570-571,577,581,586,595,601-603,606,608-609
+  s_080152623bf7dd::t_710a03cc10855c 509,543,576
+  s_080152623bf7dd::t_2521411cdf064d 27
+  s_080152623bf7dd::t_87140476d45a84 30
+src/Processors/Formats/Impl/Parquet/SchemaConverter.cpp
+  s_080152623bf7dd::t_24af572f08734c 287
+  s_080152623bf7dd::t_5ff7c25eb1fe71 285-286,288-290
+tests/queries/0_stateless/04319_nullable_array_aggregate_null_adapter.sql
+  s_080152623bf7dd::t_2c5643edc5865f 1-40
+tests/queries/0_stateless/04321_nullable_array_inferred_default_gate.sql
+  s_080152623bf7dd::t_f79d69c094a301 9,13
+  s_080152623bf7dd::t_c1269c2c5d5528 1-8,10-12,14-38
+tests/queries/0_stateless/04321_nullable_array_inferred_default_gate.reference
+  s_080152623bf7dd::t_689d025b921278 1
+src/Functions/array/arrayEnumerateExtended.h
+  s_080152623bf7dd::t_b00d777c9bfaa5 4,16,18,146,169-179,181,185,191
+src/DataTypes/tests/gtest_yt_schema.cpp
+  s_080152623bf7dd::t_e2b9309cf8606c 171
+src/Processors/Formats/Impl/ArrowColumnToCHColumn.cpp
+  s_080152623bf7dd::t_b2b47e6b6c4cf9 1775-1786
+  s_080152623bf7dd::t_5f819273431e9e 1748-1760
+src/Processors/Formats/Impl/NativeORCBlockInputFormat.h
+  s_080152623bf7dd::t_e80d7bf1760915 147-148,174
+src/Functions/array/arrayZip.cpp
+  s_080152623bf7dd::t_12b580c35cbb17 10,14,16,93,126-139,141
+src/DataTypes/StructuredSubstreamNames.cpp
+  s_080152623bf7dd::t_d6037b1bc491e0 67-75,107-108,110,114,116,122,127-128,136,141-143,145,258
+src/Functions/array/arrayReduce.cpp
+  s_080152623bf7dd::t_6168278fe3722a 18,25,27,209-215,237,240-260
+  s_080152623bf7dd::t_c80fa9e1bce61d 231-233,238-239
+src/Functions/FunctionsJSON.cpp
+  s_080152623bf7dd::t_ce7ad4ceb1be47 682-684,728
+src/AggregateFunctions/Combinators/AggregateFunctionIf.cpp
+  s_080152623bf7dd::t_d076e60ba4c715 7,12-13,51,53-55,482-488,502
+  s_080152623bf7dd::t_3fdcf8d7cf4d71 52
+tests/queries/0_stateless/04322_nullable_array_array_element_null_map.reference
+  s_080152623bf7dd::t_0bf9892faf52d9 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "953b649a117505a562bb950b99a3596c4b0cd9a9",
+  "prompts": {},
+  "logical_commit_id": "953b649a117505a562bb950b99a3596c4b0cd9a9",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
