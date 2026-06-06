@@ -1,0 +1,32 @@
+src/Functions/array/arrayReduceInRanges.cpp
+  s_080152623bf7dd::t_25bc253acf7cff 135
+src/Functions/array/arrayEnumerateRanked.h
+  s_080152623bf7dd::t_25bc253acf7cff 173
+src/Functions/array/arrayReduce.cpp
+  s_080152623bf7dd::t_25bc253acf7cff 212
+src/Functions/array/FunctionArrayMapped.h
+  s_080152623bf7dd::t_25bc253acf7cff 509
+src/Functions/array/arrayZip.cpp
+  s_080152623bf7dd::t_25bc253acf7cff 91
+src/Functions/array/arrayFold.cpp
+  s_080152623bf7dd::t_25bc253acf7cff 189
+src/Functions/array/arrayEnumerateExtended.h
+  s_080152623bf7dd::t_25bc253acf7cff 144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "6ddcc696d150d82805a4fed9c3b90d5f6e0f3e09",
+  "prompts": {},
+  "logical_commit_id": "6ddcc696d150d82805a4fed9c3b90d5f6e0f3e09",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
