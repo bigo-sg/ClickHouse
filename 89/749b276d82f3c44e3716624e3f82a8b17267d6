@@ -1,0 +1,37 @@
+src/Processors/Formats/Impl/MsgPackRowInputFormat.cpp
+  s_241311734ac355::t_a218a3af4ea0ef 393-406,408-409,416,418
+tests/queries/0_stateless/04328_array_rocauc_nullable_array.sql
+  s_241311734ac355::t_bc84f3b3212d57 5
+  s_241311734ac355::t_e14cc823bee28c 1-4,6-19
+src/Functions/array/arrayAUC.cpp
+  s_241311734ac355::t_7d528b766d69c6 145
+  s_241311734ac355::t_a12bc4018449c5 223-226,230-254,256,262,264-277
+  s_241311734ac355::t_09a9d4a9fd581c 202,210
+  s_241311734ac355::t_7ef40e9da96b65 2,4,6,10
+  s_241311734ac355::t_c22106bdd93048 293-294,309-311,345-351
+  s_241311734ac355::t_0e666b7013f4ee 160-161,163,168-169,179,183-184
+tests/queries/0_stateless/04329_msgpack_nullable_array_roundtrip.sql
+  s_241311734ac355::t_90c68e867c9ee7 16-28
+  s_241311734ac355::t_8946c2a57624b7 1,3-4,6-15,29-32
+  s_241311734ac355::t_9c25f139f30552 2,5
+tests/queries/0_stateless/04236_nullable_array_functions.sql
+  s_241311734ac355::t_b699c4aa83c9cf 244
+  s_241311734ac355::t_7231f2b3a8e827 245-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "89749b276d82f3c44e3716624e3f82a8b17267d6",
+  "prompts": {},
+  "logical_commit_id": "89749b276d82f3c44e3716624e3f82a8b17267d6",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
