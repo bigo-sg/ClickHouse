@@ -1,0 +1,20 @@
+src/AggregateFunctions/Combinators/AggregateFunctionNull.h
+  s_080152623bf7dd::t_b348720406f172 6,99,136,138-148,150-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "16c50f796cef7817d6290a33752275b67b63c502",
+  "prompts": {},
+  "logical_commit_id": "16c50f796cef7817d6290a33752275b67b63c502",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
