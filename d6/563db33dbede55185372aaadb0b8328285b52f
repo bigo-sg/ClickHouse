@@ -1,0 +1,34 @@
+src/Storages/MergeTree/MergeTreeReaderWide.cpp
+  s_241311734ac355::t_f842029e7a49ea 343
+  s_241311734ac355::t_31357459cff957 614
+src/Functions/array/arrayReduce.cpp
+  s_241311734ac355::t_e6409b6c3f9497 40-64
+  s_241311734ac355::t_3f9be6fad60a73 96
+  s_241311734ac355::t_3f2996660ef856 362
+src/Functions/array/arrayFold.cpp
+  s_241311734ac355::t_36fb70dfba8aec 33-52
+  s_241311734ac355::t_3e3861a84b2e6d 176
+src/Storages/MergeTree/MergeTreeReaderCompact.cpp
+  s_241311734ac355::t_0dfe90ef3aab42 222
+tests/queries/0_stateless/04236_nullable_array_functions.sql
+  s_241311734ac355::t_faca65db2c37b8 212-215
+  s_241311734ac355::t_694170e5f7ee7a 178-180,182-183
+  s_241311734ac355::t_1910281bf32a89 181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d6563db33dbede55185372aaadb0b8328285b52f",
+  "prompts": {},
+  "logical_commit_id": "d6563db33dbede55185372aaadb0b8328285b52f",
+  "sessions": {
+    "s_241311734ac355": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e4443ba2-5178-4da4-9ecd-d8d7f04d7a43",
+        "model": "default"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
