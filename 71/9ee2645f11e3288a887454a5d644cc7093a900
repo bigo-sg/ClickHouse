@@ -1,0 +1,25 @@
+src/Processors/Formats/Impl/ArrowColumnToCHColumn.cpp
+  s_080152623bf7dd::t_6fbd522366dba4 86,1145,1423,1426,1431-1436,1951,2075
+tests/queries/0_stateless/04255_nullable_array_parquet_hint.sh
+  s_080152623bf7dd::t_e7817b257a1a7a 113-126
+  s_080152623bf7dd::t_e8844ed1fed376 143-153
+src/Processors/Formats/Impl/NativeORCBlockInputFormat.cpp
+  s_080152623bf7dd::t_31a6b06a332902 61,1895,1898,1904-1909
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "719ee2645f11e3288a887454a5d644cc7093a900",
+  "prompts": {},
+  "logical_commit_id": "719ee2645f11e3288a887454a5d644cc7093a900",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
