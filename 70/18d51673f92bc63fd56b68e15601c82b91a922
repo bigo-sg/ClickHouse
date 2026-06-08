@@ -1,0 +1,25 @@
+src/Formats/SchemaInferenceUtils.cpp
+  s_080152623bf7dd::t_a629483e2d01ad 1469
+tests/queries/0_stateless/04330_nullable_array_json_schema_inference_gate.sh
+  s_080152623bf7dd::t_546e3d314b6e88 1-6,9-16
+  s_080152623bf7dd::t_7ca7037c75861d 7-8
+tests/queries/0_stateless/04330_nullable_array_json_schema_inference_gate.reference
+  s_080152623bf7dd::t_546e3d314b6e88 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "7018d51673f92bc63fd56b68e15601c82b91a922",
+  "prompts": {},
+  "logical_commit_id": "7018d51673f92bc63fd56b68e15601c82b91a922",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
