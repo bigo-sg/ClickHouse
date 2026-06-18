@@ -1,0 +1,25 @@
+src/Functions/array/arrayFirstLast.cpp
+  s_080152623bf7dd::t_708cfed99bd357 38
+tests/queries/0_stateless/04341_nullable_array_first_last_or_null_nested_array.reference
+  s_080152623bf7dd::t_ece8e20b41b034 1
+tests/queries/0_stateless/04341_nullable_array_first_last_or_null_nested_array.sql
+  s_080152623bf7dd::t_c546ba4e83c91a 5,9,13,17,21,25
+  s_080152623bf7dd::t_2bb3e7b1e4be5e 1-4,6-8,10-12,14-16,18-20,22-24,26-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "796320a2b68f7e3784eee5f3b77fe51ff0d672be",
+  "prompts": {},
+  "logical_commit_id": "796320a2b68f7e3784eee5f3b77fe51ff0d672be",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
