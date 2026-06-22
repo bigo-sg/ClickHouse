@@ -1,0 +1,26 @@
+src/Functions/IFunction.cpp
+  s_080152623bf7dd::t_85437249cf529e 383-393,399
+  s_080152623bf7dd::t_169a097b97f888 31
+  s_080152623bf7dd::t_b886758ff11a10 95-119
+src/DataTypes/DataTypeNullable.cpp
+  s_080152623bf7dd::t_619067d67eb7bb 158,167-170
+tests/queries/0_stateless/04356_nullable_array_default_null_adapter_scalar_array.sql
+  s_080152623bf7dd::t_3911e1822a069b 6-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "9012d892f22f133d5e17becc2f3449bbd2c71ac6",
+  "prompts": {},
+  "logical_commit_id": "9012d892f22f133d5e17becc2f3449bbd2c71ac6",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
