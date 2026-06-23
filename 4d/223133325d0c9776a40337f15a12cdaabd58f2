@@ -1,0 +1,40 @@
+tests/queries/0_stateless/04403_nullable_array_arrow_explicit_hint.sh
+  s_080152623bf7dd::t_57ac916db7d637 23-24
+  s_080152623bf7dd::t_2ec7bf730e6544 2,8
+  s_080152623bf7dd::t_c47b8c400127b2 1,3-7,9-22,25-28
+src/Processors/Formats/Impl/ArrowColumnToCHColumn.cpp
+  s_080152623bf7dd::t_c47b8c400127b2 2379,2381,2388
+tests/queries/0_stateless/04404_nullable_array_mv_inferred_nested_gate.sql
+  s_080152623bf7dd::t_f02b0dbc26548f 1-23
+tests/queries/0_stateless/04405_nullable_array_recursive_validation_gate.sql
+  s_080152623bf7dd::t_4be34c680a645f 1-35
+tests/queries/0_stateless/04406_nullable_array_int_div_nullable_scalar.sql
+  s_080152623bf7dd::t_d88e46cc25dc8a 1-4,9-10,16
+  s_080152623bf7dd::t_5495f7e2d405d9 5-8,11-15,17
+src/Interpreters/parseColumnsListForTableFunction.cpp
+  s_080152623bf7dd::t_4be34c680a645f 8,56-62
+tests/queries/0_stateless/04406_nullable_array_int_div_nullable_scalar.reference
+  s_080152623bf7dd::t_7391f1d0c4ecc7 1-2
+src/Functions/FunctionBinaryArithmetic.h
+  s_080152623bf7dd::t_dfcc9586388a86 958-962,970-971
+  s_080152623bf7dd::t_f1d89003a13746 953-957,963-969,972-981,2065-2069,2086,2094,2100,2132-2140,2151,3411
+src/Interpreters/InterpreterCreateQuery.cpp
+  s_080152623bf7dd::t_f02b0dbc26548f 31-32,546,548-552
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.11",
+  "base_commit_sha": "4d223133325d0c9776a40337f15a12cdaabd58f2",
+  "prompts": {},
+  "logical_commit_id": "4d223133325d0c9776a40337f15a12cdaabd58f2",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
