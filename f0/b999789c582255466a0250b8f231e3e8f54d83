@@ -1,0 +1,20 @@
+tests/queries/0_stateless/04413_nullable_array_div_nullable_array_denom.sql
+  s_bcb1eaa64c1cba::t_240807ff1952f4 3-4,6,10-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "f0b999789c582255466a0250b8f231e3e8f54d83",
+  "prompts": {},
+  "logical_commit_id": "f0b999789c582255466a0250b8f231e3e8f54d83",
+  "sessions": {
+    "s_bcb1eaa64c1cba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f123f-3a99-70b3-9684-ac4921c4c92f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
