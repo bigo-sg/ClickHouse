@@ -1,0 +1,20 @@
+src/DataTypes/StructuredSubstreamNames.cpp
+  s_bcb1eaa64c1cba::t_863b7c9eabaf71 70-71,74-105,272-273,276-307,365-369,372,374,377-385,387-389,391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "9d43a6b4674b076a6be914567e50b3e6388f4479",
+  "prompts": {},
+  "logical_commit_id": "9d43a6b4674b076a6be914567e50b3e6388f4479",
+  "sessions": {
+    "s_bcb1eaa64c1cba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f123f-3a99-70b3-9684-ac4921c4c92f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
