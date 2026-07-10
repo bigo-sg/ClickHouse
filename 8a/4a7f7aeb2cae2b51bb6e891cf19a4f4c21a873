@@ -1,0 +1,20 @@
+contrib/jemalloc
+  s_bcb1eaa64c1cba::t_e1c73a9087607f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "8a4a7f7aeb2cae2b51bb6e891cf19a4f4c21a873",
+  "prompts": {},
+  "logical_commit_id": "8a4a7f7aeb2cae2b51bb6e891cf19a4f4c21a873",
+  "sessions": {
+    "s_bcb1eaa64c1cba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f123f-3a99-70b3-9684-ac4921c4c92f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
