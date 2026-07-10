@@ -1,0 +1,24 @@
+src/Functions/array/arrayElement.cpp
+  s_f51f0e7ba64e41::t_0fd40882aefa29 2290
+src/Storages/MergeTree/MergeTreeDataPartWriterCompact.cpp
+  s_f51f0e7ba64e41::t_aa72c4c61c850d 124
+src/Storages/MergeTree/MergeTreeDataPartWriterWide.cpp
+  s_f51f0e7ba64e41::t_2cd2167d7e7589 231,474,510,612,900
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "2316c4225b336614da19f89b558c4731e4e19dbd",
+  "prompts": {},
+  "logical_commit_id": "2316c4225b336614da19f89b558c4731e4e19dbd",
+  "sessions": {
+    "s_f51f0e7ba64e41": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019eee40-752b-78e1-b045-f0a646157ab3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
