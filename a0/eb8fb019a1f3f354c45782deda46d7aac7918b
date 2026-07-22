@@ -1,0 +1,20 @@
+src/DataTypes/StructuredSubstreamNames.cpp
+  s_080152623bf7dd::t_aab66d6aa67815 199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a0eb8fb019a1f3f354c45782deda46d7aac7918b",
+  "prompts": {},
+  "logical_commit_id": "a0eb8fb019a1f3f354c45782deda46d7aac7918b",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "unknown"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
