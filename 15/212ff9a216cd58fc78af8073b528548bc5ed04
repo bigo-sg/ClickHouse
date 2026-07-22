@@ -1,0 +1,28 @@
+src/DataTypes/StructuredSubstreamNames.cpp
+  s_080152623bf7dd::t_62a4049f283cbb 165,377,379-381,386,390
+src/Functions/array/arrayEnumerate.cpp
+  s_080152623bf7dd::t_7e7ac183f6a27f 88-89
+src/Functions/array/arrayEnumerateRanked.h
+  s_080152623bf7dd::t_716a61e0d354cb 290-291
+src/Functions/array/arrayZip.cpp
+  s_080152623bf7dd::t_a90ac42876ae83 165-166,177-178
+src/Processors/Formats/Impl/ArrowColumnToCHColumn.cpp
+  s_080152623bf7dd::t_012fb05a96479e 2506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "15212ff9a216cd58fc78af8073b528548bc5ed04",
+  "prompts": {},
+  "logical_commit_id": "15212ff9a216cd58fc78af8073b528548bc5ed04",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "unknown"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
