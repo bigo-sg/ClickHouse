@@ -1,0 +1,26 @@
+src/Functions/FunctionBinaryArithmetic.h
+  s_080152623bf7dd::t_d56f5a98405472 1000
+src/Functions/array/FunctionArrayMapped.h
+  s_080152623bf7dd::t_e46dbbb4f06647 122
+src/Functions/array/arrayFold.cpp
+  s_080152623bf7dd::t_5f3009464d05da 223
+src/Functions/array/arrayReduce.cpp
+  s_080152623bf7dd::t_30f23498d48ffa 182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "69eb2ff266e4d5a1b864380cd644d9e4c5465f93",
+  "prompts": {},
+  "logical_commit_id": "69eb2ff266e4d5a1b864380cd644d9e4c5465f93",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "unknown"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
