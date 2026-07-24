@@ -1,0 +1,20 @@
+src/Core/SettingsChangesHistory.cpp
+  s_080152623bf7dd::t_e997ebe59adac2 45-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "34fb41c901003c47698d76649d6d08cffe62d1ea",
+  "prompts": {},
+  "logical_commit_id": "34fb41c901003c47698d76649d6d08cffe62d1ea",
+  "sessions": {
+    "s_080152623bf7dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5cd1-7b50-7df3-ab57-b4c90474477b",
+        "model": "unknown"
+      },
+      "human_author": "zhanglistar <zhanglinuxstar@gmail.com>"
+    }
+  }
+}
